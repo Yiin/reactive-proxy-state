@@ -6,11 +6,16 @@ export interface ComputedRef<T = any> extends Omit<Ref<T>, 'value'> {
     readonly [isRefSymbol]: true;
 }
 export interface WritableComputedRef<T> extends Ref<T> {
+    readonly [isComputedSymbol]: true;
+    readonly [isRefSymbol]: true;
 }
 type ComputedGetter<T> = () => T;
+type ComputedSetter<T> = (v: T) => void;
+interface WritableComputedOptions<T> {
+    get: ComputedGetter<T>;
+    set: ComputedSetter<T>;
+}
 export declare function computed<T>(getter: ComputedGetter<T>): ComputedRef<T>;
-/**
- * Checks if a value is a computed ref.
- */
-export declare function isComputed<T>(c: any): c is ComputedRef<T>;
+export declare function computed<T>(options: WritableComputedOptions<T>): WritableComputedRef<T>;
+export declare function isComputed<T>(c: any): c is ComputedRef<T> | WritableComputedRef<T>;
 export {};

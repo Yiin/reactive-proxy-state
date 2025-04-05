@@ -1,74 +1,44 @@
 import { watchEffect } from './watchEffect';
 import { traverse, deepClone } from './utils';
 /**
- * Watches a reactive source and runs a callback when it changes
- *
- * @param source - A function that returns the value to watch
- * @param callback - Function to call when the source changes
- * @param options - Watch options (immediate, deep)
- * @returns A function to stop watching
+ * watches a reactive source (getter function or reactive object/ref)
+ * and runs a callback when the source's value changes.
  */
-export function watch(sourceInput, // Renamed parameter
-callback, options = {}) {
-    // Default deep to true unless explicitly false
+export function watch(sourceInput, callback, options = {}) {
     const { immediate = false, deep = true } = options;
-    // Normalize sourceInput to always be a function
+    // normalize source to always be a getter function
     const source = typeof sourceInput === 'function'
         ? sourceInput
         : () => sourceInput;
     let oldValue;
     let initialized = false;
-    // Use watchEffect to track dependencies and re-run when they change
+    // use watchEffect internally to handle dependency tracking
     const stopEffect = watchEffect(() => {
-        // 1. Run the source function to get the current value
         const currentValue = source();
-        // Determine if deep watching is needed for tracking
-        // Use the defaulted 'deep' value
-        let needsDeepTracking = deep === true;
-        // This check becomes redundant if deep defaults to true, but keep for potential explicit {deep: false} on collections?
-        // Maybe simplify: if deep is true, always traverse.
-        /*
-        if (!needsDeepTracking && currentValue && typeof currentValue === 'object') {
-            if (Array.isArray(currentValue) || currentValue instanceof Map || currentValue instanceof Set) {
-                needsDeepTracking = true; // Track collections even if deep:false? Vue does shallow on collections by default.
-            }
+        // if deep watching, traverse the current value to track nested dependencies
+        if (deep) {
+            traverse(currentValue);
         }
-        */
-        // 2. If deep tracking needed, traverse the value *for tracking purposes only*
-        if (needsDeepTracking) {
-            traverse(currentValue); // Discard result, only needed for effect tracking
-        }
-        // 3. Compare the actual currentValue with the oldValue
         if (initialized) {
             let hasChanged = false;
-            // Use the defaulted 'deep' value for comparison logic
-            if (!deep) {
-                hasChanged = currentValue !== oldValue;
-            }
-            else {
-                // For deep watches, the effect running *implies* a relevant change occurred.
-                // The traverse() call ensures dependencies were tracked. If the effect
-                // runs, we assume a change happened without needing deepEqual.
-                hasChanged = true;
-            }
+            // for deep watches, the effect running implies a dependency changed.
+            // for shallow, explicitly check reference equality.
+            hasChanged = deep || currentValue !== oldValue;
             if (hasChanged) {
-                // Get the value to pass as the previous oldValue to the callback
                 const prevOldValue = oldValue;
-                // Update the stored oldValue. Clone *only if* deep watching is enabled.
+                // store a clone for deep watches to pass as the correct oldValue next time
                 oldValue = deep ? deepClone(currentValue) : currentValue;
                 callback(currentValue, prevOldValue);
             }
         }
         else {
-            // First run: establish initial oldValue (cloned if deep) and handle immediate call
+            // first run: store initial value (cloned if deep) and run immediate callback if requested
             oldValue = deep ? deepClone(currentValue) : currentValue;
             initialized = true;
             if (immediate) {
-                // Pass undefined as oldValue for immediate calls
-                callback(currentValue, undefined);
+                callback(currentValue, undefined); // pass undefined as oldValue for immediate
             }
         }
-    });
-    // Return the stop handle from watchEffect
+    }, { lazy: false }); // run immediately (watchEffect handles `immediate` option internally)
     return stopEffect;
 }

@@ -7,13 +7,8 @@ export interface WatchOptions {
     deep?: boolean;
 }
 /**
- * Watches a reactive source and runs a callback when it changes
- *
- * @param source - A function that returns the value to watch
- * @param callback - Function to call when the source changes
- * @param options - Watch options (immediate, deep)
- * @returns A function to stop watching
+ * watches a reactive source (getter function or reactive object/ref)
+ * and runs a callback when the source's value changes.
  */
-export declare function watch<T = any>(sourceInput: WatchSourceInput<T>, // Renamed parameter
-callback: WatchCallback<T>, options?: WatchOptions): WatchStopHandle;
+export declare function watch<T = any>(sourceInput: WatchSourceInput<T>, callback: WatchCallback<T>, options?: WatchOptions): WatchStopHandle;
 export {};

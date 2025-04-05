@@ -14,15 +14,19 @@ export interface TrackedEffect<T = any> {
 export declare let activeEffect: TrackedEffect<any> | null;
 export declare function setActiveEffect(effect: TrackedEffect<any> | null): void;
 /**
- * Clean up dependencies for a specific effect
+ * removes an effect from all dependency sets it belongs to.
+ * this is crucial to prevent memory leaks and unnecessary updates when an effect is stopped or re-run.
  */
 export declare function cleanupEffect(effect: TrackedEffect<any>): void;
 /**
- * Track a property access for the active effect
+ * establishes a dependency between the currently active effect and a specific object property.
+ * called by proxy getters or ref getters.
  */
 export declare function track(target: object, key: string | symbol): void;
 /**
- * Trigger effects associated with a property (Synchronous Only)
+ * triggers all active effects associated with a specific object property.
+ * called by proxy setters/deleters or ref setters.
+ * currently runs effects synchronously.
  */
 export declare function trigger(target: object, key: string | symbol): void;
 export interface WatchEffectOptions {
@@ -42,8 +46,9 @@ export interface WatchEffectOptions {
     }) => void;
 }
 /**
- * Runs a function and re-runs it when its reactive dependencies change.
- * Returns a stop handle that also exposes the effect instance.
+ * runs a function immediately, tracks its reactive dependencies, and re-runs it
+ * synchronously whenever any of those dependencies change.
+ * returns a stop handle to manually stop the effect.
  */
 export declare function watchEffect<T>(effectCallback: EffectCallback<T>, options?: WatchEffectOptions): WatchEffectStopHandle<T>;
 export {};

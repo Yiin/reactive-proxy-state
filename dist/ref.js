@@ -1,51 +1,51 @@
 import { track, trigger } from './watchEffect';
 // Removed reactive import as ref doesn't automatically make contained objects reactive
 // import { reactive } from './reactive';
-// Symbol for marking refs
-export const isRefSymbol = Symbol('isRef'); // Add export and Simplified symbol description
+// symbol used to identify refs internally and via isRef()
+export const isRefSymbol = Symbol('isRef');
 export function ref(value) {
     return createRef(value);
 }
-// Internal function to create refs (no longer shallow distinction needed here)
+// internal factory for creating ref objects
 function createRef(rawValue) {
-    // If the value is already a ref, return it directly
+    // avoid wrapping if the value is already a ref
     if (isRef(rawValue)) {
-        // Cast rawValue back to Ref<T> after type guard
         return rawValue;
     }
-    // The ref holds the raw value directly
-    let value = rawValue;
-    // Create the ref object with getter/setter for reactivity
+    // store the inner value
+    let _value = rawValue;
+    // create the ref object with a getter/setter on `.value`
     const r = {
-        [isRefSymbol]: true, // Mark as ref
+        [isRefSymbol]: true, // mark as a ref using the symbol
         get value() {
-            // Track dependency on the 'value' property of this ref object
-            // Ensure 'r' is treated as the target object for tracking
+            // track dependency when `.value` is accessed
+            // `r` (the ref object itself) is the target for tracking
             track(r, 'value');
-            return value;
+            return _value;
         },
         set value(newValue) {
-            // Check if value actually changed (using simple comparison)
-            // For objects, this means identity change, not deep mutation.
-            if (value !== newValue) {
-                value = newValue;
-                // Trigger effects depending on the 'value' property of this ref object
-                // Ensure 'r' is treated as the target object for triggering
+            // only update and trigger if the value has actually changed
+            // this uses strict equality (===), so for objects, it checks reference equality
+            if (_value !== newValue) {
+                _value = newValue;
+                // trigger effects when `.value` is assigned a new value
+                // `r` (the ref object itself) is the target for triggering
                 trigger(r, 'value');
             }
         },
-    }; // Explicit cast to ensure type correctness
+    }; // cast to ensure the object conforms to the Ref interface
     return r;
 }
 /**
- * Checks if a value is a ref object.
+ * checks if a value is a ref object.
  */
 export function isRef(r) {
+    // check for the presence of the internal symbol
     return !!(r && r[isRefSymbol]);
 }
 /**
- * Returns the inner value if the argument is a ref, otherwise returns the
- * argument itself.
+ * returns the inner value if the argument is a ref,
+ * otherwise returns the argument itself. this is a sugar for `isRef(val) ? val.value : val`.
  */
 export function unref(refValue) {
     return isRef(refValue) ? refValue.value : refValue;

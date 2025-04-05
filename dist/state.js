@@ -1,23 +1,26 @@
 import { pathCache, setInPathCache } from './utils';
-// Pre-allocate helper functions to avoid recreation
+// helper to abstract getting a value from a map or object property
 function getValue(obj, key) {
     if (obj instanceof Map)
         return obj.get(key);
     return obj[key];
 }
+// helper to abstract setting a value on a map or object property
 function setValue(obj, key, value) {
     if (obj instanceof Map)
         obj.set(key, value);
     else
         obj[key] = value;
 }
+// helper to abstract deleting a key from a map or object
 function deleteValue(obj, key) {
     if (obj instanceof Map)
         obj.delete(key);
     else
         delete obj[key];
 }
-// Cache for action handlers to avoid switch statement overhead
+// dispatch table for applying state events based on action type
+// this avoids a large switch statement and makes adding new actions easier
 const actionHandlers = {
     'set': function (parent, key, event) {
         setValue(parent, key, event.newValue);
@@ -27,36 +30,36 @@ const actionHandlers = {
     },
     'array-push': function (targetArray, _keyIgnored, event) {
         if (!Array.isArray(targetArray)) {
-            console.warn(`Expected Array at path ${event.path.join('.')}`);
+            console.warn(`expected array at path ${event.path.join('.')}`);
             return;
         }
         if (!event.items) {
             console.warn('array-push event missing items');
             return;
         }
-        // Note: event.key is the starting index, but push always adds to the end.
+        // event.key is the starting index, but push always adds to end
         targetArray.push(...event.items);
     },
     'array-pop': function (targetArray, _keyIgnored, event) {
         if (!Array.isArray(targetArray)) {
-            console.warn(`Expected Array at path ${event.path.join('.')}`);
+            console.warn(`expected array at path ${event.path.join('.')}`);
             return;
         }
-        // We don't need event.key or event.oldValue to perform the pop.
+        // event info (key, oldvalue) not needed to perform pop
         if (targetArray.length > 0) {
             targetArray.pop();
         }
     },
     'array-splice': function (targetArray, _keyIgnored, event) {
         if (!Array.isArray(targetArray)) {
-            console.warn(`Expected Array at path ${event.path.join('.')}`);
+            console.warn(`expected array at path ${event.path.join('.')}`);
             return;
         }
         if (event.key === undefined || event.deleteCount === undefined) {
-            console.warn('array-splice event missing key or deleteCount');
+            console.warn('array-splice event missing key or deletecount');
             return;
         }
-        // Call splice with appropriate arguments
+        // handle splice with or without items to insert
         if (event.items && event.items.length > 0) {
             targetArray.splice(event.key, event.deleteCount, ...event.items);
         }
@@ -66,142 +69,143 @@ const actionHandlers = {
     },
     'array-shift': function (targetArray, _keyIgnored, event) {
         if (!Array.isArray(targetArray)) {
-            console.warn(`Expected Array at path ${event.path.join('.')}`);
+            console.warn(`expected array at path ${event.path.join('.')}`);
             return;
         }
-        // We don't need event.key or event.oldValue to perform the shift.
+        // event info not needed to perform shift
         if (targetArray.length > 0) {
             targetArray.shift();
         }
     },
     'array-unshift': function (targetArray, _keyIgnored, event) {
         if (!Array.isArray(targetArray)) {
-            console.warn(`Expected Array at path ${event.path.join('.')}`);
+            console.warn(`expected array at path ${event.path.join('.')}`);
             return;
         }
         if (!event.items) {
             console.warn('array-unshift event missing items');
             return;
         }
-        // We don't need event.key to perform unshift
+        // event.key (always 0) not needed to perform unshift
         targetArray.unshift(...event.items);
     },
-    'map-set': function (parent, key, event) {
-        const target = getValue(parent, key);
-        if (target instanceof Map) {
-            target.set(event.key, event.newValue);
+    // note: for map/set operations originating from the proxy wrapper (e.g., map.set(k,v)),
+    // the *event path* points to the map itself, and event.key/event.value hold the map's key/value.
+    // however, the actionHandlers expect `target` to be the collection and `key` to be the map/set key.
+    // the logic in `updateState` below handles finding the correct target collection first.
+    'map-set': function (targetMap, _parentKeyIgnored, event) {
+        if (!(targetMap instanceof Map)) {
+            console.warn(`expected map at path ${event.path.join('.')}`);
+            return;
         }
-        else {
-            console.warn(`Expected Map at path ${key}`);
-        }
+        targetMap.set(event.key, event.newValue);
     },
-    'map-delete': function (parent, key, event) {
-        const target = getValue(parent, key);
-        if (target instanceof Map) {
-            target.delete(event.key);
+    'map-delete': function (targetMap, _parentKeyIgnored, event) {
+        if (!(targetMap instanceof Map)) {
+            console.warn(`expected map at path ${event.path.join('.')}`);
+            return;
         }
-        else {
-            console.warn(`Expected Map at path ${key}`);
-        }
+        targetMap.delete(event.key);
     },
-    'map-clear': function (parent, key, event) {
-        const target = getValue(parent, key);
-        if (target instanceof Map) {
-            target.clear();
+    'map-clear': function (targetMap, _parentKeyIgnored, event) {
+        if (!(targetMap instanceof Map)) {
+            console.warn(`expected map at path ${event.path.join('.')}`);
+            return;
         }
-        else {
-            console.warn(`Expected Map at path ${key}`);
-        }
+        targetMap.clear();
     },
     'set-add': function (targetSet, _keyIgnored, event) {
-        if (targetSet instanceof Set) {
-            targetSet.add(event.value);
+        if (!(targetSet instanceof Set)) {
+            console.warn(`expected set at path ${event.path.join('.')}`);
+            return;
         }
-        else {
-            console.warn(`Expected Set at path ${event.path.join('.')}`);
-        }
+        targetSet.add(event.value);
     },
     'set-delete': function (targetSet, _keyIgnored, event) {
-        if (targetSet instanceof Set) {
-            targetSet.delete(event.value);
+        if (!(targetSet instanceof Set)) {
+            console.warn(`expected set at path ${event.path.join('.')}`);
+            return;
         }
-        else {
-            console.warn(`Expected Set at path ${event.path.join('.')}`);
-        }
+        targetSet.delete(event.value);
     },
     'set-clear': function (targetSet, _keyIgnored, event) {
-        if (targetSet instanceof Set) {
-            targetSet.clear();
+        if (!(targetSet instanceof Set)) {
+            console.warn(`expected set at path ${event.path.join('.')}`);
+            return;
         }
-        else {
-            console.warn(`Expected Set at path ${event.path.join('.')}`);
-        }
+        targetSet.clear();
     }
 };
+// applies a state change event to a plain javascript object/array (the target state)
 export function updateState(root, event) {
     const { action, path } = event;
-    if (path.length === 0) {
-        console.warn('Event path is empty');
+    if (!path || path.length === 0) {
+        console.warn('event path is empty, cannot apply update', event);
         return;
     }
     const handler = actionHandlers[action];
     if (!handler) {
-        throw new Error(`Unhandled action: ${action}`);
+        // maybe allow custom handlers or ignore unknown actions?
+        console.error(`unhandled action type: ${action}`, event);
+        return;
+        // throw new Error(`Unhandled action: ${action}`);
     }
-    // Determine target and key based on action type
+    // determine the target object/collection and the specific key (if applicable)
+    // based on the action type and the event path.
     let targetForHandler;
-    let keyForHandler = null; // Key is only relevant for set/delete/map actions
-    if (action === 'set' || action === 'delete' || action.startsWith('map-')) {
-        // Actions where path leads to parent, last element is key
+    let keyForHandler = null; // key passed to handler, relevant for set/delete
+    // path resolution logic differs based on action type:
+    // - set/delete: path leads to the *value* being set/deleted, so we need the parent object and the final path segment (key).
+    // - array-*/map-*/set-*: path leads to the *collection* itself.
+    if (action === 'set' || action === 'delete') {
+        // need the parent object and the final key
         if (path.length === 1) {
-            targetForHandler = root;
+            targetForHandler = root; // parent is the root object
             keyForHandler = path[0];
         }
         else {
-            const parentPathKey = path.slice(0, -1).join('.');
+            const parentPath = path.slice(0, -1);
+            const parentPathKey = parentPath.join('.');
+            // try cache first for performance
             let parent = pathCache.get(root)?.get(parentPathKey);
             if (parent === undefined) {
-                parent = path.slice(0, -1).reduce((acc, key) => acc ? getValue(acc, key) : undefined, root);
+                // traverse path manually if not in cache
+                parent = parentPath.reduce((acc, key) => acc ? getValue(acc, key) : undefined, root);
                 if (parent !== undefined)
-                    setInPathCache(root, parentPathKey, parent);
+                    setInPathCache(root, parentPathKey, parent); // cache if found
             }
             if (parent === undefined) {
-                console.warn(`Parent path ${parentPathKey} not found for action ${action}`);
+                console.warn(`parent path ${parentPathKey} not found for action ${action}`);
                 return;
             }
             targetForHandler = parent;
             keyForHandler = path[path.length - 1];
         }
     }
-    else if (action.startsWith('array-') || action.startsWith('set-')) {
-        // Actions where path leads directly to the collection (Array or Set)
-        if (path.length === 1) {
-            targetForHandler = getValue(root, path[0]);
+    else if (action.startsWith('array-') || action.startsWith('map-') || action.startsWith('set-')) {
+        // need the collection object itself (array, map, or set)
+        const targetPath = path;
+        const targetPathKey = targetPath.join('.');
+        // try cache first
+        let targetCollection = pathCache.get(root)?.get(targetPathKey);
+        if (targetCollection === undefined) {
+            // traverse path manually if not in cache
+            targetCollection = targetPath.reduce((acc, key) => acc ? getValue(acc, key) : undefined, root);
+            if (targetCollection !== undefined)
+                setInPathCache(root, targetPathKey, targetCollection); // cache if found
         }
-        else {
-            const parentPathKey = path.slice(0, -1).join('.');
-            let parent = pathCache.get(root)?.get(parentPathKey);
-            if (parent === undefined) {
-                parent = path.slice(0, -1).reduce((acc, key) => acc ? getValue(acc, key) : undefined, root);
-                if (parent !== undefined)
-                    setInPathCache(root, parentPathKey, parent);
-            }
-            if (parent === undefined) {
-                console.warn(`Parent path ${parentPathKey} not found for action ${action}`);
-                return;
-            }
-            targetForHandler = getValue(parent, path[path.length - 1]);
-        }
-        if (targetForHandler === undefined) {
-            console.warn(`Target collection at path ${path.join('.')} not found for action ${action}`);
+        if (targetCollection === undefined) {
+            console.warn(`target collection at path ${targetPathKey} not found for action ${action}`);
             return;
         }
+        targetForHandler = targetCollection;
+        // keyForHandler remains null for these actions as the handler operates directly on the collection
     }
     else {
-        // Should not happen if handler exists
-        console.error(`Unexpected action type passed checks: ${action}`);
+        // this should not be reachable if handler lookup succeeded
+        console.error(`unexpected action type passed checks: ${action}`);
         return;
     }
-    // Call the handler with the appropriately determined target and key
+    // call the appropriate handler with the resolved target and key
     handler(targetForHandler, keyForHandler, event);
 }
