@@ -227,7 +227,3 @@ state.tags.add('important');   // Output: Tags: important
 state.data.delete('foo');      // Output: Data has "foo": false
 state.tags.add('urgent');      // Output: Tags: important, urgent
 ```
-
-## License
-
-<!-- Add your license information here, e.g., MIT --> 
