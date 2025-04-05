@@ -56,8 +56,8 @@ function applyMutations(state: any) {
 // --- Manual Benchmark ---
 
 const WARMUP_RUNS = 10;
-const BENCHMARK_RUNS = 50; // Number of measurement runs
-const MUTATIONS_PER_RUN = 100; // Number of mutation sequences per run
+const BENCHMARK_RUNS = 100; // Number of measurement runs
+const MUTATIONS_PER_RUN = 1000; // Number of mutation sequences per run
 
 function runBenchmark(name: string, setupFn: () => any, taskFn: (state: any) => void) {
     console.log(`\nRunning benchmark: ${name}`);
