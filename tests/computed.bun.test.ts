@@ -182,7 +182,7 @@ describe('computed', () => {
       (double as any).value = 100; 
       
       expect(warnCount).toBe(1);
-      expect(warnArgs[0]).toBe('Computed value is read-only');
+      expect(warnArgs[0]).toBe('computed value is read-only');
       expect(double.value).toBe(2); // Value should remain unchanged
       
       // Restore original console.warn
@@ -202,4 +202,78 @@ describe('computed', () => {
       expect(isComputed(null)).toBe(false);
   });
 
+}); 
+
+describe('writable computed', () => {
+  it('should allow creating a writable computed with get/set', () => {
+    const source = ref(1);
+    const plusOne = computed({
+      get: () => source.value + 1,
+      set: (val) => { source.value = val - 1; }
+    });
+
+    expect(isRef(plusOne)).toBe(true);
+    expect(isComputed(plusOne)).toBe(true);
+    expect(plusOne.value).toBe(2); // Initial get
+  });
+
+  it('should call the setter when value is assigned', () => {
+    const source = ref(1);
+    const setterMock = createMockFn<number>();
+    const plusOne = computed({
+      get: () => source.value + 1,
+      set: (val) => {
+        setterMock(val);
+        source.value = val - 1; 
+      }
+    });
+
+    expect(setterMock.callCount).toBe(0);
+    plusOne.value = 5; // Set value
+    expect(setterMock.callCount).toBe(1);
+    expect(setterMock.calls[0]).toBe(5);
+  });
+
+  it('should update the source ref via the setter', () => {
+    const source = ref(1);
+    const plusOne = computed({
+      get: () => source.value + 1,
+      set: (val) => { source.value = val - 1; }
+    });
+
+    expect(source.value).toBe(1);
+    expect(plusOne.value).toBe(2);
+
+    plusOne.value = 10; // Set computed value
+
+    expect(source.value).toBe(9); // Source should be updated (10 - 1)
+    expect(plusOne.value).toBe(10); // Computed reflects the new value
+  });
+
+  it('should trigger watchEffect when writable computed value changes via set', () => {
+    const source = ref(1);
+    const plusOne = computed({
+      get: () => source.value + 1,
+      set: (val) => { source.value = val - 1; }
+    });
+    const effectMock = createMockFn<number>();
+
+    watchEffect(() => {
+      effectMock(plusOne.value); // Depend on computed value
+    });
+
+    expect(effectMock.callCount).toBe(1);
+    expect(effectMock.calls[0]).toBe(2);
+
+    // Set writable computed value
+    plusOne.value = 5;
+    expect(effectMock.callCount).toBe(2); // Effect should re-run
+    expect(effectMock.calls[1]).toBe(5); // New computed value
+    expect(source.value).toBe(4); // Verify source was updated
+
+    // Change source ref directly should also trigger effect
+     source.value = 10;
+     expect(effectMock.callCount).toBe(3); 
+     expect(effectMock.calls[2]).toBe(11);
+  });
 }); 
