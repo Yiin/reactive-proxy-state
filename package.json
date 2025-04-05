@@ -20,7 +20,10 @@
     "build": "tsc",
     "test": "bun test",
     "test:watch": "bun test --watch",
-    "test:bench": "bun --bun ./benchmarks/state-sync.bench.ts"
+    "test:bench": "bun --bun ./benchmarks/state-sync.bench.ts",
+    "docs:dev": "vitepress dev docs",
+    "docs:build": "vitepress build docs",
+    "docs:preview": "vitepress preview docs"
   },
   "keywords": [
     "state",
@@ -47,6 +50,8 @@
   },
   "devDependencies": {
     "bun-types": "^1.2.8",
-    "typescript": "^5.0.4"
+    "typescript": "^5.0.4",
+    "vitepress": "^1.6.3",
+    "vue": "^3.5.13"
   }
 }
