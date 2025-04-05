@@ -1,7 +1,7 @@
 {
   "name": "@yiin/reactive-proxy-state",
   "private": false,
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "A simple, standalone reactivity library using Proxies",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
