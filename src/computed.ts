@@ -11,19 +11,39 @@ export interface ComputedRef<T = any> extends Omit<Ref<T>, 'value'> {
   readonly [isRefSymbol]: true; // mark as ref-like for type checks
 }
 
-// interface for writable computed refs (not implemented yet)
-// export interface WritableComputedRef<T> extends Ref<T> { ... }
+// interface for writable computed refs
+export interface WritableComputedRef<T> extends Ref<T> {
+    readonly [isComputedSymbol]: true;
+    readonly [isRefSymbol]: true;
+}
 
 type ComputedGetter<T> = () => T;
-// type ComputedSetter<T> = (v: T) => void;
+type ComputedSetter<T> = (v: T) => void;
+
+interface WritableComputedOptions<T> {
+  get: ComputedGetter<T>;
+  set: ComputedSetter<T>;
+}
 
 export function computed<T>(getter: ComputedGetter<T>): ComputedRef<T>;
+export function computed<T>(options: WritableComputedOptions<T>): WritableComputedRef<T>;
 
 // implementation using a lazy watchEffect with a custom scheduler for caching
-export function computed<T>(getter: ComputedGetter<T>): ComputedRef<T> {
+export function computed<T>(getterOrOptions: ComputedGetter<T> | WritableComputedOptions<T>): ComputedRef<T> | WritableComputedRef<T> {
+  let getter: ComputedGetter<T>;
+  let setter: ComputedSetter<T> | undefined;
+
+  const isGetter = typeof getterOrOptions === 'function';
+  if (isGetter) {
+    getter = getterOrOptions;
+  } else {
+    getter = getterOrOptions.get;
+    setter = getterOrOptions.set;
+  }
+
   let _value: T;
   let _dirty = true; // flag to track if the cached value is stale
-  let computedRef: ComputedRef<T>; // placeholder to allow self-reference in scheduler
+  let computedRef: ComputedRef<T> | WritableComputedRef<T>; // placeholder to allow self-reference in scheduler
 
   // create a lazy effect; scheduler intercepts triggers to mark dirty instead of recomputing immediately
   const stopHandle: WatchEffectStopHandle = watchEffect(getter, {
@@ -53,7 +73,11 @@ export function computed<T>(getter: ComputedGetter<T>): ComputedRef<T> {
       return _value;
     },
     set value(newValue: T) {
-       console.warn('computed value is read-only');
+       if (setter) {
+           setter(newValue);
+       } else {
+           console.warn('computed value is read-only');
+       }
     },
     // stop: stopHandle // potentially expose stop handle
   };
@@ -61,6 +85,6 @@ export function computed<T>(getter: ComputedGetter<T>): ComputedRef<T> {
   return computedRef;
 }
 
-export function isComputed<T>(c: any): c is ComputedRef<T> {
+export function isComputed<T>(c: any): c is ComputedRef<T> | WritableComputedRef<T> {
   return !!(c && c[isComputedSymbol]);
 } 
