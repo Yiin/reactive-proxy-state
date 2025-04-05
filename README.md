@@ -91,60 +91,99 @@ console.log(unref(123)); // 123 (returns non-refs as is)
 ```
 
 ### `computed<T>(getter: () => T): ComputedRef<T>`
+### `computed<T>(options: { get: () => T, set: (value: T) => void }): WritableComputedRef<T>`
 
-Creates a computed property based on a getter function. The getter tracks reactive dependencies (`ref`s or reactive object properties) and its result is cached. The computed value only recalculates when a dependency changes.
-Computed refs are read-only.
+Creates a computed property based on a getter function or a getter/setter pair.
+
+-   **Getter-only:** The getter tracks reactive dependencies (`ref`s or reactive object properties) and its result is cached. The computed value only recalculates when a dependency changes. Computed refs created this way are **read-only**.
+-   **Getter/Setter:** Provides both a getter for deriving the value and a setter for mutating underlying reactive state when the computed ref's `.value` is assigned.
 
 ```typescript
 import { ref, computed, watchEffect, isComputed } from '@yiin/reactive-proxy-state';
 
+// Read-only computed
 const firstName = ref('John');
 const lastName = ref('Doe');
 
-const fullName = computed(() => {
-  console.log('Computing fullName...');
+const readOnlyFullName = computed(() => {
+  console.log('Computing readOnlyFullName...');
   return `${firstName.value} ${lastName.value}`;
 });
 
 // Accessing .value triggers computation
-console.log(fullName.value); 
-// Output: Computing fullName...
+console.log(readOnlyFullName.value); 
+// Output: Computing readOnlyFullName...
 // Output: John Doe
 
 // Accessing again uses the cache
-console.log(fullName.value);
+console.log(readOnlyFullName.value);
 // Output: John Doe
 
 watchEffect(() => {
-  console.log('Full name changed:', fullName.value);
+  console.log('Read-only full name changed:', readOnlyFullName.value);
 });
-// Output: Full name changed: John Doe
+// Output: Read-only full name changed: John Doe
 
 // Changing a dependency marks computed as dirty
 firstName.value = 'Jane';
 
 // Accessing .value again triggers re-computation and the effect
-console.log(fullName.value);
-// Output: Computing fullName...
-// Output: Full name changed: Jane Doe
+console.log(readOnlyFullName.value);
+// Output: Computing readOnlyFullName...
+// Output: Read-only full name changed: Jane Doe
 // Output: Jane Doe
 
 // Chained computed
-const message = computed(() => `User: ${fullName.value}`);
+const message = computed(() => `User: ${readOnlyFullName.value}`);
 console.log(message.value); // User: Jane Doe
 
 lastName.value = 'Smith';
-// Output: Computing fullName...
-// Output: Full name changed: Jane Smith
+// Output: Computing readOnlyFullName...
+// Output: Read-only full name changed: Jane Smith
 console.log(message.value); // User: Jane Smith (message recomputed automatically)
 
 // Read-only check
+console.warn = () => console.log('Warning triggered!'); // Mock console.warn
 try {
-  (fullName as any).value = 'Test'; // Throws warning
+  (readOnlyFullName as any).value = 'Test'; // Triggers warning
 } catch (e) { /* ... */ }
+// Output: Warning triggered!
+console.log(readOnlyFullName.value); // Jane Smith (value unchanged)
+
+// Writable computed
+const source = ref(1);
+const plusOne = computed({
+    get: () => source.value + 1,
+    set: (newValue) => { 
+        console.log(`Setting source based on new value: ${newValue}`);
+        source.value = newValue - 1; 
+    }
+});
+
+console.log(plusOne.value); // 2 (Initial get)
+console.log(source.value);  // 1
+
+watchEffect(() => {
+  console.log('Writable computed changed:', plusOne.value);
+});
+// Output: Writable computed changed: 2
+
+// Set the writable computed value
+plusOne.value = 10;
+// Output: Setting source based on new value: 10
+// Output: Writable computed changed: 10 
+
+console.log(plusOne.value); // 10
+console.log(source.value);  // 9 (Source was updated by the setter)
+
+// Changing the source ref also updates the computed
+source.value = 20;
+// Output: Writable computed changed: 21
+console.log(plusOne.value); // 21
 
 // Helper
-console.log(isComputed(fullName)); // true
+console.log(isComputed(readOnlyFullName)); // true
+console.log(isComputed(plusOne)); // true
 console.log(isComputed(firstName)); // false
 ```
 
