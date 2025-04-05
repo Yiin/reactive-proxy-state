@@ -1,0 +1,51 @@
+{
+  "name": "@yiin/reactive-proxy-state",
+  "private": false,
+  "version": "1.0.1",
+  "description": "A simple, standalone reactivity library using Proxies",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "require": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "test": "bun test",
+    "test:watch": "bun test --watch"
+  },
+  "keywords": [
+    "state",
+    "sync",
+    "javascript",
+    "typescript",
+    "reactive",
+    "proxy",
+    "vue",
+    "reactivity"
+  ],
+  "author": "Yiin <stanislovas@yiin.lt>",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Yiin/reactive-proxy-state.git"
+  },
+  "bugs": {
+    "url": "https://github.com/Yiin/reactive-proxy-state/issues"
+  },
+  "homepage": "https://github.com/Yiin/reactive-proxy-state#readme",
+  "publishConfig": {
+    "access": "public"
+  },
+  "devDependencies": {
+    "bun-types": "^1.2.8",
+    "typescript": "^5.0.4"
+  }
+}
