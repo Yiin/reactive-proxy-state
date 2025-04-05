@@ -3,11 +3,10 @@ export type ActionType = 'set' | 'delete' | 'array-push' | 'array-pop' | 'array-
 export interface StateEvent {
     action: ActionType;
     path: Path;
-    oldValue?: any;
     newValue?: any;
+    oldValue?: any;
     key?: any;
     value?: any;
-    args?: any[];
     items?: any[];
     deleteCount?: number;
     oldValues?: any[];

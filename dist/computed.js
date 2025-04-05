@@ -1,59 +1,58 @@
 import { watchEffect, track, trigger } from './watchEffect';
 import { isRefSymbol } from './ref';
-// Symbol for marking computed refs
+// symbol for identifying computed refs
 const isComputedSymbol = Symbol('isComputed');
-// Implementation v4 - Using watchEffect with scheduler
-export function computed(getter) {
+// implementation using a lazy watchEffect with a custom scheduler for caching
+export function computed(getterOrOptions) {
+    let getter;
+    let setter;
+    const isGetter = typeof getterOrOptions === 'function';
+    if (isGetter) {
+        getter = getterOrOptions;
+    }
+    else {
+        getter = getterOrOptions.get;
+        setter = getterOrOptions.set;
+    }
     let _value;
-    let _dirty = true; // Start dirty
-    let computedRef; // Placeholder
-    // Create a lazy effect with a scheduler
+    let _dirty = true; // flag to track if the cached value is stale
+    let computedRef; // placeholder to allow self-reference in scheduler
+    // create a lazy effect; scheduler intercepts triggers to mark dirty instead of recomputing immediately
     const stopHandle = watchEffect(getter, {
-        lazy: true, // Don't run the getter immediately
+        lazy: true,
         scheduler: () => {
-            // When a dependency changes, don't re-run the getter immediately.
-            // Instead, mark the computed as dirty and trigger downstream effects.
             if (!_dirty) {
                 _dirty = true;
-                // Trigger effects that depend on the computed ref's value
+                // trigger effects that depend on this computed ref
                 trigger(computedRef, 'value');
             }
         },
     });
-    // Access the internal effect runner
     const effectRunner = stopHandle.effect;
     computedRef = {
         [isRefSymbol]: true,
         [isComputedSymbol]: true,
         get value() {
-            // 1. Track access to this computed value for any outer effects
             track(computedRef, 'value');
-            // 2. If dirty, run the effect manually. This will:
-            //    - Execute the getter
-            //    - Update _value (via getter's return)
-            //    - Track dependencies for the getter (handled by watchEffect internals)
-            //    - Set _dirty to false
+            // if dirty, recompute value by running the getter
             if (_dirty) {
-                // console.log('Recomputing computed value via getter access');
-                _value = effectRunner.run(); // Run the getter, update value, track deps
-                _dirty = false; // Mark as clean *after* successful run
+                _value = effectRunner.run();
+                _dirty = false; // mark as clean after successful run
             }
-            // 3. Return the (now current) value.
             return _value;
         },
         set value(newValue) {
-            console.warn('Computed value is read-only');
+            if (setter) {
+                setter(newValue);
+            }
+            else {
+                console.warn('computed value is read-only');
+            }
         },
-        // Expose the stop function if needed
-        // stop: stopHandle
+        // stop: stopHandle // potentially expose stop handle
     };
-    // Initial computation is lazy, happens on first .value access.
-    // The scheduler ensures dependency changes only mark it dirty.
     return computedRef;
 }
-/**
- * Checks if a value is a computed ref.
- */
 export function isComputed(c) {
     return !!(c && c[isComputedSymbol]);
 }

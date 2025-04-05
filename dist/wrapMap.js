@@ -4,26 +4,26 @@ import { wrapArray } from './wrapArray';
 import { wrapSet } from './wrapSet';
 import { track, trigger } from './watchEffect';
 export function wrapMap(map, emit, path) {
-    // Check wrapper cache first
+    // reuse existing proxy if available for performance
     const cachedProxy = wrapperCache.get(map);
     if (cachedProxy)
         return cachedProxy;
     const proxy = new Proxy(map, {
         get(target, prop, receiver) {
-            // Original track call - Keep for properties not explicitly handled
             track(target, prop);
-            // --- Specific Method Handlers ---
             if (prop === 'set') {
                 return function (key, value) {
                     const existed = target.has(key);
                     const oldValue = target.get(key);
                     const oldSize = target.size;
+                    // avoid unnecessary work if value hasn't changed
                     if (oldValue === value)
                         return receiver;
                     if (oldValue && typeof oldValue === 'object' && value && typeof value === 'object' && deepEqual(oldValue, value, new WeakMap()))
                         return receiver;
                     target.set(key, value);
                     const newSize = target.size;
+                    // optimize path calculation by caching concatenated paths
                     const pathKey = path.join('.');
                     let cachedPath = getPathConcat(pathKey);
                     if (cachedPath === undefined) {
@@ -38,6 +38,7 @@ export function wrapMap(map, emit, path) {
                         newValue: value
                     };
                     emit(event);
+                    // trigger effects based on whether it was an add or update
                     if (!existed) {
                         trigger(target, Symbol.iterator);
                         if (oldSize !== newSize) {
@@ -59,7 +60,7 @@ export function wrapMap(map, emit, path) {
                     const oldSize = target.size;
                     const result = target.delete(key);
                     const newSize = target.size;
-                    if (result) {
+                    if (result) { // only emit and trigger if delete was successful
                         const pathKey = path.join('.');
                         let cachedPath = getPathConcat(pathKey);
                         if (cachedPath === undefined) {
@@ -94,7 +95,6 @@ export function wrapMap(map, emit, path) {
                         key: null
                     };
                     emit(event);
-                    // Clear triggers both iterator and size
                     trigger(target, Symbol.iterator);
                     if (oldSize !== newSize) {
                         trigger(target, 'size');
@@ -102,18 +102,15 @@ export function wrapMap(map, emit, path) {
                 };
             }
             if (prop === 'get') {
-                // Return function that tracks the specific key upon execution
+                // return a function that tracks the specific key only when called
                 return function (key) {
-                    // Track access to this specific key when 'get' is called
                     track(target, String(key));
                     const value = target.get(key);
                     if (!value || typeof value !== 'object')
-                        return value; // Fast path for non-objects
-                    // Check wrapper cache for the value
+                        return value;
                     const cachedValueProxy = wrapperCache.get(value);
                     if (cachedValueProxy)
                         return cachedValueProxy;
-                    // Calculate path for the value
                     const keyString = String(key);
                     const pathKey = path.length > 0 ? `${path.join('.')}.${keyString}` : keyString;
                     let newPath = getPathConcat(pathKey);
@@ -121,7 +118,7 @@ export function wrapMap(map, emit, path) {
                         newPath = path.concat(keyString);
                         setPathConcat(pathKey, newPath);
                     }
-                    // Wrap based on type (no longer passing seen)
+                    // recursively wrap nested structures
                     if (value instanceof Map)
                         return wrapMap(value, emit, newPath);
                     if (value instanceof Set)
@@ -129,60 +126,58 @@ export function wrapMap(map, emit, path) {
                     if (Array.isArray(value))
                         return wrapArray(value, emit, newPath);
                     if (value instanceof Date)
-                        return new Date(value.getTime()); // Dates are not proxied
-                    // Default to reactive for plain objects
+                        return new Date(value.getTime()); // dates are not proxied, return a copy
                     return reactive(value, emit, newPath);
                 };
             }
             if (prop === 'has') {
-                // Track dependency on iteration/structure when 'has' is accessed
                 track(target, Symbol.iterator);
                 return function (key) {
-                    // Track specific key when 'has' is called
+                    // track the specific key only when 'has' is called
                     track(target, String(key));
                     return target.has(key);
-                }.bind(target); // Bind to original target for correct 'this'
+                }.bind(target);
             }
-            // --- Iteration Methods ---
+            // handle iteration methods
             if (prop === Symbol.iterator || prop === 'entries' || prop === 'values' || prop === 'keys' || prop === 'forEach') {
-                // Track dependency on iteration when these methods are accessed
                 track(target, Symbol.iterator);
                 const originalMethod = Reflect.get(target, prop, receiver);
-                // Return custom iterators/forEach that wrap values
+                // return custom iterators/foreach that wrap values during iteration
                 if (prop === 'forEach') {
                     return (callbackfn, thisArg) => {
-                        // Use proxied .entries() to get wrapped values + tracking
+                        // use the proxied .entries() to ensure values passed to callback are wrapped and tracked
                         const entriesIterator = proxy.entries();
                         for (const [key, value] of entriesIterator) {
                             callbackfn.call(thisArg, value, key, proxy);
                         }
                     };
                 }
-                // Handle Symbol.iterator, entries, values, keys
+                // handle symbol.iterator, entries, values, keys by creating generator functions
                 return function* (...args) {
                     const iterator = originalMethod.apply(target, args);
                     for (const entry of iterator) {
-                        let keyToWrap = entry; // Default for keys()
-                        let valueToWrap = entry; // Default for values()
+                        let keyToWrap = entry;
+                        let valueToWrap = entry;
                         let isEntry = false;
                         if (prop === 'entries' || prop === Symbol.iterator) {
                             keyToWrap = entry[0];
                             valueToWrap = entry[1];
                             isEntry = true;
                         }
-                        // Wrap key if object
+                        // wrap key if it's an object
+                        // note: reactivity on map keys can be complex/unexpected
                         let wrappedKey = keyToWrap;
                         if (isEntry && keyToWrap && typeof keyToWrap === 'object') {
-                            const pathKey = path.length > 0 ? `${path.join('.')}.${String(keyToWrap)}` : String(keyToWrap); // Or find better key path?
-                            let keyPath = getPathConcat(pathKey); // Reuse paths where possible
+                            const pathKey = path.length > 0 ? `${path.join('.')}.${String(keyToWrap)}` : String(keyToWrap);
+                            let keyPath = getPathConcat(pathKey);
                             if (keyPath === undefined) {
-                                keyPath = path.concat(String(keyToWrap)); // Simplification for key path
+                                keyPath = path.concat(String(keyToWrap));
                                 setPathConcat(pathKey, keyPath);
                             }
-                            // TODO: Decide if Map keys should be deeply reactive
+                            // todo: decide if map keys should be deeply reactive
                             wrappedKey = reactive(keyToWrap, emit, keyPath);
                         }
-                        // Wrap value if object
+                        // wrap value if it's an object
                         let wrappedValue = valueToWrap;
                         if (valueToWrap && typeof valueToWrap === 'object') {
                             const cachedValueProxy = wrapperCache.get(valueToWrap);
@@ -190,7 +185,7 @@ export function wrapMap(map, emit, path) {
                                 wrappedValue = cachedValueProxy;
                             }
                             else {
-                                const keyString = String(keyToWrap);
+                                const keyString = String(keyToWrap); // use original key for path
                                 const pathKey = path.length > 0 ? `${path.join('.')}.${keyString}` : keyString;
                                 let newPath = getPathConcat(pathKey);
                                 if (newPath === undefined) {
@@ -209,7 +204,6 @@ export function wrapMap(map, emit, path) {
                                     wrappedValue = reactive(valueToWrap, emit, newPath);
                             }
                         }
-                        // Yield based on iterator type
                         if (prop === 'entries' || prop === Symbol.iterator) {
                             yield [wrappedKey, wrappedValue];
                         }
@@ -222,20 +216,15 @@ export function wrapMap(map, emit, path) {
                     }
                 };
             }
-            // --- Size Property ---
             if (prop === 'size') {
-                // Explicitly track size access
                 track(target, 'size');
-                // Return the size directly from the target to avoid potential 'this' issues with Reflect.get
                 return target.size;
             }
-            // --- Fallback for other properties/methods ---
             const value = Reflect.get(target, prop, receiver);
-            // For non-function properties or bound functions, return the value as is.
             return value;
         }
     });
-    // Cache the newly created proxy before returning
+    // cache the newly created proxy before returning
     wrapperCache.set(map, proxy);
     return proxy;
 }

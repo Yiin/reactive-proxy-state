@@ -3,20 +3,19 @@ import { reactive } from './reactive';
 import { wrapMap } from './wrapMap';
 import { wrapSet } from './wrapSet';
 import { track, trigger } from './watchEffect';
-// Pre-allocate type check function
+// avoid repeated typeof checks
 function isObject(v) {
     return v && typeof v === 'object';
 }
 export function wrapArray(arr, emit, path) {
-    // Check wrapper cache first
+    // reuse existing proxy if available for performance
     const cachedProxy = wrapperCache.get(arr);
     if (cachedProxy)
         return cachedProxy;
     const proxy = new Proxy(arr, {
         get(target, prop, receiver) {
-            // Original track call - might be redundant if handled below but keep for now
             track(target, prop);
-            // Handle specific array mutation methods first
+            // handle specific array mutation methods that require custom logic and event emission
             switch (prop) {
                 case 'push':
                     track(target, 'length');
@@ -28,7 +27,7 @@ export function wrapArray(arr, emit, path) {
                             const event = {
                                 action: 'array-push',
                                 path: path,
-                                key: oldLength, // Start index was the old length
+                                key: oldLength, // start index was the old length
                                 items: items
                             };
                             emit(event);
@@ -132,15 +131,11 @@ export function wrapArray(arr, emit, path) {
                         }
                         return result;
                     };
-                // Handle iteration methods
+                // handle methods that rely on iteration state
                 case Symbol.iterator:
-                case 'values': // values() returns an iterator
-                case 'keys': // keys() returns an iterator
-                case 'entries': // entries() returns an iterator
-                    // Track dependency on iteration
-                    track(target, Symbol.iterator);
-                    // Fall through to Reflect.get and bind below
-                    break;
+                case 'values':
+                case 'keys':
+                case 'entries':
                 case 'forEach':
                 case 'map':
                 case 'filter':
@@ -150,38 +145,34 @@ export function wrapArray(arr, emit, path) {
                 case 'findIndex':
                 case 'every':
                 case 'some':
-                case 'join': // join depends on iteration
-                    // These methods depend on iteration
+                case 'join':
                     track(target, Symbol.iterator);
-                    // Fall through to Reflect.get and bind below
+                    // fall through to default behavior (usually binding)
                     break;
                 case 'length':
-                    // Explicitly track length access
                     track(target, 'length');
                     return Reflect.get(target, prop, receiver);
             }
-            // Fallback for index access and other properties
             const value = Reflect.get(target, prop, receiver);
-            // Handle index access: wrap retrieved element if it's an object
+            // determine if the property access is numeric array index access
             const isNumericIndex = typeof prop === 'number' || (typeof prop === 'string' && !isNaN(parseInt(prop, 10)));
             if (isNumericIndex) {
-                // Track access to specific index
                 track(target, String(prop));
                 if (!isObject(value))
                     return value;
-                // Check wrapper cache for the element
+                // reuse existing proxy for nested object/array if available
                 const cachedValueProxy = wrapperCache.get(value);
                 if (cachedValueProxy)
                     return cachedValueProxy;
-                // Calculate path for the element
+                // calculate the nested path for the element, optimizing with caching
                 const propKey = String(prop);
-                const pathKey = path.length > 0 ? `${path.join('.')}.${propKey}` : propKey; // Fix pathKey generation for index 0
+                const pathKey = path.length > 0 ? `${path.join('.')}.${propKey}` : propKey;
                 let newPath = getPathConcat(pathKey);
                 if (newPath === undefined) {
                     newPath = path.concat(propKey);
                     setPathConcat(pathKey, newPath);
                 }
-                // Wrap based on type (no longer passing seen)
+                // recursively wrap nested structures
                 if (Array.isArray(value))
                     return wrapArray(value, emit, newPath);
                 if (value instanceof Map)
@@ -189,12 +180,10 @@ export function wrapArray(arr, emit, path) {
                 if (value instanceof Set)
                     return wrapSet(value, emit, newPath);
                 if (value instanceof Date)
-                    return new Date(value.getTime()); // Dates are not proxied
-                // Default to reactive for plain objects
+                    return new Date(value.getTime()); // dates are not proxied, return a copy
                 return reactive(value, emit, newPath);
             }
-            // For non-numeric properties or properties that aren't objects, return value directly
-            // Also handle functions bound to the target
+            // ensure functions accessed directly are bound to the original target
             if (typeof value === 'function') {
                 return value.bind(target);
             }
@@ -202,18 +191,19 @@ export function wrapArray(arr, emit, path) {
         },
         set(target, prop, value, receiver) {
             const oldValue = target[prop];
-            // Fast path for primitive equality
+            // avoid unnecessary triggers if value hasn't changed
             if (oldValue === value)
                 return true;
-            // Deep equality check with new WeakMap
             if (isObject(oldValue) && isObject(value) && deepEqual(oldValue, value, new WeakMap()))
                 return true;
             const descriptor = Reflect.getOwnPropertyDescriptor(target, prop);
             const result = Reflect.set(target, prop, value, receiver);
             const isNumericIndex = typeof prop === 'number' || (typeof prop === 'string' && !isNaN(parseInt(String(prop))));
+            // emit event and trigger effects only if the set was successful and wasn't intercepted by a setter
+            // (unless it's a direct numeric index set, which doesn't have a descriptor.set)
             if (result && (!descriptor || !descriptor.set || isNumericIndex)) {
                 const propKey = String(prop);
-                const pathKey = path.length > 0 ? `${path.join('.')}.${propKey}` : propKey; // Fix pathKey generation for index 0
+                const pathKey = path.length > 0 ? `${path.join('.')}.${propKey}` : propKey;
                 let newPath = getPathConcat(pathKey);
                 if (newPath === undefined) {
                     newPath = path.concat(propKey);
@@ -231,7 +221,7 @@ export function wrapArray(arr, emit, path) {
             return result;
         }
     });
-    // Cache the newly created proxy before returning
+    // cache the newly created proxy before returning
     wrapperCache.set(arr, proxy);
     return proxy;
 }

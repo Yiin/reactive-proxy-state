@@ -8,18 +8,13 @@ export declare function setInPathCache(root: object, pathKey: string, value: any
 export declare function getPathConcat(path: string): any[] | undefined;
 export declare function setPathConcat(path: string, value: any[]): void;
 /**
- * Recursively traverses an object to track all nested properties.
- * Used for deep watching.
- * @param value - The value to traverse.
- * @param seen - A Set to handle circular references.
+ * recursively traverses an object or array, accessing each property/element.
+ * used by `watch` with `deep: true` to establish dependencies on all nested properties.
+ * the actual tracking is done by the proxy `get` handlers triggered during traversal.
  */
 export declare function traverse(value: any, seen?: Set<any>): any;
 /**
- * Creates a deep clone of a value.
- * Handles primitives, Dates, Arrays, Maps, Sets, and plain objects.
- * Includes cycle detection.
- * @param value The value to clone.
- * @param seen A WeakMap to handle circular references during recursion.
- * @returns A deep clone of the value.
+ * creates a deep clone of a value.
+ * includes cycle detection using a weakmap.
  */
 export declare function deepClone<T>(value: T, seen?: WeakMap<WeakKey, any>): T;
