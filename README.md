@@ -16,20 +16,20 @@ bun add @yiin/reactive-proxy-state
 
 ## Core Concepts
 
-1.  **Reactive State**: Create reactive versions of your objects using `wrapState`. Any mutations to these wrapped objects will be tracked.
+1.  **Reactive State**: Create reactive versions of your objects using `reactive`. Any mutations to these wrapped objects will be tracked.
 2.  **Dependency Tracking**: When code inside a `watchEffect` reads a property of a reactive object, a dependency is established.
 3.  **Effect Triggering**: When a tracked property is mutated, any dependent effects (`watchEffect` or `watch` callbacks) are re-run **synchronously**.
 
 ## API
 
-### `wrapState<T extends object>(obj: T): T`
+### `reactive<T extends object>(obj: T): T`
 
 Creates a reactive proxy for the given object, Array, Map, or Set. Nested objects/collections are also recursively wrapped.
 
 ```typescript
-import { wrapState } from '@yiin/reactive-proxy-state';
+import { reactive } from '@yiin/reactive-proxy-state';
 
-const state = wrapState({
+const state = reactive({
   count: 0,
   user: { name: 'Alice' },
   items: ['a', 'b'],
@@ -49,7 +49,7 @@ state.ids.add(3);
 
 Creates a reactive "reference" object for any value type (primitive or object). The value is accessed and mutated through the `.value` property. Reactivity is tracked on the `.value` property itself.
 
-**Note:** If a plain object is passed to `ref`, the object *itself* is not made deeply reactive. Only assignment to the `.value` property is tracked. Use `wrapState` for deep object reactivity.
+**Note:** If a plain object is passed to `ref`, the object *itself* is not made deeply reactive. Only assignment to the `.value` property is tracked. Use `reactive` for deep object reactivity.
 
 ```typescript
 import { ref, watchEffect, isRef, unref } from '@yiin/reactive-proxy-state';
@@ -157,9 +157,9 @@ Runs a function immediately, tracks its reactive dependencies, and re-runs it sy
 *   `onTrigger?(event)`: Debug hook called when the effect is triggered by a mutation.
 
 ```typescript
-import { wrapState, ref, watchEffect } from '@yiin/reactive-proxy-state';
+import { reactive, ref, watchEffect } from '@yiin/reactive-proxy-state';
 
-// ... existing watchEffect example using wrapState ...
+// ... existing watchEffect example using reactive ...
 
 // Using watchEffect with refs
 const counter = ref(10);
@@ -173,7 +173,7 @@ counter.value--;
 
 ### `watch<T>(source: WatchSource<T> | T, callback: (newValue: T, oldValue: T | undefined) => void, options?: WatchOptions)`
 
-Watches a specific reactive source (either a getter function, a direct reactive object/value created by `wrapState`, or a `ref`) and runs a callback when the source's value changes.
+Watches a specific reactive source (either a getter function, a direct reactive object/value created by `reactive`, or a `ref`) and runs a callback when the source's value changes.
 
 `WatchSource<T>`: A function that returns the value to watch, or a `ref`.
 `callback`: Function executed on change. Receives the new value and the old value.
@@ -182,9 +182,9 @@ Watches a specific reactive source (either a getter function, a direct reactive 
 *   `deep?: boolean`: If `true`, deeply traverses the source for dependency tracking and uses deep comparison logic. **Defaults to `true`**. Set to `false` for shallow watching (only triggers on direct assignment or identity change).
 
 ```typescript
-import { wrapState, ref, watch } from '@yiin/reactive-proxy-state';
+import { reactive, ref, watch } from '@yiin/reactive-proxy-state';
 
-// ... existing watch examples using wrapState ...
+// ... existing watch examples using reactive ...
 
 // Watching a ref
 const count = ref(0);
@@ -206,12 +206,12 @@ doubleCount.value = 110; // Output: Double changed from 200 to 220
 
 ## Collections (Arrays, Maps, Sets)
 
-`wrapState` automatically handles Arrays, Maps, and Sets. Mutations via standard methods (`push`, `pop`, `splice`, `set`, `delete`, `add`, `clear`, etc.) are reactive and will trigger effects that depend on the collection or its contents (if watched deeply).
+`reactive` automatically handles Arrays, Maps, and Sets. Mutations via standard methods (`push`, `pop`, `splice`, `set`, `delete`, `add`, `clear`, etc.) are reactive and will trigger effects that depend on the collection or its contents (if watched deeply).
 
 ```typescript
-import { wrapState, watchEffect } from '@yiin/reactive-proxy-state';
+import { reactive, watchEffect } from '@yiin/reactive-proxy-state';
 
-const state = wrapState({
+const state = reactive({
   list: [1, 2],
   data: new Map<string, number>(),
   tags: new Set<string>()

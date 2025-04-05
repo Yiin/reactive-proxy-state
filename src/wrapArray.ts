@@ -1,6 +1,6 @@
 import { EmitFunction, Path, StateEvent } from './types';
-import { deepEqual, globalSeen, getPathConcat, setPathConcat, wrapperCache } from './utils';
-import { wrapState } from './wrapState';
+import { deepEqual, getPathConcat, setPathConcat, wrapperCache } from './utils';
+import { reactive } from './reactive';
 import { wrapMap } from './wrapMap';
 import { wrapSet } from './wrapSet';
 import { track, trigger } from './watchEffect';
@@ -195,8 +195,8 @@ export function wrapArray<T extends any[]>(arr: T, emit: EmitFunction, path: Pat
                  if (value instanceof Map) return wrapMap(value, emit, newPath);
                  if (value instanceof Set) return wrapSet(value, emit, newPath);
                  if (value instanceof Date) return new Date(value.getTime()); // Dates are not proxied
-                 // Default to wrapState for plain objects
-                 return wrapState(value, emit, newPath);
+                 // Default to reactive for plain objects
+                 return reactive(value, emit, newPath);
             }
 
             // For non-numeric properties or properties that aren't objects, return value directly

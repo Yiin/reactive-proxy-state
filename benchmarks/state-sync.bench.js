@@ -1,4 +1,4 @@
-import { wrapState } from "../src/wrapState"; // Adjust path if needed
+import { reactive } from "../src/reactive"; // Adjust path if needed
 import { performance } from 'node:perf_hooks'; // Use Node's performance for timing
 // --- Helper Functions ---
 function createComplexEntityState() {
@@ -99,7 +99,7 @@ const emit = (event) => {
     // To be more realistic, you could add minimal processing here.
     collectedEvents.push(event);
 };
-const wrappedResults = runBenchmark("Wrapped Object Mutations", () => wrapState(createComplexEntityState(), emit), // Setup: create wrapped object
+const wrappedResults = runBenchmark("Wrapped Object Mutations", () => reactive(createComplexEntityState(), emit), // Setup: create wrapped object
 (state) => {
     applyMutations(state);
     collectedEvents = []; // Clear events to avoid memory buildup during benchmark
@@ -107,7 +107,7 @@ const wrappedResults = runBenchmark("Wrapped Object Mutations", () => wrapState(
 // Benchmark Wrapping Cost
 const wrappingResults = runBenchmark("Object Wrapping Cost", () => createComplexEntityState(), // Setup: create plain object
 (plainState) => {
-    const wrapped = wrapState(plainState, emit);
+    const wrapped = reactive(plainState, emit);
     // Prevent potential compiler optimization by using the result slightly
     if (wrapped && Math.random() < 0.00001)
         console.log("Wrapped");

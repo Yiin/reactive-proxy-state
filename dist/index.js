@@ -6,6 +6,6 @@ export * from './wrapArray';
 export * from './wrapMap';
 export * from './wrapSet';
 export * from './watch';
-export * from './watchEffect'
+export * from './watchEffect';
 export * from './ref';
 export * from './computed';

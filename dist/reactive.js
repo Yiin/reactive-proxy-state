@@ -7,7 +7,7 @@ import { track, trigger } from './watchEffect';
 function isObject(v) {
     return v && typeof v === 'object';
 }
-export function wrapState(obj, emit, path = [], seen = globalSeen) {
+export function reactive(obj, emit, path = [], seen = globalSeen) {
     if (seen.has(obj))
         return seen.get(obj);
     function wrapValue(val, subPath) {
@@ -23,7 +23,7 @@ export function wrapState(obj, emit, path = [], seen = globalSeen) {
             return wrapSet(val, emit, subPath);
         if (val instanceof Date)
             return new Date(val.getTime());
-        return wrapState(val, emit, subPath, seen);
+        return reactive(val, emit, subPath, seen);
     }
     const proxy = new Proxy(obj, {
         get(target, prop, receiver) {

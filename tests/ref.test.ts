@@ -181,7 +181,7 @@ describe('ref', () => {
     expect(dummy!).toBe(obj); // dummy still holds the same object reference
     expect(dummy!.a).toBe(2); // but the object itself has changed (use non-null assertion)
 
-    // To track mutations *within* the object, the object itself needs to be reactive (e.g., wrapState)
+    // To track mutations *within* the object, the object itself needs to be reactive (e.g., reactive)
     // or the effect needs to depend on the inner property:
     effectMock.mockClear(); // Clear previous calls
     let innerDummy: number; // No initializer

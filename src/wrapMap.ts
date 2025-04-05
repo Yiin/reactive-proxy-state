@@ -1,6 +1,6 @@
 import { EmitFunction, Path, StateEvent } from './types';
-import { deepEqual, pathConcatCache, getPathConcat, setPathConcat, wrapperCache } from './utils';
-import { wrapState } from './wrapState';
+import { deepEqual, getPathConcat, setPathConcat, wrapperCache } from './utils';
+import { reactive } from './reactive';
 import { wrapArray } from './wrapArray';
 import { wrapSet } from './wrapSet';
 import { track, trigger } from './watchEffect';
@@ -143,8 +143,8 @@ export function wrapMap<K, V>(map: Map<K, V>, emit: EmitFunction, path: Path): M
                     if (Array.isArray(value)) return wrapArray(value, emit, newPath);
                     if (value instanceof Date) return new Date(value.getTime()); // Dates are not proxied
 
-                    // Default to wrapState for plain objects
-                    return wrapState(value, emit, newPath);
+                    // Default to reactive for plain objects
+                    return reactive(value, emit, newPath);
                 };
             }
             if (prop === 'has') {
@@ -199,7 +199,7 @@ export function wrapMap<K, V>(map: Map<K, V>, emit: EmitFunction, path: Path): M
                                 setPathConcat(pathKey, keyPath);
                             }
                             // TODO: Decide if Map keys should be deeply reactive
-                            wrappedKey = wrapState(keyToWrap, emit, keyPath); 
+                            wrappedKey = reactive(keyToWrap, emit, keyPath); 
                         }
                         
                         // Wrap value if object
@@ -221,7 +221,7 @@ export function wrapMap<K, V>(map: Map<K, V>, emit: EmitFunction, path: Path): M
                                  else if (valueToWrap instanceof Set) wrappedValue = wrapSet(valueToWrap, emit, newPath);
                                  else if (Array.isArray(valueToWrap)) wrappedValue = wrapArray(valueToWrap, emit, newPath);
                                  else if (valueToWrap instanceof Date) wrappedValue = new Date(valueToWrap.getTime());
-                                 else wrappedValue = wrapState(valueToWrap, emit, newPath);
+                                 else wrappedValue = reactive(valueToWrap, emit, newPath);
                              }
                         }
 

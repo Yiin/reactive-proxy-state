@@ -1,5 +1,5 @@
 import { deepEqual, getPathConcat, setPathConcat, wrapperCache } from './utils';
-import { wrapState } from './wrapState';
+import { reactive } from './reactive';
 import { wrapArray } from './wrapArray';
 import { wrapSet } from './wrapSet';
 import { track, trigger } from './watchEffect';
@@ -130,8 +130,8 @@ export function wrapMap(map, emit, path) {
                         return wrapArray(value, emit, newPath);
                     if (value instanceof Date)
                         return new Date(value.getTime()); // Dates are not proxied
-                    // Default to wrapState for plain objects
-                    return wrapState(value, emit, newPath);
+                    // Default to reactive for plain objects
+                    return reactive(value, emit, newPath);
                 };
             }
             if (prop === 'has') {
@@ -180,7 +180,7 @@ export function wrapMap(map, emit, path) {
                                 setPathConcat(pathKey, keyPath);
                             }
                             // TODO: Decide if Map keys should be deeply reactive
-                            wrappedKey = wrapState(keyToWrap, emit, keyPath);
+                            wrappedKey = reactive(keyToWrap, emit, keyPath);
                         }
                         // Wrap value if object
                         let wrappedValue = valueToWrap;
@@ -206,7 +206,7 @@ export function wrapMap(map, emit, path) {
                                 else if (valueToWrap instanceof Date)
                                     wrappedValue = new Date(valueToWrap.getTime());
                                 else
-                                    wrappedValue = wrapState(valueToWrap, emit, newPath);
+                                    wrappedValue = reactive(valueToWrap, emit, newPath);
                             }
                         }
                         // Yield based on iterator type

@@ -1,5 +1,5 @@
 import { expect, test, describe } from "bun:test";
-import { wrapState, StateEvent, EmitFunction } from '../src/index';
+import { reactive, StateEvent, EmitFunction } from '../src/index';
 
 // Helper function to create an event emitter that collects events
 function createEventCollector(): { events: StateEvent[], emit: EmitFunction } {
@@ -11,7 +11,7 @@ function createEventCollector(): { events: StateEvent[], emit: EmitFunction } {
 describe("Map Tests", () => {
   test("map-set emits event", () => {
     const { events, emit } = createEventCollector();
-    const state = wrapState({ map: new Map([['a', 1]]) }, emit);
+    const state = reactive({ map: new Map([['a', 1]]) }, emit);
     
     state.map.set('b', 2);
     
@@ -23,9 +23,9 @@ describe("Map Tests", () => {
     expect(events[0].newValue).toBe(2);
   });
 
-  test("wrapState handles nested maps", () => {
+  test("reactive handles nested maps", () => {
     const { events, emit } = createEventCollector();
-    const state = wrapState({
+    const state = reactive({
       map: new Map([
         ['a', new Map([['x', 1]])]
       ])
@@ -43,7 +43,7 @@ describe("Map Tests", () => {
 
   test("map methods emit correct events", () => {
     const { events, emit } = createEventCollector();
-    const state = wrapState({ map: new Map([['a', 1], ['b', 2]]) }, emit);
+    const state = reactive({ map: new Map([['a', 1], ['b', 2]]) }, emit);
     
     state.map.delete('a');
     state.map.set('c', 3);

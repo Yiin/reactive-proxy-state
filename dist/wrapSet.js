@@ -1,5 +1,5 @@
 import { getPathConcat, setPathConcat, wrapperCache } from './utils';
-import { wrapState } from './wrapState';
+import { reactive } from './reactive';
 import { wrapArray } from './wrapArray';
 import { wrapMap } from './wrapMap';
 import { track, trigger } from './watchEffect';
@@ -147,7 +147,7 @@ export function wrapSet(set, emit, path) {
                                 else if (valueToWrap instanceof Date)
                                     wrappedValue = new Date(valueToWrap.getTime());
                                 else
-                                    wrappedValue = wrapState(valueToWrap, emit, newPath);
+                                    wrappedValue = reactive(valueToWrap, emit, newPath);
                                 // Note: We don't cache the *wrapped* value here, wrap functions handle caching
                             }
                         }

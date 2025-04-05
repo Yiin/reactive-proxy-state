@@ -1,5 +1,5 @@
 import { expect, test, describe } from "bun:test";
-import { wrapState, updateState, StateEvent, EmitFunction } from '../src/index';
+import { reactive, updateState, StateEvent, EmitFunction } from '../src/index';
 
 // Helper function to create an event emitter that collects events
 function createEventCollector(): { events: StateEvent[], emit: EmitFunction } {
@@ -9,10 +9,10 @@ function createEventCollector(): { events: StateEvent[], emit: EmitFunction } {
 }
 
 describe("Edge Cases", () => {
-  test("wrapState handles Symbol properties", () => {
+  test("reactive handles Symbol properties", () => {
     const { events, emit } = createEventCollector();
     const sym = Symbol('test');
-    const state = wrapState({ [sym]: 'value' }, emit);
+    const state = reactive({ [sym]: 'value' }, emit);
     
     state[sym] = 'new value';
     
@@ -22,9 +22,9 @@ describe("Edge Cases", () => {
     expect(events[0].newValue).toBe('new value');
   });
 
-  test("wrapState handles BigInt values", () => {
+  test("reactive handles BigInt values", () => {
     const { events, emit } = createEventCollector();
-    const state = wrapState({ big: 123n }, emit);
+    const state = reactive({ big: 123n }, emit);
     
     state.big = 456n;
     
@@ -34,9 +34,9 @@ describe("Edge Cases", () => {
     expect(events[0].newValue).toBe(456n);
   });
 
-  test("wrapState handles TypedArrays", () => {
+  test("reactive handles TypedArrays", () => {
     const { events, emit } = createEventCollector();
-    const state = wrapState({ arr: new Uint8Array([1, 2, 3]) }, emit);
+    const state = reactive({ arr: new Uint8Array([1, 2, 3]) }, emit);
     
     state.arr[0] = 5;
     
@@ -47,9 +47,9 @@ describe("Edge Cases", () => {
     expect(events[0].newValue).toBe(5);
   });
 
-  test("wrapState handles rapid mutations", () => {
+  test("reactive handles rapid mutations", () => {
     const { events, emit } = createEventCollector();
-    const state = wrapState({ count: 0 }, emit);
+    const state = reactive({ count: 0 }, emit);
     
     for (let i = 0; i < 100; i++) {
       state.count = i;
@@ -61,10 +61,10 @@ describe("Edge Cases", () => {
     expect(events[98].newValue).toBe(99);
   });
 
-  test("wrapState handles nested frozen objects", () => {
+  test("reactive handles nested frozen objects", () => {
     const { events, emit } = createEventCollector();
     const frozen = Object.freeze({ value: 42 });
-    const state = wrapState({ frozen }, emit);
+    const state = reactive({ frozen }, emit);
     
     // This should throw
     expect(() => {
@@ -72,9 +72,9 @@ describe("Edge Cases", () => {
     }).toThrow();
   });
 
-  test("wrapState handles getters and setters", () => {
+  test("reactive handles getters and setters", () => {
     const { events, emit } = createEventCollector();
-    const state = wrapState({
+    const state = reactive({
       get value() { return (this as any)._value; },
       set value(v) { (this as any)._value = v; },
       _value: 42
@@ -88,7 +88,7 @@ describe("Edge Cases", () => {
     expect(events[0].newValue).toBe(43);
   });
 
-  test("wrapState handles non-enumerable properties", () => {
+  test("reactive handles non-enumerable properties", () => {
     const { events, emit } = createEventCollector();
     const obj = {} as { hidden?: number };
     Object.defineProperty(obj, 'hidden', {
@@ -96,7 +96,7 @@ describe("Edge Cases", () => {
       enumerable: false
     });
     
-    const state = wrapState({ obj }, emit);
+    const state = reactive({ obj }, emit);
 
     // Expect setting a non-writable property in strict mode to throw
     expect(() => {
@@ -108,11 +108,11 @@ describe("Edge Cases", () => {
     expect((state.obj as any).hidden).toBe(42); // Value should remain unchanged
   });
 
-  test("wrapState handles prototype chain modifications", () => {
+  test("reactive handles prototype chain modifications", () => {
     const { events, emit } = createEventCollector();
     const proto = { inherited: 42 };
     const obj = Object.create(proto);
-    const state = wrapState({ obj }, emit);
+    const state = reactive({ obj }, emit);
     
     state.obj.inherited = 43;
     
@@ -123,7 +123,7 @@ describe("Edge Cases", () => {
     expect(events[0].newValue).toBe(43);
   });
 
-  test("wrapState handles Symbol.toStringTag", () => {
+  test("reactive handles Symbol.toStringTag", () => {
     const { events, emit } = createEventCollector();
     class CustomClass {
       get [Symbol.toStringTag]() {
@@ -131,13 +131,13 @@ describe("Edge Cases", () => {
       }
     }
     
-    const state = wrapState({ custom: new CustomClass() }, emit);
+    const state = reactive({ custom: new CustomClass() }, emit);
     expect(Object.prototype.toString.call(state.custom)).toBe('[object CustomClass]');
   });
 
-  test("wrapState handles concurrent mutations", () => {
+  test("reactive handles concurrent mutations", () => {
     const { events, emit } = createEventCollector();
-    const state = wrapState({
+    const state = reactive({
       a: { value: 1 },
       b: { value: 2 }
     }, emit);
@@ -157,13 +157,13 @@ describe("Edge Cases", () => {
     expect(events[1].newValue).toBe(4);
   });
 
-  test("wrapState handles mutations during event processing", () => {
+  test("reactive handles mutations during event processing", () => {
     const events: StateEvent[] = [];
     const emit: EmitFunction = (event) => {
       state.value = 999; // Modify during event processing
       events.push(event);
     };
-    const state = wrapState({ value: 1 }, emit);
+    const state = reactive({ value: 1 }, emit);
     
     state.value = 2;
     

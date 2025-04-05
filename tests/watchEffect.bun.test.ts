@@ -1,11 +1,11 @@
 import { expect, test, describe, mock, spyOn } from "bun:test";
-import { wrapState, watchEffect, StateEvent, EmitFunction } from '../src/index';
+import { reactive, watchEffect, StateEvent, EmitFunction } from '../src/index';
 import { createEventCollector } from './test-utils';
 
 describe("WatchEffect Tests", () => {
   test("watchEffect runs immediately", () => {
     const { events, emit } = createEventCollector();
-    const state = wrapState({ count: 0 }, emit);
+    const state = reactive({ count: 0 }, emit);
     const effectFn = mock(() => {
       return state.count;
     });
@@ -19,7 +19,7 @@ describe("WatchEffect Tests", () => {
   
   test("watchEffect runs when tracked dependency changes", () => {
     const { events, emit } = createEventCollector();
-    const state = wrapState({ count: 0, unrelated: 'test' }, emit);
+    const state = reactive({ count: 0, unrelated: 'test' }, emit);
     const effectFn = mock(() => {
       return state.count;
     });
@@ -38,7 +38,7 @@ describe("WatchEffect Tests", () => {
   
   test("watchEffect does not run when untracked property changes", () => {
     const { events, emit } = createEventCollector();
-    const state = wrapState({ count: 0, unrelated: 'test' }, emit);
+    const state = reactive({ count: 0, unrelated: 'test' }, emit);
     const effectFn = mock(() => {
       return state.count; // Only tracking count
     });
@@ -57,7 +57,7 @@ describe("WatchEffect Tests", () => {
   
   test("watchEffect tracks nested dependencies", () => {
     const { events, emit } = createEventCollector();
-    const state = wrapState({ 
+    const state = reactive({ 
       user: { 
         name: "Alice", 
         profile: { 
@@ -88,7 +88,7 @@ describe("WatchEffect Tests", () => {
   
   test("watchEffect stops when stop function is called", () => {
     const { events, emit } = createEventCollector();
-    const state = wrapState({ count: 0 }, emit);
+    const state = reactive({ count: 0 }, emit);
     const effectFn = mock(() => {
       return state.count;
     });
@@ -110,7 +110,7 @@ describe("WatchEffect Tests", () => {
   
   test("watchEffect with array operations", () => {
     const { events, emit } = createEventCollector();
-    const state = wrapState({ items: [1, 2, 3] }, emit);
+    const state = reactive({ items: [1, 2, 3] }, emit);
     const effectFn = mock(() => {
       return state.items.join(',');
     });
@@ -136,7 +136,7 @@ describe("WatchEffect Tests", () => {
   test("watchEffect with Map operations", () => {
     const { events, emit } = createEventCollector();
     const map = new Map<string, number>([["a", 1], ["b", 2]]);
-    const state = wrapState({ map }, emit);
+    const state = reactive({ map }, emit);
     const effectFn = mock(() => {
       return Array.from(state.map.entries());
     });
@@ -158,7 +158,7 @@ describe("WatchEffect Tests", () => {
   test("watchEffect with Set operations", () => {
     const { events, emit } = createEventCollector();
     const set = new Set([1, 2, 3]);
-    const state = wrapState({ set }, emit);
+    const state = reactive({ set }, emit);
     const effectFn = mock(() => {
       return Array.from(state.set);
     });
@@ -179,7 +179,7 @@ describe("WatchEffect Tests", () => {
 
   test("watchEffect with tracking events", () => {
     const { events, emit } = createEventCollector();
-    const state = wrapState({ count: 0 }, emit);
+    const state = reactive({ count: 0 }, emit);
     
     const onTrack = mock((event: any) => {});
     const onTrigger = mock((event: any) => {});
@@ -205,7 +205,7 @@ describe("WatchEffect Tests", () => {
   
   test("watchEffect handles multiple tracked dependencies", () => {
     const { events, emit } = createEventCollector();
-    const state = wrapState({ 
+    const state = reactive({ 
       count: 0,
       name: "Alice",
       flags: {
@@ -245,7 +245,7 @@ describe("WatchEffect Tests", () => {
   });
 
   test('watchEffect tracks property additions', () => {
-    const state = wrapState<{ prop?: number }>({}, () => {});
+    const state = reactive<{ prop?: number }>({}, () => {});
     const effectFn = mock(() => {
       // Access potentially non-existent prop
       const val = state.prop;
@@ -260,7 +260,7 @@ describe("WatchEffect Tests", () => {
   });
 
   test('watchEffect tracks property deletions', () => {
-    const state = wrapState<{ prop?: number }>({ prop: 5 }, () => {});
+    const state = reactive<{ prop?: number }>({ prop: 5 }, () => {});
     const effectFn = mock(() => {
       const val = state.prop;
     });
@@ -274,7 +274,7 @@ describe("WatchEffect Tests", () => {
   });
 
   test('watchEffect handles conditional tracking', () => {
-    const state = wrapState({ flag: true, a: 1, b: 2 }, () => {});
+    const state = reactive({ flag: true, a: 1, b: 2 }, () => {});
     let value: number | undefined;
     const effectFn = mock(() => {
       value = state.flag ? state.a : state.b;
@@ -311,7 +311,7 @@ describe("WatchEffect Tests", () => {
   });
 
   test('watchEffect can stop itself', () => {
-    const state = wrapState({ count: 0 }, () => {});
+    const state = reactive({ count: 0 }, () => {});
     let stopHandle: (() => void) | null = null;
     const effectFn = mock(() => {
       if (state.count >= 2) {
@@ -336,7 +336,7 @@ describe("WatchEffect Tests", () => {
     const obj = { prop: 1 };
     const set = new Set([1, 2]);
     const map = new Map([["a", 1]]);
-    const state = wrapState({ obj, set, map }, () => {}); 
+    const state = reactive({ obj, set, map }, () => {}); 
     
     const objEffect = mock(() => { state.obj.prop });
     const setEffect = mock(() => { for (const _ of state.set); }); // Iterate to track
@@ -376,7 +376,7 @@ describe("WatchEffect Tests", () => {
         enumerable: true,
         configurable: true
     });
-    const state = wrapState<{ _count: number, count: number }>(stateObj as any, () => {});
+    const state = reactive<{ _count: number, count: number }>(stateObj as any, () => {});
     let value: number | undefined; // Keep value for later checks if needed, but don't assign in effect
     const effectFn = mock(() => {
         // This mock is NOT the user effect passed to watchEffect initially

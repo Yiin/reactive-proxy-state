@@ -1,11 +1,11 @@
 import { expect, test, describe, mock } from "bun:test";
-import { wrapState, watch, StateEvent, EmitFunction } from '../src/index';
+import { reactive, watch, StateEvent, EmitFunction } from '../src/index';
 import { createEventCollector } from './test-utils';
 
 describe("Watch Tests", () => {
   test("watch calls callback when source changes", () => {
     const { events, emit } = createEventCollector();
-    const state = wrapState({ count: 0 }, emit);
+    const state = reactive({ count: 0 }, emit);
     const callback = mock((newVal: number, oldVal: number | undefined) => {});
     
     const stop = watch(() => state.count, callback);
@@ -20,7 +20,7 @@ describe("Watch Tests", () => {
   
   test("watch does not call callback when value doesn't change", () => {
     const { events, emit } = createEventCollector();
-    const state = wrapState({ count: 0 }, emit);
+    const state = reactive({ count: 0 }, emit);
     const callback = mock((newVal: number, oldVal: number | undefined) => {});
     
     const stop = watch(() => state.count, callback);
@@ -34,7 +34,7 @@ describe("Watch Tests", () => {
   
   test("watch with immediate option calls callback immediately", () => {
     const { events, emit } = createEventCollector();
-    const state = wrapState({ count: 0 }, emit);
+    const state = reactive({ count: 0 }, emit);
     const callback = mock((newVal: number, oldVal: number | undefined) => {});
     
     const stop = watch(() => state.count, callback, { immediate: true });
@@ -52,7 +52,7 @@ describe("Watch Tests", () => {
   
   test("watch stops watching when stop function is called", () => {
     const { events, emit } = createEventCollector();
-    const state = wrapState({ count: 0 }, emit);
+    const state = reactive({ count: 0 }, emit);
     const callback = mock((newVal: number, oldVal: number | undefined) => {});
     
     const stop = watch(() => state.count, callback);
@@ -68,7 +68,7 @@ describe("Watch Tests", () => {
   
   test("watch on nested properties", () => {
     const { events, emit } = createEventCollector();
-    const state = wrapState({ user: { name: "Alice", age: 30 } }, emit);
+    const state = reactive({ user: { name: "Alice", age: 30 } }, emit);
     const callback = mock((newVal: string, oldVal: string | undefined) => {});
     
     const stop = watch(() => state.user.name, callback);
@@ -87,7 +87,7 @@ describe("Watch Tests", () => {
   
   test("watch on nested object with deep option", () => {
     const { events, emit } = createEventCollector();
-    const state = wrapState({ user: { name: "Alice", address: { city: "New York" } } }, emit);
+    const state = reactive({ user: { name: "Alice", address: { city: "New York" } } }, emit);
     const callback = mock((newVal: any, oldVal: any) => {});
     
     const stop = watch(() => state.user, callback, { deep: true });
@@ -105,7 +105,7 @@ describe("Watch Tests", () => {
   
   test("watch with array sources", () => {
     const { events, emit } = createEventCollector();
-    const state = wrapState({ items: [1, 2, 3] }, emit);
+    const state = reactive({ items: [1, 2, 3] }, emit);
     const callback = mock((newVal: number[], oldVal: number[] | undefined) => {});
     
     const stop = watch(() => state.items, callback, { deep: true });
@@ -121,7 +121,7 @@ describe("Watch Tests", () => {
   test("watch with Map sources", () => {
     const { events, emit } = createEventCollector();
     const map = new Map<string, number>([["a", 1], ["b", 2]]);
-    const state = wrapState({ map }, emit);
+    const state = reactive({ map }, emit);
     const callback = mock((newVal: Map<string, number>, oldVal: Map<string, number> | undefined) => {});
     
     const stop = watch(() => state.map, callback, { deep: true });
@@ -136,7 +136,7 @@ describe("Watch Tests", () => {
   test("watch with Set sources", () => {
     const { events, emit } = createEventCollector();
     const set = new Set([1, 2, 3]);
-    const state = wrapState({ set }, emit);
+    const state = reactive({ set }, emit);
     const callback = mock((newVal: Set<number>, oldVal: Set<number> | undefined) => {});
     
     const stop = watch(() => state.set, callback, { deep: true });
@@ -150,7 +150,7 @@ describe("Watch Tests", () => {
   
   test("watch should handle multiple watches on the same source", () => {
     const { events, emit } = createEventCollector();
-    const state = wrapState({ count: 0 }, emit);
+    const state = reactive({ count: 0 }, emit);
     
     const callback1 = mock((newVal: number, oldVal: number | undefined) => {});
     const callback2 = mock((newVal: number, oldVal: number | undefined) => {});
@@ -174,7 +174,7 @@ describe("Watch Tests", () => {
   });
 
   test('watches a plain object directly (deep default)', () => {
-    const state = wrapState({ a: 1, nested: { b: 2 } }, () => {});
+    const state = reactive({ a: 1, nested: { b: 2 } }, () => {});
     const callback = mock((newVal, oldVal) => {});
     
     const stop = watch(state, callback); // deep: true is default
@@ -193,7 +193,7 @@ describe("Watch Tests", () => {
   });
 
   test('watches with deep: false', () => {
-    const state = wrapState({ nested: { value: 1 } }, () => {});
+    const state = reactive({ nested: { value: 1 } }, () => {});
     const callback = mock((newVal, oldVal) => {});
     
     const stop = watch(() => state.nested, callback, { deep: false });
@@ -211,7 +211,7 @@ describe("Watch Tests", () => {
   });
 
   test('watch with immediate: true and deep: true', () => {
-    const state = wrapState({ nested: { value: 1 } }, () => {});
+    const state = reactive({ nested: { value: 1 } }, () => {});
     const callback = mock((newVal, oldVal) => {});
 
     const stop = watch(state.nested, callback, { immediate: true, deep: true });
@@ -229,7 +229,7 @@ describe("Watch Tests", () => {
   });
 
   test('watches specific Map properties (get, has)', () => {
-    const state = wrapState({ map: new Map([['a', 1], ['b', 2]]) }, () => {});
+    const state = reactive({ map: new Map([['a', 1], ['b', 2]]) }, () => {});
     const watchGet = mock((newVal, oldVal) => {});
     const watchHas = mock((newVal, oldVal) => {});
 
@@ -262,7 +262,7 @@ describe("Watch Tests", () => {
   });
 
   test('watches Map/Set size', () => {
-    const state = wrapState({ map: new Map(), set: new Set() }, () => {});
+    const state = reactive({ map: new Map(), set: new Set() }, () => {});
     const mapSizeCb = mock((newVal, oldVal) => {});
     const setSizeCb = mock((newVal, oldVal) => {});
 
@@ -296,7 +296,7 @@ describe("Watch Tests", () => {
   });
 
   test('provides correct oldValue and newValue (primitive)', () => {
-    const state = wrapState({ count: 0 }, () => {});
+    const state = reactive({ count: 0 }, () => {});
     const callback = mock((newVal, oldVal) => {});
     const stop = watch(() => state.count, callback);
 
@@ -314,7 +314,7 @@ describe("Watch Tests", () => {
   });
 
   test('provides correct oldValue and newValue (object, deep)', () => {
-    const state = wrapState<{ obj: { val: number } }>({ obj: { val: 1 } }, () => {});
+    const state = reactive<{ obj: { val: number } }>({ obj: { val: 1 } }, () => {});
     const callback = mock((newVal, oldVal) => {});
     const stop = watch(() => state.obj, callback, { deep: true });
 
@@ -341,7 +341,7 @@ describe("Watch Tests", () => {
   });
 
   test('watches sources returning null/undefined', () => {
-    const state = wrapState<{ prop: { nested: number } | null }>({ prop: { nested: 1 } }, () => {});
+    const state = reactive<{ prop: { nested: number } | null }>({ prop: { nested: 1 } }, () => {});
     const callback = mock((newVal, oldVal) => {});
     const stop = watch(() => state.prop?.nested, callback);
 
@@ -372,7 +372,7 @@ describe("Watch Tests", () => {
         get() { return this._a + this._b; },
         enumerable: true, configurable: true
     });
-    const state = wrapState<{ _a: number, _b: number, computed: number }>(stateObj as any, () => {});
+    const state = reactive<{ _a: number, _b: number, computed: number }>(stateObj as any, () => {});
     const callback = mock((newVal, oldVal) => {});
 
     const stop = watch(() => state.computed, callback);
@@ -396,7 +396,7 @@ describe("Watch Tests", () => {
   });
 
   test('watch with array sources', () => {
-    const state = wrapState({ arr: [1, 2] }, () => {});
+    const state = reactive({ arr: [1, 2] }, () => {});
     const callback = mock(() => {});
     const stop = watch(() => state.arr, callback, { deep: true });
 
@@ -406,7 +406,7 @@ describe("Watch Tests", () => {
   });
 
   test('watch with Map sources', () => {
-    const state = wrapState({ map: new Map([['a', 1]]) }, () => {});
+    const state = reactive({ map: new Map([['a', 1]]) }, () => {});
     const callback = mock(() => {});
     const stop = watch(() => state.map, callback, { deep: true }); // Or watch(state.map, callback)
 
@@ -416,7 +416,7 @@ describe("Watch Tests", () => {
   });
 
   test('watch with Set sources', () => {
-    const state = wrapState({ set: new Set([1]) }, () => {});
+    const state = reactive({ set: new Set([1]) }, () => {});
     const callback = mock(() => {});
     const stop = watch(() => state.set, callback, { deep: true }); // Or watch(state.set, callback)
 
@@ -426,7 +426,7 @@ describe("Watch Tests", () => {
   });
 
   test('watch should handle multiple watches on the same source', () => {
-    const state = wrapState({ count: 0 }, () => {});
+    const state = reactive({ count: 0 }, () => {});
     const callback1 = mock(() => {});
     const callback2 = mock(() => {});
 
