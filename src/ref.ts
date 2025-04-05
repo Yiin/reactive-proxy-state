@@ -2,8 +2,8 @@ import { track, trigger } from './watchEffect';
 // Removed reactive import as ref doesn't automatically make contained objects reactive
 // import { reactive } from './reactive';
 
-// Symbol for marking refs
-export const isRefSymbol = Symbol('isRef'); // Add export and Simplified symbol description
+// symbol used to identify refs internally and via isRef()
+export const isRefSymbol = Symbol('isRef');
 
 // Helper to check if a value is an object (and not null) - Keep for potential future use?
 /*
@@ -12,70 +12,71 @@ function isObject(val: any): val is object {
 }
 */
 
-// Ref interface
+// ref interface defining the shape of a ref object
 export interface Ref<T = any> {
   value: T;
-  // Type marker
+  // internal marker
   readonly [isRefSymbol]: true;
 }
 
 /**
- * Takes an inner value and returns a reactive and mutable ref object,
- * which has a single property `.value` that points to the inner value.
- * The ref tracks access and mutations to its `.value` property.
- * If the initial value is an object, it is NOT automatically made reactive.
+ * creates a reactive reference object.
+ * the object has a single `.value` property.
+ * reactivity is tracked on access and mutation of the `.value` property.
+ * if an object is passed as the initial value, the object itself is *not* made deeply reactive.
+ * only the assignment to `.value` is tracked.
  */
 export function ref<T>(value: T): Ref<T>;
-export function ref<T = undefined>(): Ref<T | undefined>; // Overload for no argument
+export function ref<T = undefined>(): Ref<T | undefined>; // overload for creating an empty ref (value will be undefined)
 export function ref<T>(value?: T): Ref<T | undefined> {
   return createRef(value);
 }
 
-// Internal function to create refs (no longer shallow distinction needed here)
+// internal factory for creating ref objects
 function createRef<T>(rawValue: T): Ref<T> {
-  // If the value is already a ref, return it directly
+  // avoid wrapping if the value is already a ref
   if (isRef(rawValue)) {
-    // Cast rawValue back to Ref<T> after type guard
-    return rawValue as Ref<T>; 
+    return rawValue as Ref<T>;
   }
 
-  // The ref holds the raw value directly
-  let value = rawValue;
+  // store the inner value
+  let _value = rawValue;
 
-  // Create the ref object with getter/setter for reactivity
+  // create the ref object with a getter/setter on `.value`
   const r = {
-    [isRefSymbol]: true, // Mark as ref
+    [isRefSymbol]: true, // mark as a ref using the symbol
     get value(): T {
-      // Track dependency on the 'value' property of this ref object
-      // Ensure 'r' is treated as the target object for tracking
+      // track dependency when `.value` is accessed
+      // `r` (the ref object itself) is the target for tracking
       track(r, 'value');
-      return value;
+      return _value;
     },
     set value(newValue: T) {
-      // Check if value actually changed (using simple comparison)
-      // For objects, this means identity change, not deep mutation.
-      if (value !== newValue) {
-        value = newValue;
-        // Trigger effects depending on the 'value' property of this ref object
-        // Ensure 'r' is treated as the target object for triggering
+      // only update and trigger if the value has actually changed
+      // this uses strict equality (===), so for objects, it checks reference equality
+      if (_value !== newValue) {
+        _value = newValue;
+        // trigger effects when `.value` is assigned a new value
+        // `r` (the ref object itself) is the target for triggering
         trigger(r, 'value');
       }
     },
-  } as Ref<T>; // Explicit cast to ensure type correctness
+  } as Ref<T>; // cast to ensure the object conforms to the Ref interface
 
   return r;
 }
 
 /**
- * Checks if a value is a ref object.
+ * checks if a value is a ref object.
  */
 export function isRef<T>(r: any): r is Ref<T> {
+  // check for the presence of the internal symbol
   return !!(r && r[isRefSymbol]);
 }
 
 /**
- * Returns the inner value if the argument is a ref, otherwise returns the
- * argument itself.
+ * returns the inner value if the argument is a ref,
+ * otherwise returns the argument itself. this is a sugar for `isRef(val) ? val.value : val`.
  */
 export function unref<T>(refValue: T | Ref<T>): T {
   return isRef(refValue) ? refValue.value : refValue;

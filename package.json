@@ -19,7 +19,8 @@
   "scripts": {
     "build": "tsc",
     "test": "bun test",
-    "test:watch": "bun test --watch"
+    "test:watch": "bun test --watch",
+    "test:bench": "bun --bun ./benchmarks/state-sync.bench.ts"
   },
   "keywords": [
     "state",

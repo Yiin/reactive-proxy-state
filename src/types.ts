@@ -1,31 +1,36 @@
-// Type definitions
+// represents a path to a nested property
 export type Path = (string | number | symbol)[];
+
+// possible types of state change actions
 export type ActionType = 
-  | 'set' 
-  | 'delete' 
-  | 'array-push' 
-  | 'array-pop' 
-  | 'array-splice' 
-  | 'array-shift' 
-  | 'array-unshift' 
-  | 'map-set' 
-  | 'map-delete' 
+  | 'set'
+  | 'delete'
+  | 'array-push'
+  | 'array-pop'
+  | 'array-splice'
+  | 'array-shift'
+  | 'array-unshift'
+  | 'map-set'
+  | 'map-delete'
   | 'map-clear'
-  | 'set-add' 
+  | 'set-add'
   | 'set-delete'
   | 'set-clear';
 
+// represents a single state change event emitted by reactive proxies
 export interface StateEvent {
   action: ActionType;
-  path: Path;
-  oldValue?: any; // For single value changes (set, pop, shift, map-delete)
-  newValue?: any; // For single value changes (set, map-set)
-  key?: any;      // For Map/Set keys or Array index
-  value?: any;    // For Set values (set-add, set-delete)
-  args?: any[];   // No longer used for array methods?
-  items?: any[];  // For array-push, array-unshift, array-splice (added items)
-  deleteCount?: number; // For array-splice
-  oldValues?: any[]; // For array-splice (deleted items)
+  path: Path; // path to the object/collection mutated (or parent for set/delete)
+
+  // --- fields relevant to specific actions ---
+  newValue?: any;  // for set, map-set
+  oldValue?: any;  // for set, delete, array-pop, array-shift, map-delete, set-delete
+  key?: any;       // for map-set, map-delete, array-splice (start index)
+  value?: any;     // for set-add, set-delete
+  items?: any[];   // for array-push, array-unshift, array-splice (items added)
+  deleteCount?: number; // for array-splice
+  oldValues?: any[];   // for array-splice (items removed)
 }
 
+// callback used to emit state change events
 export type EmitFunction = (event: StateEvent) => void; 

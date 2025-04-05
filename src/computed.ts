@@ -1,54 +1,42 @@
 import { watchEffect, track, trigger, TrackedEffect, activeEffect, cleanupEffect, setActiveEffect, WatchEffectStopHandle } from './watchEffect';
 import { Ref, isRef, isRefSymbol, unref } from './ref';
 
-// Symbol for marking computed refs
+// symbol for identifying computed refs
 const isComputedSymbol = Symbol('isComputed');
 
-// Interface for computed refs (read-only value)
+// resembles a ref but is read-only and derived from a getter
 export interface ComputedRef<T = any> extends Omit<Ref<T>, 'value'> {
   readonly value: T;
   readonly [isComputedSymbol]: true;
-  readonly [isRefSymbol]: true; // Add isRefSymbol to conform to Ref-like structure
-  // Expose the internal effect for potential advanced usage or debugging
-  // readonly effect: TrackedEffect;
+  readonly [isRefSymbol]: true; // mark as ref-like for type checks
 }
 
-// Interface for writable computed refs (if setter is provided)
-// Note: We are implementing the read-only version first.
-export interface WritableComputedRef<T> extends Ref<T> {
-  // readonly effect: ReactiveEffect<T> // Internal effect instance might be exposed
-}
+// interface for writable computed refs (not implemented yet)
+// export interface WritableComputedRef<T> extends Ref<T> { ... }
 
-// Type for the getter function
 type ComputedGetter<T> = () => T;
-
-// Type for setter function (for writable computed)
 // type ComputedSetter<T> = (v: T) => void;
 
-// Overload for getter-only computed
 export function computed<T>(getter: ComputedGetter<T>): ComputedRef<T>;
 
-// Implementation v4 - Using watchEffect with scheduler
+// implementation using a lazy watchEffect with a custom scheduler for caching
 export function computed<T>(getter: ComputedGetter<T>): ComputedRef<T> {
   let _value: T;
-  let _dirty = true; // Start dirty
-  let computedRef: ComputedRef<T>; // Placeholder
+  let _dirty = true; // flag to track if the cached value is stale
+  let computedRef: ComputedRef<T>; // placeholder to allow self-reference in scheduler
 
-  // Create a lazy effect with a scheduler
+  // create a lazy effect; scheduler intercepts triggers to mark dirty instead of recomputing immediately
   const stopHandle: WatchEffectStopHandle = watchEffect(getter, {
-    lazy: true, // Don't run the getter immediately
+    lazy: true,
     scheduler: () => {
-      // When a dependency changes, don't re-run the getter immediately.
-      // Instead, mark the computed as dirty and trigger downstream effects.
       if (!_dirty) {
         _dirty = true;
-        // Trigger effects that depend on the computed ref's value
+        // trigger effects that depend on this computed ref
         trigger(computedRef, 'value');
       }
     },
   });
 
-  // Access the internal effect runner
   const effectRunner = stopHandle.effect;
 
   computedRef = {
@@ -56,38 +44,23 @@ export function computed<T>(getter: ComputedGetter<T>): ComputedRef<T> {
     [isComputedSymbol]: true,
 
     get value(): T {
-      // 1. Track access to this computed value for any outer effects
       track(computedRef, 'value');
-
-      // 2. If dirty, run the effect manually. This will:
-      //    - Execute the getter
-      //    - Update _value (via getter's return)
-      //    - Track dependencies for the getter (handled by watchEffect internals)
-      //    - Set _dirty to false
+      // if dirty, recompute value by running the getter
       if (_dirty) {
-        // console.log('Recomputing computed value via getter access');
-        _value = effectRunner.run(); // Run the getter, update value, track deps
-        _dirty = false; // Mark as clean *after* successful run
+        _value = effectRunner.run();
+        _dirty = false; // mark as clean after successful run
       }
-      // 3. Return the (now current) value.
       return _value;
     },
     set value(newValue: T) {
-       console.warn('Computed value is read-only');
+       console.warn('computed value is read-only');
     },
-    // Expose the stop function if needed
-    // stop: stopHandle
+    // stop: stopHandle // potentially expose stop handle
   };
-
-  // Initial computation is lazy, happens on first .value access.
-  // The scheduler ensures dependency changes only mark it dirty.
 
   return computedRef;
 }
 
-/**
- * Checks if a value is a computed ref.
- */
-export function isComputed<T>(c: any): c is ComputedRef<T> /* | WritableComputedRef<T> */ {
+export function isComputed<T>(c: any): c is ComputedRef<T> {
   return !!(c && c[isComputedSymbol]);
 } 
