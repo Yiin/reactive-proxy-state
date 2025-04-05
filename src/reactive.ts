@@ -10,7 +10,7 @@ function isObject(v: any): v is object {
     return v && typeof v === 'object';
 }
 
-export function wrapState<T extends object>(obj: T, emit: EmitFunction, path: Path = [], seen: WeakMap<any, any> = globalSeen): T {
+export function reactive<T extends object>(obj: T, emit: EmitFunction, path: Path = [], seen: WeakMap<any, any> = globalSeen): T {
     if (seen.has(obj)) return seen.get(obj);
 
     function wrapValue(val: any, subPath: Path): any {
@@ -22,7 +22,7 @@ export function wrapState<T extends object>(obj: T, emit: EmitFunction, path: Pa
         if (val instanceof Set) return wrapSet(val, emit, subPath);
         if (val instanceof Date) return new Date(val.getTime());
 
-        return wrapState(val, emit, subPath, seen);
+        return reactive(val, emit, subPath, seen);
     }
 
     const proxy = new Proxy(obj, {

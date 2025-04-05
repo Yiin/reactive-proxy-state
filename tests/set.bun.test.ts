@@ -1,5 +1,5 @@
 import { expect, test, describe } from "bun:test";
-import { wrapState, StateEvent, EmitFunction } from '../src/index';
+import { reactive, StateEvent, EmitFunction } from '../src/index';
 
 // Helper function to create an event emitter that collects events
 function createEventCollector(): { events: StateEvent[], emit: EmitFunction } {
@@ -11,7 +11,7 @@ function createEventCollector(): { events: StateEvent[], emit: EmitFunction } {
 describe("Set Tests", () => {
   test("set-add emits event", () => {
     const { events, emit } = createEventCollector();
-    const state = wrapState({ set: new Set([1, 2]) }, emit);
+    const state = reactive({ set: new Set([1, 2]) }, emit);
     
     state.set.add(3);
     
@@ -22,10 +22,10 @@ describe("Set Tests", () => {
     expect(events[0].oldValue).toBe(undefined);
   });
 
-  test("wrapState handles nested sets", () => {
+  test("reactive handles nested sets", () => {
     const { events, emit } = createEventCollector();
     const innerSet = new Set([1, 2]);
-    const state = wrapState({ set: new Set([innerSet]) }, emit);
+    const state = reactive({ set: new Set([innerSet]) }, emit);
     
     state.set.values().next().value!.add(3);
     
@@ -38,7 +38,7 @@ describe("Set Tests", () => {
 
   test("set methods emit correct events", () => {
     const { events, emit } = createEventCollector();
-    const state = wrapState({ set: new Set([1, 2, 3]) }, emit);
+    const state = reactive({ set: new Set([1, 2, 3]) }, emit);
     
     state.set.delete(2);
     state.set.add(4);

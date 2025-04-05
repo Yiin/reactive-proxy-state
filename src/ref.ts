@@ -1,6 +1,6 @@
 import { track, trigger } from './watchEffect';
-// Removed wrapState import as ref doesn't automatically make contained objects reactive
-// import { wrapState } from './wrapState';
+// Removed reactive import as ref doesn't automatically make contained objects reactive
+// import { reactive } from './reactive';
 
 // Symbol for marking refs
 export const isRefSymbol = Symbol('isRef'); // Add export and Simplified symbol description

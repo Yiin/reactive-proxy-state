@@ -1,5 +1,5 @@
 import { expect, test, describe } from "bun:test";
-import { wrapState, StateEvent, EmitFunction } from '../src/index';
+import { reactive, StateEvent, EmitFunction } from '../src/index';
 
 // Helper function to create an event emitter that collects events
 function createEventCollector(): { events: StateEvent[], emit: EmitFunction } {
@@ -11,7 +11,7 @@ function createEventCollector(): { events: StateEvent[], emit: EmitFunction } {
 describe("Array Tests", () => {
   test("array push emits event", () => {
     const { events, emit } = createEventCollector();
-    const state = wrapState({ arr: [1, 2] }, emit);
+    const state = reactive({ arr: [1, 2] }, emit);
     
     state.arr.push(3);
     
@@ -22,9 +22,9 @@ describe("Array Tests", () => {
     expect(events[0].items).toEqual([3]);
   });
 
-  test("wrapState handles nested arrays", () => {
+  test("reactive handles nested arrays", () => {
     const { events, emit } = createEventCollector();
-    const state = wrapState({ arr: [[1, 2], [3, 4]] }, emit);
+    const state = reactive({ arr: [[1, 2], [3, 4]] }, emit);
     
     state.arr[0][1] = 5;
     
@@ -36,7 +36,7 @@ describe("Array Tests", () => {
 
   test("array methods emit correct events", () => {
     const { events, emit } = createEventCollector();
-    const state = wrapState({ arr: [1, 2, 3] }, emit);
+    const state = reactive({ arr: [1, 2, 3] }, emit);
     
     state.arr.splice(1, 1, 4, 5);
     

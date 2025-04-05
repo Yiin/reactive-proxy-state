@@ -1,5 +1,5 @@
 import { expect, test, describe } from "bun:test";
-import { wrapState, StateEvent, EmitFunction } from '../src/index';
+import { reactive, StateEvent, EmitFunction } from '../src/index';
 
 // Helper function to create an event emitter that collects events
 function createEventCollector(): { events: StateEvent[], emit: EmitFunction } {
@@ -9,10 +9,10 @@ function createEventCollector(): { events: StateEvent[], emit: EmitFunction } {
 }
 
 describe("Wrap State Tests", () => {
-  test("wrapState handles Date objects", () => {
+  test("reactive handles Date objects", () => {
     const { events, emit } = createEventCollector();
     const date = new Date('2024-01-01');
-    const state = wrapState({ date }, emit);
+    const state = reactive({ date }, emit);
     
     state.date = new Date('2024-01-02');
     
@@ -22,9 +22,9 @@ describe("Wrap State Tests", () => {
     expect(events[0].newValue).toEqual(new Date('2024-01-02'));
   });
 
-  test("wrapState handles deep equality check", () => {
+  test("reactive handles deep equality check", () => {
     const { events, emit } = createEventCollector();
-    const state = wrapState({ obj: { value: 42 } }, emit);
+    const state = reactive({ obj: { value: 42 } }, emit);
     
     state.obj = { value: 42 }; // Same value, should not emit
     state.obj = { value: 43 }; // Different value, should emit
@@ -35,9 +35,9 @@ describe("Wrap State Tests", () => {
     expect(events[0].newValue).toEqual({ value: 43 });
   });
 
-  test("wrapState handles nested object creation", () => {
+  test("reactive handles nested object creation", () => {
     const { events, emit } = createEventCollector();
-    const state = wrapState({ obj: {} as any }, emit);
+    const state = reactive({ obj: {} as any }, emit);
     
     state.obj.nested = { value: 42 };
     
@@ -47,9 +47,9 @@ describe("Wrap State Tests", () => {
     expect(events[0].newValue).toEqual({ value: 42 });
   });
 
-  test("wrapState handles property deletion", () => {
+  test("reactive handles property deletion", () => {
     const { events, emit } = createEventCollector();
-    const state = wrapState({ obj: { prop: 42 } as any }, emit);
+    const state = reactive({ obj: { prop: 42 } as any }, emit);
     
     delete state.obj.prop;
     
@@ -58,9 +58,9 @@ describe("Wrap State Tests", () => {
     expect(events[0].path).toEqual(['obj', 'prop']);
   });
 
-  test("wrapState handles nested property deletion", () => {
+  test("reactive handles nested property deletion", () => {
     const { events, emit } = createEventCollector();
-    const state = wrapState({
+    const state = reactive({
       nested: {
         deep: {
           value: 42
@@ -75,11 +75,11 @@ describe("Wrap State Tests", () => {
     expect(events[0].path).toEqual(['nested', 'deep', 'value']);
   });
 
-  test("wrapState handles circular references", () => {
+  test("reactive handles circular references", () => {
     const { events, emit } = createEventCollector();
     const obj: any = { value: 42 };
     obj.self = obj;
-    const state = wrapState({ obj }, emit);
+    const state = reactive({ obj }, emit);
     
     state.obj.value = 43;
     

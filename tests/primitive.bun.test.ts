@@ -1,5 +1,5 @@
 import { expect, test, describe } from "bun:test";
-import { wrapState, StateEvent, EmitFunction } from '../src/index';
+import { reactive, StateEvent, EmitFunction } from '../src/index';
 
 // Helper function to create an event emitter that collects events
 function createEventCollector(): { events: StateEvent[], emit: EmitFunction } {
@@ -11,7 +11,7 @@ function createEventCollector(): { events: StateEvent[], emit: EmitFunction } {
 describe("Primitive Tests", () => {
   test("primitive set emits event", () => {
     const { events, emit } = createEventCollector();
-    const state = wrapState({ value: 42 }, emit);
+    const state = reactive({ value: 42 }, emit);
     
     state.value = 43;
     

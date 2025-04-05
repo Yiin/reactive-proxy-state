@@ -1,5 +1,5 @@
 import { expect, test, describe } from "bun:test";
-import { wrapState, updateState, StateEvent, EmitFunction } from '../src/index';
+import { reactive, updateState, StateEvent, EmitFunction } from '../src/index';
 
 // Helper function to create an event emitter that collects events
 function createEventCollector(): { events: StateEvent[], emit: EmitFunction } {
@@ -9,9 +9,9 @@ function createEventCollector(): { events: StateEvent[], emit: EmitFunction } {
 }
 
 describe("Complex Tests", () => {
-  test("wrapState handles complex nested operations", () => {
+  test("reactive handles complex nested operations", () => {
     const { events, emit } = createEventCollector();
-    const state = wrapState({
+    const state = reactive({
       users: [
         { name: "Alice", tags: new Set(["admin"]) },
         { name: "Bob", tags: new Set(["user"]) }

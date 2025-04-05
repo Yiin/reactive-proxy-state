@@ -7,8 +7,11 @@
     "esModuleInterop": true,
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
-    "types": ["bun-types"]
+    "types": ["bun-types"],
+    "outDir": "./dist",
+    "declaration": true,
+    "rootDir": "./src"
   },
-  "include": ["src/**/*", "tests/**/*", "benchmarks/**/*"],
+  "include": ["src/**/*"],
   "exclude": ["node_modules", "dist"]
 } 
