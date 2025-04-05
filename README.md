@@ -6,6 +6,10 @@ A simple, standalone reactivity library inspired by Vue 3's reactivity system, d
 
 **Note:** This library currently only supports synchronous effect execution.
 
+## Documentation
+
+For comprehensive documentation, visit our [documentation site](https://Yiin.github.io/reactive-proxy-state/).
+
 ## Installation
 
 ```bash
