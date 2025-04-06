@@ -86,28 +86,3 @@ npm install @yiin/reactive-proxy-state
 # Using yarn
 yarn add @yiin/reactive-proxy-state
 ```
-
-## New in v1.1.0: Writable Computed Properties
-
-Now supporting writable computed properties with getter/setter functionality:
-
-```js
-const firstName = ref('John');
-const lastName = ref('Doe');
-
-const fullName = computed({
-  get: () => `${firstName.value} ${lastName.value}`,
-  set: (newValue) => {
-    const parts = newValue.split(' ');
-    firstName.value = parts[0] || '';
-    lastName.value = parts[1] || '';
-  }
-});
-
-console.log(fullName.value); // "John Doe"
-
-// Update source refs through computed property
-fullName.value = 'Jane Smith';
-console.log(firstName.value); // "Jane"
-console.log(lastName.value);  // "Smith"
-``` 
