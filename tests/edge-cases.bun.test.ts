@@ -1,5 +1,5 @@
 import { expect, test, describe } from "bun:test";
-import { reactive, updateState, StateEvent, EmitFunction } from '../src/index';
+import { reactive, updateState, StateEvent, EmitFunction, toRefs } from '../src/index';
 
 // Helper function to create an event emitter that collects events
 function createEventCollector(): { events: StateEvent[], emit: EmitFunction } {
@@ -174,5 +174,65 @@ describe("Edge Cases", () => {
     expect(events[1].action).toBe('set');
     expect(events[1].path[0]).toBe('value');
     expect(events[1].newValue).toBe(2);
+  });
+
+  test("destructuring reactive objects breaks reactivity", () => {
+    const { events, emit } = createEventCollector();
+    const state = reactive({ count: 0, nested: { value: 42 } }, emit);
+    
+    // Destructure properties
+    const { count, nested } = state;
+    const { value } = nested;
+    
+    // Updating the destructured properties shouldn't emit events
+    count + 1; // This is just to use the variable to avoid lint warnings
+    nested.value = 100;
+    expect(events.length).toBe(1);
+    expect(events[0].path).toEqual(['nested', 'value']);
+    expect(events[0].newValue).toBe(100);
+    
+    // Reset events
+    events.length = 0;
+    
+    // Direct mutation of destructured primitive doesn't affect original
+    // and won't trigger reactivity
+    const newCount = count + 1;
+    expect(newCount).toBe(1);
+    expect(state.count).toBe(0);
+    expect(events.length).toBe(0);
+    
+    // Updating through the original reactive object emits events
+    state.count = 1;
+    expect(events.length).toBe(1);
+    expect(events[0].path).toEqual(['count']);
+    expect(events[0].newValue).toBe(1);
+  });
+
+  test("toRefs maintains reactivity when destructuring", () => {
+    const { events, emit } = createEventCollector();
+    const state = reactive({ count: 0, nested: { value: 42 } }, emit);
+    
+    // Use toRefs to destructure while maintaining reactivity
+    const { count, nested } = toRefs(state);
+    
+    // Reset events
+    events.length = 0;
+    
+    // Update through the ref - should trigger events
+    count.value++;
+    expect(events.length).toBe(1);
+    expect(events[0].path).toEqual(['count']);
+    expect(events[0].newValue).toBe(1);
+    expect(state.count).toBe(1);
+    
+    // Reset events
+    events.length = 0;
+    
+    // Update nested ref - should trigger events
+    nested.value.value = 100;
+    expect(events.length).toBe(1);
+    expect(events[0].path).toEqual(['nested', 'value']);
+    expect(events[0].newValue).toBe(100);
+    expect(state.nested.value).toBe(100);
   });
 }); 

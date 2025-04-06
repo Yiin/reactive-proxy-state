@@ -180,7 +180,27 @@ user.name = 'Bob';
 ## Edge Cases and Limitations
 
 - The reactivity system is **synchronous** - effects run immediately after mutations
-- Destructuring reactive objects breaks reactivity - retain the object structure or use `toRefs`
+- Destructuring reactive objects has the following reactivity implications:
+  - Primitive values (numbers, strings, booleans): Destructuring completely breaks reactivity because you get a copy of the value, not a reactive connection
+    ```js
+    const state = reactive({ count: 0 });
+    const { count } = state; // count is now just a number (0)
+    count++; // This won't affect state.count
+    ```
+  - Objects and arrays: Partial reactivity is maintained - you can modify properties of the destructured object and maintain reactivity, but replacing the object itself won't be tracked
+    ```js
+    const state = reactive({ nested: { value: 42 } });
+    const { nested } = state; 
+    nested.value = 100; // This still triggers reactivity
+    nested = { value: 200 }; // This won't affect state.nested
+    ```
+  - Solution: Use `toRefs` to maintain full reactivity when destructuring
+    ```js
+    const state = reactive({ count: 0, nested: { value: 42 } });
+    const { count, nested } = toRefs(state);
+    count.value++; // This updates state.count reactively
+    nested.value = { value: 100 }; // This updates state.nested reactively
+    ```
 - Object property addition/deletion is tracked, but requires the object to be created with `reactive()`
 - Direct mutations to nested objects inside refs won't trigger effects - use `reactive` for deep reactivity
 - Modifying array length directly or using non-standard array methods might have unexpected behavior
