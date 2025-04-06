@@ -4,6 +4,7 @@ import { defineConfig } from 'vitepress'
 export default defineConfig({
   title: "Reactive Proxy State",
   description: "A simple, standalone reactivity library inspired by Vue 3's reactivity system",
+  base: '/reactive-proxy-state/', // Base path for GitHub Pages
   themeConfig: {
     // https://vitepress.dev/reference/default-theme-config
     nav: [
