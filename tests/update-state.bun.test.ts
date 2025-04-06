@@ -54,4 +54,54 @@ describe("Update State Tests", () => {
     expect(Array.from(obj.set)).toEqual([2, 3]);
     expect(obj.arr).toEqual([2, 3, 4]);
   });
+
+  test("updateState handles array-pop", () => {
+    const state = { list: [1, 2, 3] };
+    const event: StateEvent = { action: 'array-pop', path: ['list'] };
+    updateState(state, event);
+    expect(state.list).toEqual([1, 2]);
+  });
+
+  test("updateState handles array-shift", () => {
+    const state = { list: [1, 2, 3] };
+    const event: StateEvent = { action: 'array-shift', path: ['list'] };
+    updateState(state, event);
+    expect(state.list).toEqual([2, 3]);
+  });
+
+  test("updateState handles array-unshift", () => {
+    const state = { list: [1, 2, 3] };
+    const event: StateEvent = { action: 'array-unshift', path: ['list'], items: [0, -1] };
+    updateState(state, event);
+    expect(state.list).toEqual([0, -1, 1, 2, 3]);
+  });
+
+  test("updateState handles map-set (direct action)", () => {
+    const state = { data: new Map([["a", 1]]) };
+    const event: StateEvent = { action: 'map-set', path: ['data'], key: "b", newValue: 2 };
+    updateState(state, event);
+    expect(state.data.get("b")).toBe(2);
+  });
+
+  test("updateState handles map-delete", () => {
+    const state = { data: new Map([["a", 1], ["b", 2]]) };
+    const event: StateEvent = { action: 'map-delete', path: ['data'], key: "a" };
+    updateState(state, event);
+    expect(state.data.has("a")).toBe(false);
+    expect(state.data.size).toBe(1);
+  });
+
+  test("updateState handles map-clear", () => {
+    const state = { data: new Map([["a", 1], ["b", 2]]) };
+    const event: StateEvent = { action: 'map-clear', path: ['data'] };
+    updateState(state, event);
+    expect(state.data.size).toBe(0);
+  });
+
+  test("updateState handles set-clear", () => {
+    const state = { items: new Set([1, 2, 3]) };
+    const event: StateEvent = { action: 'set-clear', path: ['items'] };
+    updateState(state, event);
+    expect(state.items.size).toBe(0);
+  });
 }); 
