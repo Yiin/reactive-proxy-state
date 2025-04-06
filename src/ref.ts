@@ -82,6 +82,41 @@ export function unref<T>(refValue: T | Ref<T>): T {
   return isRef(refValue) ? refValue.value : refValue;
 }
 
+/**
+ * Converts an object's properties to reactive refs.
+ * This is useful when you want to destructure reactive objects but maintain reactivity.
+ * @param object The reactive object to convert to refs
+ * @returns An object with the same properties, where each property is a ref connected to the original object
+ */
+export function toRefs<T extends object>(object: T): { [K in keyof T]: Ref<T[K]> } {
+  const result: any = {};
+
+  for (const key in object) {
+    result[key] = toRef(object, key);
+  }
+
+  return result;
+}
+
+/**
+ * Creates a ref that is connected to a property on an object.
+ * @param object The source object
+ * @param key The property key
+ * @returns A ref connected to the object's property
+ */
+export function toRef<T extends object, K extends keyof T>(object: T, key: K): Ref<T[K]> {
+  return {
+    [isRefSymbol]: true,
+    get value() {
+      track(this, 'value');
+      return object[key];
+    },
+    set value(newVal) {
+      object[key] = newVal;
+    }
+  } as Ref<T[K]>;
+}
+
 // Basic triggerRef function (may need refinement if used)
 /*
 export function triggerRef(ref: Ref<any>): void {
