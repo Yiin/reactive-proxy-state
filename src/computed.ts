@@ -1,4 +1,4 @@
-import { watchEffect, track, trigger, TrackedEffect, activeEffect, cleanupEffect, setActiveEffect, WatchEffectStopHandle } from './watchEffect';
+import { watchEffect, track, trigger, TrackedEffect, activeEffect, cleanupEffect, setActiveEffect, WatchEffectStopHandle } from './watch-effect';
 import { Ref, isRef, isRefSymbol, unref } from './ref';
 
 // symbol for identifying computed refs

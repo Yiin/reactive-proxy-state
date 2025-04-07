@@ -1,8 +1,8 @@
 import { deepEqual, getPathConcat, setPathConcat, wrapperCache } from './utils';
 import { reactive } from './reactive';
-import { wrapArray } from './wrapArray';
-import { wrapSet } from './wrapSet';
-import { track, trigger } from './watchEffect';
+import { wrapArray } from './wrap-array';
+import { wrapSet } from './wrap-set';
+import { track, trigger } from './watch-effect';
 export function wrapMap(map, emit, path) {
     // reuse existing proxy if available for performance
     const cachedProxy = wrapperCache.get(map);

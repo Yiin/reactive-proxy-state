@@ -1,4 +1,4 @@
-import { watchEffect, track, trigger } from './watchEffect';
+import { watchEffect, track, trigger } from './watch-effect';
 import { isRefSymbol } from './ref';
 // symbol for identifying computed refs
 const isComputedSymbol = Symbol('isComputed');

@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'bun:test';
 // Import directly from source files
 import { ref, isRef, unref } from '../src/ref'; 
-import { watchEffect } from '../src/watchEffect';
+import { watchEffect } from '../src/watch-effect';
 
 // Simple mock function implementation with better typing
 interface MockFn<T = any> {

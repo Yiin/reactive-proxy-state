@@ -1,4 +1,4 @@
-import { watchEffect } from './watchEffect';
+import { watchEffect } from './watch-effect';
 import { traverse, deepClone } from './utils';
 /**
  * watches a reactive source (getter function or reactive object/ref)

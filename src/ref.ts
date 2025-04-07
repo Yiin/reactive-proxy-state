@@ -1,4 +1,4 @@
-import { track, trigger } from './watchEffect';
+import { track, trigger } from './watch-effect';
 // Removed reactive import as ref doesn't automatically make contained objects reactive
 // import { reactive } from './reactive';
 

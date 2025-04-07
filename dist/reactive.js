@@ -1,8 +1,8 @@
 import { deepEqual, globalSeen, getPathConcat, setPathConcat } from './utils';
-import { wrapArray } from './wrapArray';
-import { wrapMap } from './wrapMap';
-import { wrapSet } from './wrapSet';
-import { track, trigger } from './watchEffect';
+import { wrapArray } from './wrap-array';
+import { wrapMap } from './wrap-map';
+import { wrapSet } from './wrap-set';
+import { track, trigger } from './watch-effect';
 // avoid repeated typeof checks
 function isObject(v) {
     return v && typeof v === 'object';

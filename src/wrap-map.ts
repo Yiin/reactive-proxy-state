@@ -1,21 +1,34 @@
 import { EmitFunction, Path, StateEvent } from './types';
 import { deepEqual, getPathConcat, setPathConcat, wrapperCache } from './utils';
 import { reactive } from './reactive';
-import { wrapArray } from './wrapArray';
-import { wrapSet } from './wrapSet';
-import { track, trigger } from './watchEffect';
+import { wrapArray } from './wrap-array';
+import { wrapSet } from './wrap-set';
+import { track, trigger } from './watch-effect';
 
 export function wrapMap<K, V>(map: Map<K, V>, emit: EmitFunction, path: Path): Map<K, V> {
     // reuse existing proxy if available for performance
     const cachedProxy = wrapperCache.get(map);
     if (cachedProxy) return cachedProxy as Map<K, V>;
 
+    // cache for wrapped methods to avoid re-creating them on each call
+    const methodCache: { [key: string | symbol]: Function } = {};
+
     const proxy = new Proxy(map, {
         get(target: Map<K, V>, prop: string | symbol, receiver: any): any {
             track(target, prop);
 
+            // iteration methods need to track the iterator symbol on every access
+            // to re-establish dependency after effect cleanup, even when cached
+            if (prop === Symbol.iterator || prop === 'entries' || prop === 'values' || prop === 'keys' || prop === 'forEach') {
+                track(target, Symbol.iterator);
+            }
+
+            if (methodCache[prop]) {
+                return methodCache[prop];
+            }
+
             if (prop === 'set') {
-                return function (key: K, value: V): Map<K, V> {
+                methodCache[prop] = function (key: K, value: V): Map<K, V> {
                     const existed = target.has(key);
                     const oldValue = target.get(key);
                     const oldSize = target.size;
@@ -56,9 +69,10 @@ export function wrapMap<K, V>(map: Map<K, V>, emit: EmitFunction, path: Path): M
 
                     return receiver;
                 };
+                return methodCache[prop];
             }
             if (prop === 'delete') {
-                return function (key: K): boolean {
+                methodCache[prop] = function (key: K): boolean {
                     const existed = target.has(key);
                     if (!existed) return false;
 
@@ -88,13 +102,15 @@ export function wrapMap<K, V>(map: Map<K, V>, emit: EmitFunction, path: Path): M
                         if (oldSize !== newSize) {
                             trigger(target, 'size');
                         }
+                        trigger(target, String(key));
                     }
 
                     return result;
                 };
+                 return methodCache[prop];
             }
             if (prop === 'clear') {
-                return function (): void {
+                methodCache[prop] = function (): void {
                     const oldSize = target.size;
                     if (oldSize === 0) return;
 
@@ -113,10 +129,11 @@ export function wrapMap<K, V>(map: Map<K, V>, emit: EmitFunction, path: Path): M
                        trigger(target, 'size');
                     }
                 };
+                 return methodCache[prop];
             }
             if (prop === 'get') {
                 // return a function that tracks the specific key only when called
-                return function (key: K): any {
+                methodCache[prop] = function (key: K): any {
                     track(target, String(key));
                     const value = target.get(key);
 
@@ -141,14 +158,16 @@ export function wrapMap<K, V>(map: Map<K, V>, emit: EmitFunction, path: Path): M
                     if (value instanceof Date) return new Date(value.getTime()); // dates are not proxied, return a copy
                     return reactive(value, emit, newPath);
                 };
+                 return methodCache[prop];
             }
             if (prop === 'has') {
                 track(target, Symbol.iterator);
-                return function(key: K): boolean {
+                 methodCache[prop] = function(key: K): boolean {
                     // track the specific key only when 'has' is called
                     track(target, String(key));
                     return target.has(key);
-                }.bind(target);
+                }.bind(target); // bind is still okay here, doesn't interfere with caching
+                 return methodCache[prop];
             }
 
             // handle iteration methods
@@ -158,17 +177,18 @@ export function wrapMap<K, V>(map: Map<K, V>, emit: EmitFunction, path: Path): M
 
                 // return custom iterators/foreach that wrap values during iteration
                 if (prop === 'forEach') {
-                     return (callbackfn: (value: V, key: K, map: Map<K, V>) => void, thisArg?: any): void => {
+                     methodCache[prop] = (callbackfn: (value: V, key: K, map: Map<K, V>) => void, thisArg?: any): void => {
                          // use the proxied .entries() to ensure values passed to callback are wrapped and tracked
                          const entriesIterator = proxy.entries();
                          for (const [key, value] of entriesIterator) {
                              callbackfn.call(thisArg, value, key, proxy);
                          }
                      }
+                     return methodCache[prop];
                 }
 
                 // handle symbol.iterator, entries, values, keys by creating generator functions
-                return function* (...args: any[]) {
+                 methodCache[prop] = function* (...args: any[]) {
                     const iterator = originalMethod.apply(target, args);
 
                     for (const entry of iterator) {
@@ -228,6 +248,7 @@ export function wrapMap<K, V>(map: Map<K, V>, emit: EmitFunction, path: Path): M
                         }
                     }
                 };
+                 return methodCache[prop];
             }
 
             if (prop === 'size') {
@@ -236,6 +257,10 @@ export function wrapMap<K, V>(map: Map<K, V>, emit: EmitFunction, path: Path): M
             }
 
             const value = Reflect.get(target, prop, receiver);
+            // Bind plain functions accessed directly (e.g., toString)
+            if (typeof value === 'function') {
+                 return value.bind(target);
+            }
             return value;
         }
     });

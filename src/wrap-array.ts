@@ -1,9 +1,9 @@
 import { EmitFunction, Path, StateEvent } from './types';
 import { deepEqual, getPathConcat, setPathConcat, wrapperCache } from './utils';
 import { reactive } from './reactive';
-import { wrapMap } from './wrapMap';
-import { wrapSet } from './wrapSet';
-import { track, trigger } from './watchEffect';
+import { wrapMap } from './wrap-map';
+import { wrapSet } from './wrap-set';
+import { track, trigger } from './watch-effect';
 
 // avoid repeated typeof checks
 function isObject(v: any): v is object {
@@ -15,15 +15,22 @@ export function wrapArray<T extends any[]>(arr: T, emit: EmitFunction, path: Pat
     const cachedProxy = wrapperCache.get(arr);
     if (cachedProxy) return cachedProxy as T;
 
+    // cache for wrapped methods to avoid re-creating them on each call
+    const methodCache: { [key: string | symbol]: Function } = {};
+
     const proxy = new Proxy(arr, {
         get(target: T, prop: string | symbol, receiver: any): any {
             track(target, prop);
+
+            if (methodCache[prop]) {
+                return methodCache[prop];
+            }
 
             // handle specific array mutation methods that require custom logic and event emission
             switch (prop) {
                 case 'push':
                     track(target, 'length');
-                    return function(...items: any[]): number {
+                    methodCache[prop] = function(...items: any[]): number {
                         const oldLength = target.length;
                         const result = target.push(...items);
                         const newLength = target.length;
@@ -42,9 +49,10 @@ export function wrapArray<T extends any[]>(arr: T, emit: EmitFunction, path: Pat
                         }
                         return result;
                     };
+                    return methodCache[prop];
                 case 'pop':
                     track(target, 'length');
-                    return function(): any {
+                     methodCache[prop] = function(): any {
                         if (target.length === 0) return undefined;
                         const oldLength = target.length;
                         const poppedIndex = oldLength - 1;
@@ -64,9 +72,10 @@ export function wrapArray<T extends any[]>(arr: T, emit: EmitFunction, path: Pat
                         }
                         return result;
                     };
+                    return methodCache[prop];
                 case 'shift':
                     track(target, 'length');
-                    return function(): any {
+                    methodCache[prop] = function(): any {
                         if (target.length === 0) return undefined;
                         const oldLength = target.length;
                         const oldValue = target[0];
@@ -85,9 +94,10 @@ export function wrapArray<T extends any[]>(arr: T, emit: EmitFunction, path: Pat
                         }
                         return result;
                     };
+                    return methodCache[prop];
                  case 'unshift':
                     track(target, 'length');
-                    return function(...items: any[]): number {
+                    methodCache[prop] = function(...items: any[]): number {
                         const oldLength = target.length;
                         const result = target.unshift(...items);
                         const newLength = target.length;
@@ -106,9 +116,10 @@ export function wrapArray<T extends any[]>(arr: T, emit: EmitFunction, path: Pat
                          }
                         return result;
                     };
+                    return methodCache[prop];
                 case 'splice':
                     track(target, 'length');
-                    return function(start: number, deleteCount?: number, ...items: any[]): any[] {
+                    methodCache[prop] = function(start: number, deleteCount?: number, ...items: any[]): any[] {
                         const oldLength = target.length;
                         const actualStart = start < 0 ? Math.max(target.length + start, 0) : Math.min(start, target.length);
                         const deleteCountNum = deleteCount === undefined ? target.length - actualStart : Number(deleteCount);
@@ -135,6 +146,7 @@ export function wrapArray<T extends any[]>(arr: T, emit: EmitFunction, path: Pat
                         }
                         return result;
                     };
+                    return methodCache[prop];
                 // handle methods that rely on iteration state
                 case Symbol.iterator:
                 case 'values':

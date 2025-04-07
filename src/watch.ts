@@ -1,6 +1,6 @@
 import { StateEvent, Path, EmitFunction } from './types';
 import { deepEqual } from './utils';
-import { watchEffect } from './watchEffect';
+import { watchEffect } from './watch-effect';
 import { traverse, deepClone } from './utils';
 
 // type for the callback function executed on change

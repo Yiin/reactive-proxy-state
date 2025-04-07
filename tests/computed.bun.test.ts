@@ -1,7 +1,7 @@
 import { describe, it, expect, mock } from 'bun:test';
 import { ref, isRef } from '../src/ref';
 import { computed, isComputed } from '../src/computed';
-import { watchEffect } from '../src/watchEffect';
+import { watchEffect } from '../src/watch-effect';
 
 // Simple mock function implementation (copied from ref.test.ts)
 interface MockFn<T = any> {
