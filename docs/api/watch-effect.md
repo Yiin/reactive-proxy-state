@@ -13,21 +13,18 @@ function watchEffect(
 
 ## Parameters
 
-- `effect`: A function that will be run immediately and re-run when its dependencies change.
+- `effect`: A function that will be run immediately and re-run when its dependencies change. This function receives an optional `onCleanup` function as its first argument (see example below).
 - `options`: Optional settings object with the following properties:
   - `onTrack?`: Debug callback for when a reactive property is tracked
   - `onTrigger?`: Debug callback for when the effect is triggered
-  - `scheduler?`: Custom scheduler function to control when the effect is re-run
-  - `lazy?`: If true, effect is not run immediately (internal option, not typically used directly)
 
 ## Return Value
 
-Returns a stop handle with a method to stop the watcher from running:
+Returns a stop handle function that can be called to stop the watcher:
 
 ```ts
 interface WatchEffectStopHandle {
   stop(): void;
-  effect: TrackedEffect;
 }
 ```
 
@@ -85,21 +82,22 @@ user.age = 31;
 
 ### Cleanup on Re-execution
 
-You can register a cleanup function by using `onCleanup` inside the effect. This function will be called before the effect runs again or when it's stopped:
+The `effect` function receives an `onCleanup` function as its first argument. You can call this to register a cleanup callback that will be executed right before the effect is run again, or when the watcher is stopped.
 
 ```ts
 import { ref, watchEffect } from '@yiin/reactive-proxy-state';
-import { onCleanup } from '@yiin/reactive-proxy-state/watch';
+// No import needed for onCleanup
 
 const id = ref(0);
 
-watchEffect((onCleanup) => {
+watchEffect((onCleanup) => { // onCleanup is passed as an argument
   const currentId = id.value;
+  console.log(`Effect running for id: ${currentId}`);
   const timer = setTimeout(() => {
     console.log(`Timer ${currentId} fired`);
   }, 1000);
-  
-  // Register a cleanup function that will be called before re-execution 
+
+  // Register a cleanup function that will be called before re-execution
   // or when the effect is stopped
   onCleanup(() => {
     clearTimeout(timer);
@@ -112,8 +110,13 @@ setTimeout(() => {
   id.value++;
 }, 500);
 
-// Output after 500ms: Timer 0 cleared
-// Output after 1500ms: Timer 1 fired
+// Output:
+// Effect running for id: 0
+// (after 500ms)
+// Timer 0 cleared
+// Effect running for id: 1
+// (after 1500ms)
+// Timer 1 fired
 ```
 
 ### Debugging with onTrack and onTrigger
@@ -140,54 +143,6 @@ watchEffect(
 );
 
 state.count++;
-```
-
-### Custom Scheduler
-
-For advanced use cases, you can provide a custom scheduler to control when the effect is re-run:
-
-```ts
-import { reactive, watchEffect } from '@yiin/reactive-proxy-state';
-
-const state = reactive({ count: 0 });
-
-// Queue to batch multiple updates together
-const queueEffectRuns = (() => {
-  const queue = new Set<() => void>();
-  let isScheduled = false;
-  
-  return (fn: () => void) => {
-    queue.add(fn);
-    
-    if (!isScheduled) {
-      isScheduled = true;
-      Promise.resolve().then(() => {
-        // Run all queued effects in one batch
-        queue.forEach(fn => fn());
-        queue.clear();
-        isScheduled = false;
-      });
-    }
-  };
-})();
-
-watchEffect(
-  () => {
-    console.log(`Count is: ${state.count}`);
-  },
-  {
-    scheduler: queueEffectRuns
-  }
-);
-// Output: Count is: 0
-
-// These updates will be batched together
-state.count++;
-state.count++;
-state.count++;
-
-// Only one effect run will happen asynchronously
-// Output (in next microtask): Count is: 3
 ```
 
 ## Stopping the Watcher

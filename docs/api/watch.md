@@ -26,13 +26,12 @@ type WatchSource<T> = Ref<T> | (() => T)
 ## Parameters
 
 - `source`: A reactive reference or a getter function that returns a value to watch.
-- `callback`: A function that receives the new value and old value of the watched source(s).
-- `options`: Optional configuration:
+- `callback`: A function that receives the new value(s), old value(s), and an optional `onCleanup` function (see Cleanup Function example below).
+- `options`: Optional configuration object:
   - `immediate?: boolean`: If `true`, the callback is called immediately with the current value. Default: `false`.
   - `deep?: boolean`: If `true`, performs deep traversal on objects for dependency tracking and deep comparisons. Default: `true`.
   - `onTrack?`: Debug callback for when dependencies are tracked.
   - `onTrigger?`: Debug callback for when the watcher is triggered.
-  - `scheduler?`: Custom scheduler function to control when the callback is called.
 
 ## Return Value
 
@@ -98,6 +97,9 @@ const user = reactive({
 // By default, deep: true - so it watches nested properties
 watch(user, (newUser, oldUser) => {
   console.log('User changed:', newUser, oldUser);
+  // Note: When watching a reactive object deeply,
+  // newUser and oldUser will be the same object reference.
+  // The callback triggers because a mutation occurred *within* the object.
 });
 
 user.address.city = 'Boston';
@@ -188,21 +190,30 @@ watch(
   () => state.items,
   (newItems, oldItems) => {
     console.log('Items changed:', newItems, oldItems);
-  }
+    // Note: With deep: true (default), this triggers on internal mutations (like push).
+    // In that case, newItems and oldItems will be the same Array instance.
+  },
+  { deep: true } // Explicitly showing default for clarity
 );
 
 watch(
   () => state.preferences,
   (newPrefs, oldPrefs) => {
     console.log('Preferences changed:', newPrefs, oldPrefs);
-  }
+    // Similarly, for Maps, newPrefs and oldPrefs will be the same Map instance
+    // when triggered by internal changes (like set, delete).
+  },
+  { deep: true }
 );
 
 watch(
   () => state.activeIds,
   (newIds, oldIds) => {
     console.log('Active IDs changed:', newIds, oldIds);
-  }
+    // And for Sets, newIds and oldIds will be the same Set instance
+    // when triggered by internal changes (like add, delete).
+  },
+  { deep: true }
 );
 
 state.items.push('orange');        // Triggers items watcher
@@ -233,33 +244,55 @@ count.value = 2;
 
 ### Cleanup Function
 
-You can register a cleanup function when using `watch` to clean up resources or cancel async operations when dependencies change:
+The watch `callback` receives an `onCleanup` function as its third argument. This can be used to register a function that will be called when the watched source changes again, or when the watcher is stopped. This is useful for cleaning up side effects, like cancelling pending asynchronous requests.
 
 ```ts
 import { ref, watch } from '@yiin/reactive-proxy-state';
 
 const id = ref(1);
 
-watch(id, (newId, oldId, onCleanup) => {
+const stop = watch(id, async (newId, oldId, onCleanup) => {
   const controller = new AbortController();
   const { signal } = controller;
 
-  fetch(`https://api.example.com/data/${newId}`, { signal })
-    .then(resp => resp.json())
-    .then(data => {
-      console.log(`Data for ID ${newId}:`, data);
-    });
-
-  // This will be called before the callback runs again
-  // or when the watcher is stopped
+  // Register the cleanup function to abort the request if
+  // id changes again before this fetch completes, or if the watch stops.
   onCleanup(() => {
+    console.log(`Cleanup: Aborting fetch for ID ${newId}`);
     controller.abort();
-    console.log(`Cancelled fetch for ID ${newId}`);
   });
+
+  try {
+    console.log(`Fetching data for ID ${newId}...`);
+    const response = await fetch(`https://jsonplaceholder.typicode.com/todos/${newId}`, { signal });
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`);
+    }
+    const data = await response.json();
+    console.log(`Data for ID ${newId}:`, data.title);
+  } catch (error: any) {
+    if (error.name === 'AbortError') {
+      console.log(`Fetch aborted for ID ${newId}`);
+    } else {
+      console.error(`Fetch failed for ID ${newId}:`, error);
+    }
+  }
 });
 
-// After this change, the previous fetch will be aborted
-id.value = 2;
+// Trigger the first fetch
+// Output: Fetching data for ID 1...
+// Output: Data for ID 1: <todo title>
+
+// Change the ID quickly to trigger cleanup and a new fetch
+setTimeout(() => {
+  id.value = 2;
+  // Output: Cleanup: Aborting fetch for ID 1
+  // Output: Fetching data for ID 2...
+  // Output: Data for ID 2: <todo title>
+}, 100); // Adjust timing if needed
+
+// Later, stop the watcher (which also triggers cleanup if a fetch was pending)
+// setTimeout(stop, 500);
 ```
 
 ## When to Use watch vs. watchEffect
