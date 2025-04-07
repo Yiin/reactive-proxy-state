@@ -16,12 +16,8 @@ Returns a reactive reference object with a `.value` property that contains the i
 ## Type Declarations
 
 ```ts
-// Symbol used to identify ref objects
-const isRefSymbol: unique symbol
-
 interface Ref<T = any> {
   value: T
-  [isRefSymbol]: true
 }
 ```
 
@@ -63,22 +59,6 @@ const settings = ref(new Map([['theme', 'dark']]));
 // Null/undefined
 const nullValue = ref(null);
 const undefinedValue = ref();  // defaults to undefined
-```
-
-### Auto-unwrapping in Templates (when used with UI frameworks)
-
-While not directly part of this library, when used with frameworks like Vue, refs are generally auto-unwrapped in templates:
-
-```html
-<!-- In a Vue template, .value is automatically unwrapped -->
-<template>
-  <div>{{ message }}</div>
-</template>
-
-<script setup>
-import { ref } from '@yiin/reactive-proxy-state';
-const message = ref('Hello');
-</script>
 ```
 
 ### Reactivity with Object Values

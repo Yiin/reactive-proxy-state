@@ -2,7 +2,7 @@
 
 [![npm version](https://badge.fury.io/js/%40yiin%2Freactive-proxy-state.svg)](https://badge.fury.io/js/%40yiin%2Freactive-proxy-state) [![Tests](https://github.com/Yiin/reactive-proxy-state/actions/workflows/test.yml/badge.svg)](https://github.com/Yiin/reactive-proxy-state/actions/workflows/test.yml) [![codecov](https://codecov.io/gh/Yiin/reactive-proxy-state/branch/main/graph/badge.svg)](https://codecov.io/gh/Yiin/reactive-proxy-state)
 
-A simple, standalone reactivity library inspired by Vue 3's reactivity system, designed for use outside of Vue, particularly in server-side contexts or for data synchronization tasks. It uses JavaScript Proxies to track changes in plain objects, Arrays, Maps, and Sets.
+A simple, standalone reactivity library inspired by Vue 3's reactivity system, designed for use outside of Vue, particularly in server-side contexts or for data synchronization tasks. It uses JavaScript Proxies to track changes in plain objects, Arrays, Maps, and Sets. Notably, it includes mechanisms for serializing and applying state changes (see [`updateState`](./docs/api/update-state.md)), enabling use cases like state replication between different environments (e.g., server-client, main thread-worker), a feature not typically found in core reactivity libraries.
 
 **Note:** This library currently only supports synchronous effect execution.
 

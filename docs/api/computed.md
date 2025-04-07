@@ -26,20 +26,14 @@ function computed<T>(options: {
 ## Type Declarations
 
 ```ts
-// symbol for identifying computed refs
-const isComputedSymbol: unique symbol
-
 // resembles a ref but is read-only and derived from a getter
 interface ComputedRef<T = any> extends Omit<Ref<T>, 'value'> {
   readonly value: T;
-  readonly [isComputedSymbol]: true;
-  readonly [isRefSymbol]: true; // mark as ref-like for type checks
 }
 
 // interface for writable computed refs
 interface WritableComputedRef<T> extends Ref<T> {
-  readonly [isComputedSymbol]: true;
-  readonly [isRefSymbol]: true;
+  // Writable computed refs are also refs, but derived.
 }
 ```
 

@@ -20,11 +20,15 @@ interface StateEvent {
   // Determines the type of operation to perform
   action: 'set' | 'delete' | 'set-add' | 'set-delete' | 'map-set' | 'array-splice';
   
-  // Path to the target property as an array of keys/indices
+  // Path to the target property or collection as an array of keys/indices
   path: (string | number)[];
   
-  // For 'set' and 'map-set' actions
+  // For 'set' action on regular properties
   newValue?: any;
+  
+  // For 'map-set' action
+  key?: string | number | symbol; // The key being set in the Map
+  newValue?: any;            // The value for the key in the Map
   
   // For 'set-add', 'set-delete' actions
   value?: any;
@@ -88,14 +92,15 @@ const state = {
   preferences: new Map([['theme', 'light']])
 };
 
-// Add a new key-value pair to the Map
+// Add a new key-value pair to the Map using 'map-set'
 updateState(state, {
-  action: 'set',
-  path: ['preferences', 'language'],
-  newValue: 'en'
+  action: 'map-set',
+  path: ['preferences'], // Path to the Map itself
+  key: 'language',      // The key to set
+  newValue: 'en'        // The value for the key
 });
 
-// Delete a key from the Map
+// Delete a key from the Map (using 'delete' seems correct)
 updateState(state, {
   action: 'delete',
   path: ['preferences', 'theme']
@@ -140,19 +145,22 @@ const state = {
   items: ['apple', 'banana', 'orange']
 };
 
-// Add an element at a specific index
+// Add 'pear' at the end using array-splice
 updateState(state, {
-  action: 'set',
-  path: ['items', '3'],
-  newValue: 'pear'
+  action: 'array-splice',
+  path: ['items'],   // Path to the array
+  key: 3,           // Start index (end of current array)
+  deleteCount: 0,   // Don't delete any elements
+  items: ['pear']   // Add 'pear'
 });
+// state.items is now ['apple', 'banana', 'orange', 'pear']
 
-// Remove elements using array-splice
+// Remove 'apple' using array-splice
 updateState(state, {
   action: 'array-splice',
   path: ['items'],
-  key: 0, // Start at index 0
-  deleteCount: 1 // Remove 1 element
+  key: 0,           // Start index
+  deleteCount: 1   // Remove 1 element
 });
 
 console.log(state.items); // ['banana', 'orange', 'pear']

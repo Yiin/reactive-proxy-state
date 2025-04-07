@@ -8,21 +8,17 @@ Creates a reactive proxy around an object, making it reactive. Accessing propert
 // Basic usage
 function reactive<T extends object>(target: T): T
 
-// With event emitter
+// With event emitter for state synchronization
 function reactive<T extends object>(
-  target: T, 
-  emit: (event: StateEvent) => void, 
-  path?: (string | number)[], 
-  seen?: WeakMap<any, any>
+  target: T,
+  emit: (event: StateEvent) => void
 ): T
 ```
 
 ## Parameters
 
 - `target`: The object to make reactive.
-- `emit`: A callback function that receives state change events when the reactive object is mutated.
-- `path`: (Internal) The current property path for nested objects.
-- `seen`: (Internal) WeakMap to track circular references.
+- `emit`: An optional callback function that receives state change events (`StateEvent`) whenever the reactive object or its nested properties/collections are mutated. This is key for state replication.
 
 ## Return Value
 
@@ -31,22 +27,16 @@ Returns a proxy that intercepts operations on the original object. The proxy beh
 ## Type Declarations
 
 ```ts
-// Symbol used to identify reactive objects
-const isReactiveSymbol: unique symbol
-
-// Type guard function to check if an object is reactive
-function isReactive(value: unknown): boolean
-
 // Event emitted when state changes
 interface StateEvent {
   action: 'set' | 'delete' | 'set-add' | 'set-delete' | 'map-set' | 'array-splice';
-  path: (string | number)[];
-  newValue?: any;
-  oldValue?: any;  // Only available for 'set' and 'delete' actions
-  value?: any;
-  key?: number;
-  deleteCount?: number;
-  items?: any[];
+  path: (string | number)[]; // Path to the target property/collection
+  newValue?: any; // Value for 'set', 'map-set'
+  oldValue?: any; // Previous value (if applicable)
+  value?: any;    // Value for 'set-add', 'set-delete'
+  key?: number;   // Index/key for 'map-set', 'array-splice'
+  deleteCount?: number; // For 'array-splice'
+  items?: any[];  // For 'array-splice'
 }
 
 // Emit function type
@@ -150,56 +140,82 @@ console.log(secondaryState.user.name); // 'Bob'
 
 ### State Synchronization Across Contexts
 
-Event emission enables powerful state synchronization patterns, like syncing state between a main thread and a Web Worker:
+Event emission enables powerful state synchronization patterns, like syncing state between a main thread and a Web Worker. The `emit` function captures changes that can be sent elsewhere.
 
 ```ts
 // In main thread
 import { reactive, updateState } from '@yiin/reactive-proxy-state';
 
+const worker = new Worker('worker.js');
+
 // Create a state that emits events to the worker
 const state = reactive(
   { count: 0, messages: [] },
   (event) => {
-    // Send the event to the worker
+    console.log('Main: Sending event to worker ->', event);
+    // Send the raw event data to the worker
     worker.postMessage({ type: 'STATE_CHANGE', event });
   }
 );
 
-// Listen for state changes from the worker
+// --- Receiving changes FROM worker ---
+// Note: Applying changes received from another context back into the *same*
+// reactive object that emits changes requires careful handling to prevent
+// infinite loops (A -> B -> A -> ...).
+// A common pattern is to apply incoming changes to a separate, non-reactive
+// mirror of the state, or use updateState directly on the target data if
+// the goal is one-way synchronization (e.g., UI updates based on worker state).
+
+// Example of receiving data (assuming worker sends updates)
 worker.addEventListener('message', (e) => {
-  if (e.data.type === 'STATE_CHANGE') {
-    // Apply worker's changes to local state without re-emitting
-    updateState(state, e.data.event);
+  if (e.data.type === 'WORKER_UPDATE') {
+    console.log('Main: Received data from worker:', e.data.payload);
+    // Here you might update UI or a *different* state object
+    // updateState(state, ...) // <-- Be cautious applying back to the emitting 'state'
   }
 });
+
+// Mutate state in main thread, triggering emit -> postMessage
+state.count++;
+state.messages.push('Hello from main');
+
 
 // In worker.js
 import { updateState } from '@yiin/reactive-proxy-state';
 
-// Local copy of state
-let state = { count: 0, messages: [] };
+// Local non-reactive copy of state in the worker
+let workerState = { count: 0, messages: [] };
 
-// Listen for state changes from main thread
 self.addEventListener('message', (e) => {
   if (e.data.type === 'STATE_CHANGE') {
-    // Apply changes from main thread
-    updateState(state, e.data.event);
+    console.log('Worker: Received event from main ->', e.data.event);
+    // Apply changes from main thread to the worker's local state
+    updateState(workerState, e.data.event);
+    console.log('Worker: State updated:', workerState);
+
+    // Example: Worker sends back some data (not a direct state event)
+    if (workerState.count > 1) {
+      self.postMessage({ type: 'WORKER_UPDATE', payload: { message: 'Count exceeded 1' } });
+    }
   }
 });
 
-// When worker needs to update state
+// Example: Worker updating its own state and notifying main thread
+// (This part depends on the application logic - not directly tied to receiving events)
 function updateStateFromWorker() {
   const event = {
     action: 'set',
     path: ['messages'],
-    newValue: ['New message from worker']
+    // Note: Directly creating events requires knowing the exact structure.
+    // Usually, the worker would manage its own reactive state if needed.
+    newValue: [...workerState.messages, 'Update from worker']
   };
-  
+
   // Apply locally
-  updateState(state, event);
-  
-  // Send to main thread
-  self.postMessage({ type: 'STATE_CHANGE', event });
+  updateState(workerState, event);
+
+  // Send the change back to main thread *if needed by the application*
+  // self.postMessage({ type: 'STATE_CHANGE', event }); // <-- Be careful not to create loops!
 }
 ```
 
