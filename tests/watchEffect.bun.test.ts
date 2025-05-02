@@ -345,6 +345,8 @@ describe("WatchEffect Tests", () => {
     let runCountB = 0;
     const effectB = mock(() => {
       if (runCountB++ >= 10) throw new Error("Effect B ran too many times!");
+      // Effect B only reads the dependency
+      state.count;
     });
 
     const stopA = watchEffect(effectA);
