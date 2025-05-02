@@ -1,16 +1,7 @@
 import { track, trigger } from './watch-effect';
-// Removed reactive import as ref doesn't automatically make contained objects reactive
-// import { reactive } from './reactive';
 
 // symbol used to identify refs internally and via isRef()
 export const isRefSymbol = Symbol('isRef');
-
-// Helper to check if a value is an object (and not null) - Keep for potential future use?
-/*
-function isObject(val: any): val is object {
-  return val !== null && typeof val === 'object';
-}
-*/
 
 // ref interface defining the shape of a ref object
 export interface Ref<T = any> {
@@ -20,11 +11,14 @@ export interface Ref<T = any> {
 }
 
 /**
- * creates a reactive reference object.
- * the object has a single `.value` property.
- * reactivity is tracked on access and mutation of the `.value` property.
- * if an object is passed as the initial value, the object itself is *not* made deeply reactive.
- * only the assignment to `.value` is tracked.
+ * Creates a reactive reference object.
+ * The object has a single `.value` property.
+ * Reactivity is tracked on access and mutation of the `.value` property.
+ * If an object is passed as the initial value, the object itself is *not* made deeply reactive.
+ * Only the assignment to `.value` is tracked.
+ * 
+ * @param value - The value to wrap in a ref
+ * @returns A ref object with the value
  */
 export function ref<T>(value: T): Ref<T>;
 export function ref<T = undefined>(): Ref<T | undefined>; // overload for creating an empty ref (value will be undefined)
@@ -67,7 +61,10 @@ function createRef<T>(rawValue: T): Ref<T> {
 }
 
 /**
- * checks if a value is a ref object.
+ * Checks if a value is a ref object.
+ * 
+ * @param r - The value to check
+ * @returns true if the value is a ref, false otherwise
  */
 export function isRef<T>(r: any): r is Ref<T> {
   // check for the presence of the internal symbol
@@ -75,8 +72,11 @@ export function isRef<T>(r: any): r is Ref<T> {
 }
 
 /**
- * returns the inner value if the argument is a ref,
+ * Returns the inner value if the argument is a ref,
  * otherwise returns the argument itself. this is a sugar for `isRef(val) ? val.value : val`.
+ * 
+ * @param refValue - The value to unref
+ * @returns The inner value if the argument is a ref, otherwise the argument itself
  */
 export function unref<T>(refValue: T | Ref<T>): T {
   return isRef(refValue) ? refValue.value : refValue;
@@ -85,6 +85,7 @@ export function unref<T>(refValue: T | Ref<T>): T {
 /**
  * Converts an object's properties to reactive refs.
  * This is useful when you want to destructure reactive objects but maintain reactivity.
+ * 
  * @param object The reactive object to convert to refs
  * @returns An object with the same properties, where each property is a ref connected to the original object
  */
@@ -100,6 +101,7 @@ export function toRefs<T extends object>(object: T): { [K in keyof T]: Ref<T[K]>
 
 /**
  * Creates a ref that is connected to a property on an object.
+ * 
  * @param object The source object
  * @param key The property key
  * @returns A ref connected to the object's property
@@ -117,12 +119,11 @@ export function toRef<T extends object, K extends keyof T>(object: T, key: K): R
   } as Ref<T[K]>;
 }
 
-// Basic triggerRef function (may need refinement if used)
-/*
+/**
+ * Basic triggerRef function
+ * 
+ * @param ref - The ref object to trigger
+ */
 export function triggerRef(ref: Ref<any>): void {
   trigger(ref, 'value');
 }
-*/
-
-// TODO: Implement shallowRef if needed (uses createRef(value, true))
-// TODO: Implement customRef if needed (more advanced) 

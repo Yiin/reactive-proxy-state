@@ -15,7 +15,8 @@ export type ActionType =
   | 'map-clear'
   | 'set-add'
   | 'set-delete'
-  | 'set-clear';
+  | 'set-clear'
+  | 'replace';
 
 // represents a single state change event emitted by reactive proxies
 export interface StateEvent {
@@ -33,4 +34,4 @@ export interface StateEvent {
 }
 
 // callback used to emit state change events
-export type EmitFunction = (event: StateEvent) => void; 
+export type EmitFunction = (event: StateEvent) => void;

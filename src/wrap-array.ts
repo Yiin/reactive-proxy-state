@@ -1,5 +1,5 @@
 import { EmitFunction, Path, StateEvent } from './types';
-import { deepEqual, getPathConcat, setPathConcat, wrapperCache } from './utils';
+import { deepEqual, getPathConcat, setPathConcat, wrapperCache, globalSeen } from './utils';
 import { reactive } from './reactive';
 import { wrapMap } from './wrap-map';
 import { wrapSet } from './wrap-set';
@@ -10,10 +10,11 @@ function isObject(v: any): v is object {
     return v && typeof v === 'object';
 }
 
-export function wrapArray<T extends any[]>(arr: T, emit: EmitFunction, path: Path): T {
+export function wrapArray<T extends any[]>(arr: T, emit?: EmitFunction, path: Path = [], seen: WeakMap<any, any> = globalSeen): T {
     // reuse existing proxy if available for performance
     const cachedProxy = wrapperCache.get(arr);
     if (cachedProxy) return cachedProxy as T;
+    if (seen.has(arr)) return seen.get(arr);
 
     // cache for wrapped methods to avoid re-creating them on each call
     const methodCache: { [key: string | symbol]: Function } = {};
@@ -41,7 +42,7 @@ export function wrapArray<T extends any[]>(arr: T, emit: EmitFunction, path: Pat
                                 key: oldLength, // start index was the old length
                                 items: items
                             };
-                            emit(event);
+                            emit?.(event);
                             trigger(target, Symbol.iterator);
                             if (oldLength !== newLength) {
                                 trigger(target, 'length');
@@ -65,7 +66,7 @@ export function wrapArray<T extends any[]>(arr: T, emit: EmitFunction, path: Pat
                             key: poppedIndex,
                             oldValue: oldValue
                         };
-                        emit(event);
+                        emit?.(event);
                         trigger(target, Symbol.iterator);
                         if (oldLength !== newLength) {
                            trigger(target, 'length');
@@ -87,7 +88,7 @@ export function wrapArray<T extends any[]>(arr: T, emit: EmitFunction, path: Pat
                             key: 0,
                             oldValue: oldValue
                         };
-                        emit(event);
+                        emit?.(event);
                         trigger(target, Symbol.iterator);
                         if (oldLength !== newLength) {
                            trigger(target, 'length');
@@ -108,7 +109,7 @@ export function wrapArray<T extends any[]>(arr: T, emit: EmitFunction, path: Pat
                                  key: 0,
                                  items: items
                              };
-                             emit(event);
+                             emit?.(event);
                              trigger(target, Symbol.iterator);
                              if (oldLength !== newLength) {
                                 trigger(target, 'length');
@@ -138,7 +139,7 @@ export function wrapArray<T extends any[]>(arr: T, emit: EmitFunction, path: Pat
                                 items: items.length > 0 ? items : undefined,
                                 oldValues: deletedItems.length > 0 ? deletedItems : undefined
                             };
-                            emit(event);
+                            emit?.(event);
                             trigger(target, Symbol.iterator);
                              if (oldLength !== newLength) {
                                trigger(target, 'length');
@@ -178,6 +179,7 @@ export function wrapArray<T extends any[]>(arr: T, emit: EmitFunction, path: Pat
             if (isNumericIndex) {
                 track(target, String(prop));
                  if (!isObject(value)) return value;
+                 if (seen.has(value)) return seen.get(value);
 
                  // reuse existing proxy for nested object/array if available
                  const cachedValueProxy = wrapperCache.get(value);
@@ -194,11 +196,11 @@ export function wrapArray<T extends any[]>(arr: T, emit: EmitFunction, path: Pat
                  }
 
                  // recursively wrap nested structures
-                 if (Array.isArray(value)) return wrapArray(value, emit, newPath);
-                 if (value instanceof Map) return wrapMap(value, emit, newPath);
-                 if (value instanceof Set) return wrapSet(value, emit, newPath);
+                 if (Array.isArray(value)) return wrapArray(value, emit, newPath, seen);
+                 if (value instanceof Map) return wrapMap(value, emit, newPath, seen);
+                 if (value instanceof Set) return wrapSet(value, emit, newPath, seen);
                  if (value instanceof Date) return new Date(value.getTime()); // dates are not proxied, return a copy
-                 return reactive(value, emit, newPath);
+                 return reactive(value, emit, newPath, seen);
             }
 
             // ensure functions accessed directly are bound to the original target
@@ -237,14 +239,14 @@ export function wrapArray<T extends any[]>(arr: T, emit: EmitFunction, path: Pat
                     oldValue,
                     newValue: value
                 };
-                emit(event);
+                emit?.(event);
                 trigger(target, prop);
             }
             return result;
         }
     });
 
-    // cache the newly created proxy before returning
+    seen.set(arr, proxy);
     wrapperCache.set(arr, proxy);
     return proxy;
-} 
+}

@@ -1,30 +1,34 @@
 {
   "name": "@yiin/reactive-proxy-state",
-  "private": false,
   "version": "1.0.9",
-  "description": "A simple, standalone reactivity library using Proxies",
+  "author": "Yiin <stanislovas@yiin.lt>",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Yiin/reactive-proxy-state.git"
+  },
   "main": "dist/index.js",
-  "types": "dist/index.d.ts",
+  "devDependencies": {
+    "bun-types": "^1.2.8",
+    "typescript": "^5.0.4",
+    "vitepress": "^1.6.3",
+    "vue": "^3.5.13"
+  },
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
       "require": "./dist/index.js"
     }
   },
+  "bugs": {
+    "url": "https://github.com/Yiin/reactive-proxy-state/issues"
+  },
+  "description": "A simple, standalone reactivity library using Proxies",
   "files": [
     "dist",
     "README.md",
     "LICENSE"
   ],
-  "scripts": {
-    "build": "tsc",
-    "test": "bun test",
-    "test:watch": "bun test --watch",
-    "test:bench": "bun --bun ./benchmarks/state-sync.bench.ts",
-    "docs:dev": "vitepress dev docs",
-    "docs:build": "vitepress build docs",
-    "docs:preview": "vitepress preview docs"
-  },
+  "homepage": "https://Yiin.github.io/reactive-proxy-state/",
   "keywords": [
     "state",
     "sync",
@@ -35,23 +39,19 @@
     "vue",
     "reactivity"
   ],
-  "author": "Yiin <stanislovas@yiin.lt>",
   "license": "MIT",
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/Yiin/reactive-proxy-state.git"
-  },
-  "bugs": {
-    "url": "https://github.com/Yiin/reactive-proxy-state/issues"
-  },
-  "homepage": "https://Yiin.github.io/reactive-proxy-state/",
+  "private": false,
   "publishConfig": {
     "access": "public"
   },
-  "devDependencies": {
-    "bun-types": "^1.2.8",
-    "typescript": "^5.0.4",
-    "vitepress": "^1.6.3",
-    "vue": "^3.5.13"
-  }
+  "scripts": {
+    "build": "tsc",
+    "test": "bun test",
+    "test:watch": "bun test --watch",
+    "test:bench": "bun --bun ./benchmarks/state-sync.bench.ts",
+    "docs:dev": "vitepress dev docs",
+    "docs:build": "vitepress build docs",
+    "docs:preview": "vitepress preview docs"
+  },
+  "types": "dist/index.d.ts"
 }

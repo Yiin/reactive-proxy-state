@@ -24,6 +24,94 @@ bun add @yiin/reactive-proxy-state
 2.  **Dependency Tracking**: When code inside a `watchEffect` reads a property of a reactive object, a dependency is established.
 3.  **Effect Triggering**: When a tracked property is mutated, any dependent effects (`watchEffect` or `watch` callbacks) are re-run **synchronously**.
 
+## State Synchronization with `updateState`
+
+A key feature is `updateState`, which allows applying changes from a plain JavaScript object (often received from serialization) onto an existing reactive state object. It intelligently updates properties, adds/removes array elements, and modifies Maps/Sets to match the target structure, triggering reactive effects only where necessary.
+
+This is typically used with the `emit` callback of `reactive` for state synchronization:
+
+```typescript
+import { reactive, updateState, watchEffect } from '@yiin/reactive-proxy-state';
+
+// Assume these functions exist:
+// - getInitialStateFromServer(): Fetches the initial state snapshot.
+// - sendEventToClient(event): Sends a state change event to the client.
+// - listenForServerEvents(callback): Sets up a listener for events from the server.
+
+// --- Source State (e.g., Server) ---
+const sourceData = {
+  counter: 0,
+  user: { name: 'Alice' },
+  items: ['a']
+};
+
+// 1. Server creates reactive state & emits deltas via sendEventToClient
+const sourceState = reactive(sourceData, sendEventToClient);
+
+
+// --- Client Initialization & Sync ---
+// 2. Client creates its reactive state holder *before* data arrives
+const targetState = reactive({});
+console.log('Client: Initial empty target state created:', targetState);
+
+// 3. Client watches its local state for changes (e.g., for UI updates)
+watchEffect(() => {
+  console.log('Client: Target state updated:', targetState);
+});
+// Initial output: Client: Target state updated: {}
+
+// 4. Client fetches the initial state snapshot
+const initialSnapshot = getInitialStateFromServer(); // Assume fetches { counter: 0, ... }
+console.log('\n--- Client Received Initial Snapshot ---');
+console.log(initialSnapshot);
+
+// 5. Client applies the initial snapshot using a 'replace' action
+// (Requires updateState implementation to support action: 'replace')
+updateState(targetState, {
+  action: 'replace', 
+  path: [], // Apply to the root
+  newValue: initialSnapshot
+});
+// Output after 'replace': 
+// Client: Target state updated: { counter: 0, user: { name: 'Alice' }, items: [ 'a' ] }
+
+// 6. Client starts listening for subsequent delta events from the server
+listenForServerEvents((event) => {
+  console.log(`Client: Received delta event <- Server:`, event);
+  // Apply the delta event normally
+  updateState(targetState, event);
+});
+
+
+// --- Subsequent Server Modifications ---
+// 7. Server state is modified *after* the client has initialized
+console.log('\n--- Server Modifying State (Post-Init) ---');
+sourceState.counter++;
+// Output: (sendEventToClient called with { action: 'set', path: [ 'counter' ], ... })
+sourceState.user.name = 'Charlie';
+// Output: (sendEventToClient called with { action: 'set', path: [ 'user', 'name' ], ... })
+sourceState.items.push('b');
+// Output: (sendEventToClient called with { action: 'array-push', path: [ 'items' ], ... })
+
+// --- Delta Events arrive and are processed asynchronously by the client ---
+
+// Example Console Output Order (assuming async processing):
+// Client: Initial empty target state created: {}
+// Client: Target state updated: {}
+// --- Client Received Initial Snapshot ---
+// { counter: 0, user: { name: 'Alice' }, items: ['a'] }
+// Client: Target state updated: { counter: 0, user: { name: 'Alice' }, items: [ 'a' ] } // From 'replace'
+// --- Server Modifying State (Post-Init) ---
+// Client: Received delta event <- Server: { action: 'set', path: [ 'counter' ], oldValue: 0, newValue: 1 }
+// Client: Target state updated: { counter: 1, user: { name: 'Alice' }, items: [ 'a' ] }
+// Client: Received delta event <- Server: { action: 'set', path: [ 'user', 'name' ], oldValue: 'Alice', newValue: 'Charlie' }
+// Client: Target state updated: { counter: 1, user: { name: 'Charlie' }, items: [ 'a' ] }
+// Client: Received delta event <- Server: { action: 'array-push', path: [ 'items' ], key: 1, items: [ 'b' ] }
+// Client: Target state updated: { counter: 1, user: { name: 'Charlie' }, items: [ 'a', 'b' ] }
+```
+
+See the [`updateState` documentation](./docs/api/update-state.md) and [`reactive` documentation](./docs/api/reactive.md) for more details on event emission and application.
+
 ## API
 
 ### `reactive<T extends object>(obj: T): T`

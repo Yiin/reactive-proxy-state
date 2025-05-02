@@ -9,3 +9,4 @@ export * from './watch';
 export * from './watch-effect'
 export * from './ref';
 export * from './computed';
+export * from './constants';

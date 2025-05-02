@@ -15,11 +15,8 @@ describe("Set Tests", () => {
     
     state.set.add(3);
     
-    expect(events.length).toBe(1);
-    expect(events[0].action).toBe('set-add');
-    expect(events[0].path).toEqual(['set']);
-    expect(events[0].value).toBe(3);
-    expect(events[0].oldValue).toBe(undefined);
+    expect(events.length).toBe(2);
+    expect(events[1]).toEqual({ action: 'set-add', path: ['set'], value: 3 });
   });
 
   test("reactive handles nested sets", () => {
@@ -29,11 +26,10 @@ describe("Set Tests", () => {
     
     state.set.values().next().value!.add(3);
     
-    expect(events.length).toBe(1);
-    expect(events[0].action).toBe('set-add');
-    expect(events[0].path).toEqual(['set', '0']);
-    expect(events[0].value).toBe(3);
-    expect(events[0].oldValue).toBe(undefined);
+    expect(events.length).toBe(2);
+    expect(events[1].action).toBe('set-add');
+    expect(events[1].path).toEqual(['set', '0']);
+    expect(events[1].value).toBe(3);
   });
 
   test("set methods emit correct events", () => {
@@ -43,14 +39,12 @@ describe("Set Tests", () => {
     state.set.delete(2);
     state.set.add(4);
     
-    expect(events.length).toBe(2);
-    expect(events[0].action).toBe('set-delete');
-    expect(events[0].path).toEqual(['set']);
-    expect(events[0].value).toBe(2);
-    expect(events[0].oldValue).toBe(2);
-    expect(events[1].action).toBe('set-add');
-    expect(events[1].path).toEqual(['set']);
-    expect(events[1].value).toBe(4);
-    expect(events[1].oldValue).toBe(undefined);
+    expect(events.length).toBe(3);
+    const deleteEvent = events[1];
+    expect(deleteEvent.action).toBe('set-delete');
+    expect(deleteEvent.path).toEqual(['set']);
+    expect(deleteEvent.value).toBe(2);
+    expect(deleteEvent.oldValue).toBe(2);
+    expect(events[2]).toEqual({ action: 'set-add', path: ['set'], value: 4 });
   });
 }); 

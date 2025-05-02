@@ -1,21 +1,24 @@
 import { EmitFunction, Path, StateEvent } from './types';
-import { getPathConcat, setPathConcat, wrapperCache } from './utils';
+import { getPathConcat, setPathConcat, wrapperCache, globalSeen } from './utils';
 import { reactive } from './reactive';
 import { wrapArray } from './wrap-array';
 import { wrapMap } from './wrap-map';
 import { track, trigger } from './watch-effect';
 
-export function wrapSet<T>(set: Set<T>, emit: EmitFunction, path: Path): Set<T> {
-    // reuse existing proxy if available for performance
+export function wrapSet<T>(set: Set<T>, emit?: EmitFunction, path: Path = [], seen: WeakMap<any, any> = globalSeen): Set<T> {
     const cachedProxy = wrapperCache.get(set);
     if (cachedProxy) return cachedProxy as Set<T>;
+    if (seen.has(set)) return seen.get(set);
 
-    // cache for wrapped methods to avoid re-creating them on each call
     const methodCache: { [key: string | symbol]: Function } = {};
 
     const proxy = new Proxy(set, {
         get(target: Set<T>, prop: string | symbol, receiver: any): any {
             track(target, prop);
+
+            if (prop === Symbol.iterator || prop === 'entries' || prop === 'values' || prop === 'keys' || prop === 'forEach') {
+                track(target, Symbol.iterator);
+            }
 
             if (methodCache[prop]) {
                 return methodCache[prop];
@@ -26,7 +29,6 @@ export function wrapSet<T>(set: Set<T>, emit: EmitFunction, path: Path): Set<T> 
                     const existed = target.has(value);
                     const oldSize = target.size;
 
-                    // only add and trigger if the value doesn't already exist
                     if (!existed) {
                         target.add(value);
                         const newSize = target.size;
@@ -36,13 +38,13 @@ export function wrapSet<T>(set: Set<T>, emit: EmitFunction, path: Path): Set<T> 
                             path: path,
                             value: value
                         };
-                        emit(event);
+                        emit?.(event);
                         trigger(target, Symbol.iterator);
                         if (oldSize !== newSize) {
                            trigger(target, 'size');
                         }
                     }
-                    return receiver; // return the proxy itself for chaining
+                    return receiver;
                 };
                 return methodCache[prop];
             }
@@ -56,14 +58,14 @@ export function wrapSet<T>(set: Set<T>, emit: EmitFunction, path: Path): Set<T> 
                         const result = target.delete(value);
                         const newSize = target.size;
 
-                        if (result) { // only emit and trigger if delete was successful
+                        if (result) {
                            const event: StateEvent = {
                                 action: 'set-delete',
                                 path: path,
                                 value: value,
                                 oldValue: oldValue
                             };
-                            emit(event);
+                            emit?.(event);
                             trigger(target, Symbol.iterator);
                             if (oldSize !== newSize) {
                                 trigger(target, 'size');
@@ -88,7 +90,7 @@ export function wrapSet<T>(set: Set<T>, emit: EmitFunction, path: Path): Set<T> 
                         path: path,
                         value: null
                     };
-                    emit(event);
+                    emit?.(event);
                     trigger(target, Symbol.iterator);
                     if (oldSize !== newSize) {
                         trigger(target, 'size');
@@ -99,24 +101,19 @@ export function wrapSet<T>(set: Set<T>, emit: EmitFunction, path: Path): Set<T> 
             if (prop === 'has') {
                 track(target, Symbol.iterator);
                 methodCache[prop] = function(value: T): boolean {
-                    // track specific primitive value when 'has' is called
-                    // tracking object values for existence is complex and less common, handled by iteration track
                     if (typeof value === 'string' || typeof value === 'number' || typeof value === 'symbol') {
                         track(target, String(value));
                     }
                     return target.has(value);
-                }.bind(target); // bind is still okay here, doesn't interfere with caching
+                }.bind(target);
                  return methodCache[prop];
             }
-            // handle iteration methods
             if (prop === 'values' || prop === Symbol.iterator || prop === 'entries' || prop === 'keys' || prop === 'forEach') {
                 track(target, Symbol.iterator);
                 const originalMethod = Reflect.get(target, prop, receiver);
 
-                // return custom iterators/foreach that wrap values during iteration
                 if (prop === 'forEach') {
                     methodCache[prop] = (callbackfn: (value: T, value2: T, set: Set<T>) => void, thisArg?: any): void => {
-                        // use the proxied values() to ensure values passed to callback are wrapped and tracked
                          const valuesIterator = proxy.values();
                          for (const value of valuesIterator) {
                              callbackfn.call(thisArg, value, value, proxy);
@@ -124,17 +121,13 @@ export function wrapSet<T>(set: Set<T>, emit: EmitFunction, path: Path): Set<T> 
                     }
                      return methodCache[prop];
                 }
-                 // handle symbol.iterator, values, keys, entries by creating generator functions
                  methodCache[prop] = function* (...args: any[]) {
-                    let index = 0; // use index for path generation if value is not primitive
+                    let index = 0;
                     const iterator = originalMethod.apply(target, args);
 
                     for (const entry of iterator) {
                         let valueToWrap = entry;
-                        let mapKey = undefined; // key for entries() which yields [value, value]
-
                         if (prop === 'entries') {
-                            mapKey = entry[0]; // for Set.entries(), key and value are the same
                             valueToWrap = entry[1];
                         }
 
@@ -142,30 +135,32 @@ export function wrapSet<T>(set: Set<T>, emit: EmitFunction, path: Path): Set<T> 
 
                         let wrappedValue = valueToWrap;
                         if (valueToWrap && typeof valueToWrap === 'object') {
-                             const cachedValueProxy = wrapperCache.get(valueToWrap);
-                             if (cachedValueProxy) {
-                                 wrappedValue = cachedValueProxy;
+                             if (seen.has(valueToWrap)) {
+                                 wrappedValue = seen.get(valueToWrap);
                              } else {
-                                 // calculate path using index as key, as set values don't have inherent keys
-                                 const keyForPath = String(index);
-                                 const pathKey = path.length > 0 ? `${path.join('.')}.${keyForPath}` : keyForPath;
-                                 let newPath = getPathConcat(pathKey);
-                                 if (newPath === undefined) {
-                                     newPath = path.concat(keyForPath);
-                                     setPathConcat(pathKey, newPath);
-                                 }
+                                 const cachedValueProxy = wrapperCache.get(valueToWrap);
+                                 if (cachedValueProxy) {
+                                     wrappedValue = cachedValueProxy;
+                                 } else {
+                                     const keyForPath = String(index);
+                                     const pathKey = path.length > 0 ? `${path.join('.')}.${keyForPath}` : keyForPath;
+                                     let newPath = getPathConcat(pathKey);
+                                     if (newPath === undefined) {
+                                         newPath = path.concat(keyForPath);
+                                         setPathConcat(pathKey, newPath);
+                                     }
 
-                                 // recursively wrap nested structures
-                                 if (valueToWrap instanceof Map) wrappedValue = wrapMap(valueToWrap, emit, newPath);
-                                 else if (valueToWrap instanceof Set) wrappedValue = wrapSet(valueToWrap, emit, newPath);
-                                 else if (Array.isArray(valueToWrap)) wrappedValue = wrapArray(valueToWrap, emit, newPath);
-                                 else if (valueToWrap instanceof Date) wrappedValue = new Date(valueToWrap.getTime()); // dates are not proxied, return copy
-                                 else wrappedValue = reactive(valueToWrap, emit, newPath);
+                                     if (valueToWrap instanceof Map) wrappedValue = wrapMap(valueToWrap, emit, newPath, seen);
+                                     else if (valueToWrap instanceof Set) wrappedValue = wrapSet(valueToWrap, emit, newPath, seen);
+                                     else if (Array.isArray(valueToWrap)) wrappedValue = wrapArray(valueToWrap, emit, newPath, seen);
+                                     else if (valueToWrap instanceof Date) wrappedValue = new Date(valueToWrap.getTime());
+                                     else wrappedValue = reactive(valueToWrap, emit, newPath, seen);
+                                 }
                              }
                         }
 
                         if (prop === 'entries') {
-                            yield [wrappedValue, wrappedValue]; // set entries yield [value, value]
+                            yield [wrappedValue, wrappedValue];
                         } else {
                             yield wrappedValue;
                         }
@@ -180,7 +175,6 @@ export function wrapSet<T>(set: Set<T>, emit: EmitFunction, path: Path): Set<T> 
             }
 
             const value = Reflect.get(target, prop, receiver);
-            // Bind plain functions accessed directly (e.g., toString)
             if (typeof value === 'function') {
                 return value.bind(target);
             }
@@ -188,7 +182,7 @@ export function wrapSet<T>(set: Set<T>, emit: EmitFunction, path: Path): Set<T> 
         }
     });
 
-    // cache the newly created proxy before returning
+    seen.set(set, proxy);
     wrapperCache.set(set, proxy);
     return proxy;
-} 
+}

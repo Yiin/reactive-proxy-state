@@ -21,10 +21,11 @@ describe("Object Tests", () => {
     
     state.nested.deep.value = 43;
     
-    expect(events.length).toBe(1);
-    expect(events[0].action).toBe('set');
-    expect(events[0].path).toEqual(['nested', 'deep', 'value']);
-    expect(events[0].newValue).toBe(43);
+    expect(events.length).toBe(2);
+    const setEvent = events[1];
+    expect(setEvent.action).toBe('set');
+    expect(setEvent.path).toEqual(['nested', 'deep', 'value']);
+    expect(setEvent.newValue).toBe(43);
   });
 
   test("reactive handles nested object creation", () => {
@@ -33,10 +34,10 @@ describe("Object Tests", () => {
     
     state.obj.nested = { value: 42 };
     
-    expect(events.length).toBe(1);
-    expect(events[0].action).toBe('set');
-    expect(events[0].path).toEqual(['obj', 'nested']);
-    expect(events[0].newValue).toEqual({ value: 42 });
+    expect(events.length).toBe(2);
+    expect(events[1].action).toBe('set');
+    expect(events[1].path).toEqual(['obj', 'nested']);
+    expect(events[1].newValue).toEqual({ value: 42 });
   });
 
   test("reactive handles property deletion", () => {
@@ -45,9 +46,10 @@ describe("Object Tests", () => {
     
     delete state.obj.prop;
     
-    expect(events.length).toBe(1);
-    expect(events[0].action).toBe('delete');
-    expect(events[0].path).toEqual(['obj', 'prop']);
+    expect(events.length).toBe(2);
+    const deleteEvent = events[1];
+    expect(deleteEvent.action).toBe('delete');
+    expect(deleteEvent.path).toEqual(['obj', 'prop']);
   });
 
   test("reactive handles nested property deletion", () => {
@@ -62,9 +64,10 @@ describe("Object Tests", () => {
     
     delete state.nested.deep.value;
     
-    expect(events.length).toBe(1);
-    expect(events[0].action).toBe('delete');
-    expect(events[0].path).toEqual(['nested', 'deep', 'value']);
+    expect(events.length).toBe(2);
+    const deleteEvent2 = events[1];
+    expect(deleteEvent2.action).toBe('delete');
+    expect(deleteEvent2.path).toEqual(['nested', 'deep', 'value']);
   });
 
   test("reactive handles circular references", () => {
@@ -75,9 +78,10 @@ describe("Object Tests", () => {
     
     state.obj.value = 43;
     
-    expect(events.length).toBe(1);
-    expect(events[0].action).toBe('set');
-    expect(events[0].path).toEqual(['obj', 'value']);
-    expect(events[0].newValue).toBe(43);
+    expect(events.length).toBe(2);
+    const setEvent3 = events[1];
+    expect(setEvent3.action).toBe('set');
+    expect(setEvent3.path).toEqual(['obj', 'value']);
+    expect(setEvent3.newValue).toBe(43);
   });
 }); 

@@ -18,13 +18,16 @@ function updateState(target: any, event: StateEvent): void
 ```ts
 interface StateEvent {
   // Determines the type of operation to perform
-  action: 'set' | 'delete' | 'set-add' | 'set-delete' | 'map-set' | 'array-splice';
+  action: 'set' | 'delete' | 'set-add' | 'set-delete' | 'map-set' | 'array-splice' | 'replace';
   
   // Path to the target property or collection as an array of keys/indices
   path: (string | number)[];
   
   // For 'set' action on regular properties
   newValue?: any;
+  
+  // For 'replace' action
+  newValue?: any;  // The value to completely replace at the given path
   
   // For 'map-set' action
   key?: string | number | symbol; // The key being set in the Map
@@ -57,6 +60,47 @@ updateState(obj, {
 });
 
 console.log(obj.count); // 1
+```
+
+### Replacing a Value
+
+```ts
+import { updateState } from '@yiin/reactive-proxy-state';
+
+const state = {
+  user: {
+    name: 'John',
+    age: 30,
+    settings: {
+      theme: 'light',
+      notifications: true
+    }
+  }
+};
+
+// Completely replace the user object
+updateState(state, {
+  action: 'replace',
+  path: ['user'],
+  newValue: {
+    name: 'Jane',
+    age: 28,
+    settings: {
+      theme: 'dark',
+      notifications: false
+    }
+  }
+});
+
+console.log(state.user); 
+// {
+//   name: 'Jane',
+//   age: 28,
+//   settings: {
+//     theme: 'dark',
+//     notifications: false
+//   }
+// }
 ```
 
 ### Updating a Nested Property
@@ -202,9 +246,11 @@ console.log(Array.from(state.tags)); // ['draft', 'important']
 2. **Remote State Management**: Serialize state changes for transmission over a network.
 3. **Undo/Redo Functionality**: Record state events for implementing undo/redo.
 4. **Time-Travel Debugging**: Replay a series of state events to reconstruct a specific state.
+5. **Initial State Sync**: Use the 'replace' action to initialize or reset state with a complete value.
 
 ## Notes
 
 - `updateState` does not validate paths or actions. It's assumed that the events are valid and match the structure of the target object.
 - For optimal performance, prefer batching multiple state updates when possible.
-- If applying events to a reactive state, be aware that each call to `updateState` might trigger reactive effects. 
+- If applying events to a reactive state, be aware that each call to `updateState` might trigger reactive effects.
+- The 'replace' action is especially useful for initial state synchronization or for completely resetting a section of your state tree. 

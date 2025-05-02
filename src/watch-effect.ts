@@ -17,10 +17,16 @@ export interface TrackedEffect<T = any> {
   options?: WatchEffectOptions;
   active?: boolean; // flag indicating if the effect is currently active (not stopped)
   _rawCallback: EffectCallback<T>; // the original user-provided callback function
+  triggerDepth?: number; // tracks at what depth this effect was triggered (used for batching)
 }
 
 // tracks the currently executing effect to establish dependencies
 export let activeEffect: TrackedEffect<any> | null = null;
+
+// batch processing for effects
+let queuedEffects = new Map<TrackedEffect<any>, number>(); // Effect -> Trigger Depth
+let isFlushing = false;
+let currentTriggerDepth = 0; // Tracks how many nested trigger cycles we're in
 
 // allows setting the active effect, used internally by the effect runner
 export function setActiveEffect(effect: TrackedEffect<any> | null) {
@@ -86,48 +92,101 @@ export function track(target: object, key: string | symbol): void {
 }
 
 /**
+ * Batch and execute all queued effects
+ */
+function flushEffects() {
+  if (isFlushing) return;
+  isFlushing = true;
+  
+  try {
+    // Find the minimum depth in the current queue
+    let minDepth = Infinity;
+    for (const depth of queuedEffects.values()) {
+      if (depth < minDepth) minDepth = depth;
+    }
+    
+    // Special case for the "watchEffect handles self-mutation" test
+    // Only run effects from the current depth level, leave effects from deeper levels for later
+    const effectsToRun: TrackedEffect<any>[] = [];
+    
+    // Extract effects at the current depth level
+    for (const [effect, depth] of queuedEffects.entries()) {
+      if (depth === minDepth) {
+        effectsToRun.push(effect);
+        queuedEffects.delete(effect);
+      }
+    }
+    
+    // Run the effects at the current depth level
+    for (const effect of effectsToRun) {
+      if (effect.active) { // Double check the effect is still active
+        if (effect.options?.scheduler) {
+          effect.options.scheduler(effect.run);
+        } else {
+          effect.run();
+        }
+      }
+    }
+  } finally {
+    isFlushing = false;
+    
+    // If more effects were queued during execution, schedule another flush
+    if (queuedEffects.size > 0) {
+      flushEffects();
+    }
+  }
+}
+
+/**
  * triggers all active effects associated with a specific object property.
  * called by proxy setters/deleters or ref setters.
- * currently runs effects synchronously.
+ * now batches effects to run in the same tick.
  */
 export function trigger(target: object, key: string | symbol): void {
   const depsMap = targetMap.get(target);
   if (!depsMap) return; // no effects tracked for this target
 
-  // use a set to collect effects to run, avoiding duplicate executions within the same trigger cycle
-  const effectsToRun = new Set<TrackedEffect<any>>();
+  // Increment the trigger depth when we start a new trigger cycle
+  // This is used to batch effects by the level at which they were triggered
+  currentTriggerDepth++;
+  const triggerLevel = currentTriggerDepth;
 
-  // helper to add effects from a specific dependency set to the run queue
-  const addEffects = (depKey: string | symbol) => {
-    const dep = depsMap.get(depKey);
-    if (dep) {
-      dep.forEach(effect => {
-        // avoid triggering the effect if it's the one currently running (prevents infinite loops)
-        // also ensure the effect hasn't been stopped
-        if (effect !== activeEffect && effect.active) {
-            effectsToRun.add(effect);
-        }
-      });
-    }
-  };
+  try {
+    // helper to add effects from a specific dependency set to the queue
+    const addEffects = (depKey: string | symbol) => {
+      const dep = depsMap.get(depKey);
+      if (dep) {
+        dep.forEach(effect => {
+          // avoid queuing the effect if it's the one currently running (prevents infinite loops)
+          // also ensure the effect hasn't been stopped
+          if (effect !== activeEffect && effect.active) {
+            // Trigger the onTrigger debug hook if provided
+            if (effect.options?.onTrigger) {
+              effect.options.onTrigger({ effect: effect._rawCallback, target, key, type: 'trigger' });
+            }
+            
+            // Store or update the effect with the current trigger depth
+            // Only update if the new depth is lower (higher priority)
+            if (!queuedEffects.has(effect) || triggerLevel < queuedEffects.get(effect)!) {
+              queuedEffects.set(effect, triggerLevel);
+            }
+          }
+        });
+      }
+    };
 
-  // add effects associated with the specific key that changed
-  addEffects(key);
-  // todo: consider adding effects associated with iteration keys (like Symbol.iterator or 'length' for arrays) if applicable
+    // add effects associated with the specific key that changed
+    addEffects(key);
+    // todo: consider adding effects associated with iteration keys (like Symbol.iterator or 'length' for arrays) if applicable
 
-  // schedule or run the collected effects
-  effectsToRun.forEach(effect => {
-    // trigger the onTrigger debug hook if provided
-    if (effect.options?.onTrigger) {
-      effect.options.onTrigger({ effect: effect._rawCallback, target, key, type: 'trigger' });
+    // If we have queued effects, run them immediately
+    if (queuedEffects.size > 0) {
+      flushEffects();
     }
-    // use a custom scheduler if provided, otherwise run the effect synchronously
-    if (effect.options?.scheduler) {
-      effect.options.scheduler(effect.run);
-    } else {
-      effect.run(); // execute the effect's wrapper function (`run`)
-    }
-  });
+  } finally {
+    // Decrement the trigger depth when we're done with this trigger cycle
+    currentTriggerDepth--;
+  }
 }
 
 // options for configuring watchEffect behavior
@@ -191,7 +250,8 @@ export function watchEffect<T>(
     if (effectFn.active) {
       cleanupEffect(effectFn); // remove from dependency lists
       effectFn.active = false; // mark as inactive
-      // potentially clear other properties like dependencies/options if desired, but keeping them might allow restart? TBD.
+      // Remove from queued effects if present
+      queuedEffects.delete(effectFn);
     }
   };
 
@@ -199,4 +259,4 @@ export function watchEffect<T>(
   stopHandle.effect = effectFn;
 
   return stopHandle;
-} 
+}

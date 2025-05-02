@@ -16,10 +16,10 @@ describe("Wrap State Tests", () => {
     
     state.date = new Date('2024-01-02');
     
-    expect(events.length).toBe(1);
-    expect(events[0].action).toBe('set');
-    expect(events[0].path[0]).toBe('date');
-    expect(events[0].newValue).toEqual(new Date('2024-01-02'));
+    expect(events.length).toBe(2);
+    expect(events[1].action).toBe('set');
+    expect(events[1].path).toEqual(['date']);
+    expect(events[1].newValue).toEqual(new Date('2024-01-02'));
   });
 
   test("reactive handles deep equality check", () => {
@@ -29,10 +29,10 @@ describe("Wrap State Tests", () => {
     state.obj = { value: 42 }; // Same value, should not emit
     state.obj = { value: 43 }; // Different value, should emit
     
-    expect(events.length).toBe(1);
-    expect(events[0].action).toBe('set');
-    expect(events[0].path[0]).toBe('obj');
-    expect(events[0].newValue).toEqual({ value: 43 });
+    expect(events.length).toBe(2);
+    expect(events[1].action).toBe('set');
+    expect(events[1].path).toEqual(['obj']);
+    expect(events[1].newValue).toEqual({ value: 43 });
   });
 
   test("reactive handles nested object creation", () => {
@@ -41,10 +41,10 @@ describe("Wrap State Tests", () => {
     
     state.obj.nested = { value: 42 };
     
-    expect(events.length).toBe(1);
-    expect(events[0].action).toBe('set');
-    expect(events[0].path).toEqual(['obj', 'nested']);
-    expect(events[0].newValue).toEqual({ value: 42 });
+    expect(events.length).toBe(2);
+    expect(events[1].action).toBe('set');
+    expect(events[1].path).toEqual(['obj', 'nested']);
+    expect(events[1].newValue).toEqual({ value: 42 });
   });
 
   test("reactive handles property deletion", () => {
@@ -53,9 +53,11 @@ describe("Wrap State Tests", () => {
     
     delete state.obj.prop;
     
-    expect(events.length).toBe(1);
-    expect(events[0].action).toBe('delete');
-    expect(events[0].path).toEqual(['obj', 'prop']);
+    expect(events.length).toBe(2);
+    const deleteEvent = events[1];
+    expect(deleteEvent.action).toBe('delete');
+    expect(deleteEvent.path).toEqual(['obj', 'prop']);
+    expect(deleteEvent.oldValue).toBe(42);
   });
 
   test("reactive handles nested property deletion", () => {
@@ -70,9 +72,11 @@ describe("Wrap State Tests", () => {
     
     delete state.nested.deep.value;
     
-    expect(events.length).toBe(1);
-    expect(events[0].action).toBe('delete');
-    expect(events[0].path).toEqual(['nested', 'deep', 'value']);
+    expect(events.length).toBe(2);
+    const deleteEvent2 = events[1];
+    expect(deleteEvent2.action).toBe('delete');
+    expect(deleteEvent2.path).toEqual(['nested', 'deep', 'value']);
+    expect(deleteEvent2.oldValue).toBe(42);
   });
 
   test("reactive handles circular references", () => {
@@ -83,9 +87,11 @@ describe("Wrap State Tests", () => {
     
     state.obj.value = 43;
     
-    expect(events.length).toBe(1);
-    expect(events[0].action).toBe('set');
-    expect(events[0].path).toEqual(['obj', 'value']);
-    expect(events[0].newValue).toBe(43);
+    expect(events.length).toBe(2);
+    const setEvent = events[1];
+    expect(setEvent.action).toBe('set');
+    expect(setEvent.path).toEqual(['obj', 'value']);
+    expect(setEvent.newValue).toBe(43);
+    expect(setEvent.oldValue).toBe(42);
   });
 }); 

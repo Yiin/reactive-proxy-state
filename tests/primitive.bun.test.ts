@@ -14,10 +14,13 @@ describe("Primitive Tests", () => {
     const state = reactive({ value: 42 }, emit);
     
     state.value = 43;
-    
-    expect(events.length).toBe(1);
-    expect(events[0].action).toBe('set');
-    expect(events[0].path[0]).toBe('value');
-    expect(events[0].newValue).toBe(43);
+
+    expect(events.length).toBe(2);
+
+    const setEvent = events.pop()!;
+    expect(setEvent.action).toBe('set');
+    expect(setEvent.path).toEqual(['value']);
+    expect(setEvent.newValue).toBe(43);
+    expect(setEvent.oldValue).toBe(42);
   });
 }); 

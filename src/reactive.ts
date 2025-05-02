@@ -1,19 +1,64 @@
 import { EmitFunction, Path, StateEvent } from './types';
-import { deepEqual, globalSeen, getPathConcat, setPathConcat } from './utils';
+import { deepEqual, globalSeen, getPathConcat, setPathConcat, deepClone } from './utils';
 import { wrapArray } from './wrap-array';
 import { wrapMap } from './wrap-map';
 import { wrapSet } from './wrap-set';
 import { track, trigger } from './watch-effect';
+import { ReactiveFlags } from './constants';
 
 // avoid repeated typeof checks
 function isObject(v: any): v is object {
     return v && typeof v === 'object';
 }
 
-// create a reactive proxy for an object
-export function reactive<T extends object>(obj: T, emit: EmitFunction, path: Path = [], seen: WeakMap<any, any> = globalSeen): T {
+/**
+ * Checks if an object is a reactive proxy
+ */
+export function isReactive(value: any): boolean {
+    return !!(value && value[ReactiveFlags.IS_REACTIVE]);
+}
+
+/**
+ * Returns the raw, original object underlying a reactive proxy.
+ * If the input is not a proxy, returns the input itself.
+ */
+export function toRaw<T>(observed: T): T {
+    const raw = observed && (observed as any)[ReactiveFlags.RAW];
+    return raw ? toRaw(raw) : observed;
+}
+
+/**
+ * Create a reactive proxy for an object
+ */
+export function reactive<T extends object>(obj: T, emit?: EmitFunction, path: Path = [], seen: WeakMap<any, any> = globalSeen): T {
     // prevent infinite recursion with circular references
     if (seen.has(obj)) return seen.get(obj);
+
+    // if this is the root call (path is empty) and an emit function is provided,
+    // emit the initial state event.
+    if (emit && path.length === 0) {
+        try {
+            const initialEvent: StateEvent = {
+                action: 'replace',
+                path: [],
+                newValue: obj
+            };
+            emit(initialEvent);
+        } catch (error) {
+            console.error("Failed to emit initial reactive state:", error);
+        }
+    }
+
+    // Delegate to specific wrappers for root collections
+    if (Array.isArray(obj)) {
+        return wrapArray(obj, emit, path, seen) as T;
+    }
+    if (obj instanceof Map) {
+        return wrapMap(obj, emit, path, seen) as T;
+    }
+    if (obj instanceof Set) {
+        return wrapSet(obj, emit, path, seen) as T;
+    }
 
     // helper to wrap nested values recursively
     function wrapValue(val: any, subPath: Path): any {
@@ -22,8 +67,8 @@ export function reactive<T extends object>(obj: T, emit: EmitFunction, path: Pat
 
         // delegate wrapping to specific functions based on type
         if (Array.isArray(val)) return wrapArray(val, emit, subPath);
-        if (val instanceof Map) return wrapMap(val, emit, subPath);
-        if (val instanceof Set) return wrapSet(val, emit, subPath);
+        if (val instanceof Map) return wrapMap(val, emit, subPath, seen);
+        if (val instanceof Set) return wrapSet(val, emit, subPath, seen);
         if (val instanceof Date) return new Date(val.getTime()); // dates are not proxied, return copy
 
         // default to reactive for plain objects
@@ -32,6 +77,14 @@ export function reactive<T extends object>(obj: T, emit: EmitFunction, path: Pat
 
     const proxy = new Proxy(obj, {
         get(target: T, prop: string | symbol, receiver: any): any {
+            // Special handling for reactive flags
+            if (prop === ReactiveFlags.RAW) {
+                return target;
+            }
+            if (prop === ReactiveFlags.IS_REACTIVE) {
+                return true;
+            }
+
             const value = Reflect.get(target, prop, receiver);
 
             // track property access for dependency tracking
@@ -84,7 +137,7 @@ export function reactive<T extends object>(obj: T, emit: EmitFunction, path: Pat
                     newValue: value
                 };
 
-                emit(event);
+                emit?.(event);
 
                 // notify effects watching this property
                 trigger(target, prop);
@@ -114,7 +167,7 @@ export function reactive<T extends object>(obj: T, emit: EmitFunction, path: Pat
                     oldValue
                 };
 
-                emit(event);
+                emit?.(event);
 
                 // notify effects watching this property
                 trigger(target, prop);
@@ -127,4 +180,4 @@ export function reactive<T extends object>(obj: T, emit: EmitFunction, path: Pat
     // cache the proxy to handle circular references and improve performance
     seen.set(obj, proxy);
     return proxy;
-} 
+}

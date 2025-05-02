@@ -41,21 +41,23 @@ describe("Complex Tests", () => {
     // Add to nested array
     state.users.push({ name: "Charlie", tags: new Set(["user"]) });
 
-    expect(events.length).toBe(4);
-    expect(events[0].action).toBe('set');
-    expect(events[0].path).toEqual(['users', '0', 'name']);
-    expect(events[0].newValue).toBe('Alice Smith');
-    expect(events[1].action).toBe('set-add');
-    expect(events[1].path).toEqual(['users', '0', 'tags']);
-    expect(events[1].value).toBe('superuser');
-    expect(events[2].action).toBe('array-push');
-    expect(events[2].path).toEqual(['roles', 'admin', 'permissions']);
-    expect(events[2].key).toBe(2);
-    expect(events[2].items).toEqual(['delete']);
+    expect(events.length).toBe(5);
+    expect(events[0].action).toBe('replace');
+    expect(events[0].path).toEqual([]);
+    expect(events[1].action).toBe('set');
+    expect(events[1].path).toEqual(['users', '0', 'name']);
+    expect(events[1].newValue).toBe('Alice Smith');
+    expect(events[2].action).toBe('set-add');
+    expect(events[2].path).toEqual(['users', '0', 'tags']);
+    expect(events[2].value).toBe('superuser');
     expect(events[3].action).toBe('array-push');
-    expect(events[3].path).toEqual(['users']);
+    expect(events[3].path).toEqual(['roles', 'admin', 'permissions']);
     expect(events[3].key).toBe(2);
-    expect(events[3].items).toEqual([{ name: "Charlie", tags: new Set(["user"]) }]);
+    expect(events[3].items).toEqual(['delete']);
+    expect(events[4].action).toBe('array-push');
+    expect(events[4].path).toEqual(['users']);
+    expect(events[4].key).toBe(2);
+    expect(events[4].items).toEqual([{ name: "Charlie", tags: new Set(["user"]) }]);
   });
 
   test("updateState handles complex nested operations", () => {

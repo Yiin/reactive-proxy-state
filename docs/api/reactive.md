@@ -29,9 +29,9 @@ Returns a proxy that intercepts operations on the original object. The proxy beh
 ```ts
 // Event emitted when state changes
 interface StateEvent {
-  action: 'set' | 'delete' | 'set-add' | 'set-delete' | 'map-set' | 'array-splice';
+  action: 'set' | 'delete' | 'set-add' | 'set-delete' | 'map-set' | 'array-splice' | 'replace';
   path: (string | number)[]; // Path to the target property/collection
-  newValue?: any; // Value for 'set', 'map-set'
+  newValue?: any; // Value for 'set', 'map-set', 'replace'
   oldValue?: any; // Previous value (if applicable)
   value?: any;    // Value for 'set-add', 'set-delete'
   key?: number;   // Index/key for 'map-set', 'array-splice'
@@ -92,6 +92,8 @@ const state = reactive(
     stateEvents.push(event);
   }
 );
+// Initial state event when creating reactive object
+// Event: { action: 'replace', path: [], newValue: { count: 0, user: { name: 'Alice' }, items: ['apple', 'banana'], preferences: Map(['theme', 'dark']), tags: Set(['important']) } }
 
 // Each mutation will emit an event
 state.count = 1;
@@ -118,7 +120,7 @@ You can use event emission and [`updateState`](/api/update-state) together to sy
 import { reactive, updateState } from '@yiin/reactive-proxy-state';
 
 // Create a secondary state that will be kept in sync
-const secondaryState = { count: 0, user: { name: 'Alice' } };
+const secondaryState = {};
 
 // Create primary state with event tracking
 const primaryState = reactive(
@@ -128,6 +130,8 @@ const primaryState = reactive(
     updateState(secondaryState, event);
   }
 );
+
+console.log(JSON.stringify(primaryState) === JSON.stringify(secondaryState)); // true
 
 // Mutate the primary state
 primaryState.count = 1;

@@ -1,4 +1,5 @@
-import { StateEvent, Path } from './types';
+import { isReactive } from './reactive';
+import { StateEvent } from './types';
 import { pathCache, setInPathCache } from './utils';
 
 // helper to abstract getting a value from a map or object property
@@ -115,15 +116,51 @@ const actionHandlers: { [key: string]: (target: any, key: any, event: StateEvent
              console.warn(`expected set at path ${event.path.join('.')}`); return;
          }
         targetSet.clear();
+    },
+    'replace': function(target: any, _keyIgnored: any, event: StateEvent) {
+        const newValue = event.newValue;
+        if (newValue === undefined || newValue === null) {
+            console.warn('replace action requires newValue');
+            return;
+        }
+
+        // determine type and replace content accordingly
+        if (Array.isArray(target) && Array.isArray(newValue)) {
+            target.splice(0, target.length, ...newValue);
+        } else if (target instanceof Map && newValue instanceof Map) {
+            const newValueEntries = [...newValue.entries()];
+            target.clear();
+            for (const [key, value] of newValueEntries) {
+                target.set(key, value);
+            }
+        } else if (target instanceof Set && newValue instanceof Set) {
+            const newValueEntries = [...newValue.values()];
+            target.clear();
+            for (const value of newValueEntries) {
+                target.add(value);
+            }
+        } else if (typeof target === 'object' && target !== null && typeof newValue === 'object' && newValue !== null) {
+            // plain object replacement
+            Object.keys(target).forEach(key => delete target[key]);
+            Object.assign(target, newValue);
+        } else {
+            console.warn(`Type mismatch or unsupported type for 'replace' action at path ${event.path.join('.')}. Target type: ${typeof target} ${target.constructor.name}, New value type: ${typeof newValue} ${newValue.constructor.name}`);
+        }
     }
 };
 
-// applies a state change event to a plain javascript object/array (the target state)
+/**
+ * Applies a state change event to a plain javascript object/array (the target state)
+ * 
+ * @param root - The root object/array to apply the event to
+ * @param event - The state change event to apply
+ */
 export function updateState(root: any, event: StateEvent): void {
     const { action, path } = event;
 
-    if (!path || path.length === 0) {
-        console.warn('event path is empty, cannot apply update', event);
+    // Allow empty path ONLY for 'replace' action to target the root
+    if (!path || (path.length === 0 && action !== 'replace')) {
+        console.warn('event path is invalid for action', event);
         return;
     }
 
@@ -166,24 +203,29 @@ export function updateState(root: any, event: StateEvent): void {
             targetForHandler = parent;
             keyForHandler = path[path.length - 1];
         }
-    } else if (action.startsWith('array-') || action.startsWith('map-') || action.startsWith('set-')) {
-        // need the collection object itself (array, map, or set)
-        const targetPath = path;
-        const targetPathKey = targetPath.join('.');
-        // try cache first
-        let targetCollection = pathCache.get(root)?.get(targetPathKey);
-        if (targetCollection === undefined) {
-             // traverse path manually if not in cache
-             targetCollection = targetPath.reduce((acc: any, key: any) => acc ? getValue(acc, key) : undefined, root);
-             if (targetCollection !== undefined) setInPathCache(root, targetPathKey, targetCollection); // cache if found
-        }
+    } else if (action.startsWith('array-') || action.startsWith('map-') || action.startsWith('set-') || action === 'replace') {
+        // need the target object itself (array, map, set, or object for replace)
+        if (path.length === 0 && action === 'replace') {
+             // special case: replace action on the root object itself
+             targetForHandler = root;
+        } else {
+            const targetPath = path;
+            const targetPathKey = targetPath.join('.');
+            // try cache first
+            let targetCollection = pathCache.get(root)?.get(targetPathKey);
+            if (targetCollection === undefined) {
+                 // traverse path manually if not in cache
+                 targetCollection = targetPath.reduce((acc: any, key: any) => acc ? getValue(acc, key) : undefined, root);
+                 if (targetCollection !== undefined) setInPathCache(root, targetPathKey, targetCollection); // cache if found
+            }
 
-        if (targetCollection === undefined) {
-             console.warn(`target collection at path ${targetPathKey} not found for action ${action}`);
-             return;
+            if (targetCollection === undefined) {
+                 console.warn(`target at path ${targetPathKey} not found for action ${action}`);
+                 return;
+            }
+            targetForHandler = targetCollection;
         }
-        targetForHandler = targetCollection;
-        // keyForHandler remains null for these actions as the handler operates directly on the collection
+        // keyForHandler remains null for these actions as the handler operates directly on the target
     } else {
          // this should not be reachable if handler lookup succeeded
          console.error(`unexpected action type passed checks: ${action}`);
@@ -192,4 +234,4 @@ export function updateState(root: any, event: StateEvent): void {
 
     // call the appropriate handler with the resolved target and key
     handler(targetForHandler, keyForHandler, event);
-} 
+}
