@@ -15,6 +15,12 @@ interface WritableComputedOptions<T> {
     get: ComputedGetter<T>;
     set: ComputedSetter<T>;
 }
+/**
+ * Creates a computed ref from a getter function
+ *
+ * @param getter - The getter function
+ * @returns A computed ref
+ */
 export declare function computed<T>(getter: ComputedGetter<T>): ComputedRef<T>;
 export declare function computed<T>(options: WritableComputedOptions<T>): WritableComputedRef<T>;
 export declare function isComputed<T>(c: any): c is ComputedRef<T> | WritableComputedRef<T>;

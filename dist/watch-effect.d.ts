@@ -10,6 +10,7 @@ export interface TrackedEffect<T = any> {
     options?: WatchEffectOptions;
     active?: boolean;
     _rawCallback: EffectCallback<T>;
+    triggerDepth?: number;
 }
 export declare let activeEffect: TrackedEffect<any> | null;
 export declare function setActiveEffect(effect: TrackedEffect<any> | null): void;
@@ -26,7 +27,7 @@ export declare function track(target: object, key: string | symbol): void;
 /**
  * triggers all active effects associated with a specific object property.
  * called by proxy setters/deleters or ref setters.
- * currently runs effects synchronously.
+ * now batches effects to run in the same tick.
  */
 export declare function trigger(target: object, key: string | symbol): void;
 export interface WatchEffectOptions {
