@@ -15,6 +15,7 @@ This section provides detailed documentation for all the functions and types exp
 
 - `isRef` - Check if a value is a ref object
 - `unref` - Unwrap a ref to get its inner value
+- `toRefs` - Convert reactive object properties to individual refs
 - `isReactive` - Check if an object is a reactive proxy
 - `isReadonly` - Check if an object is a readonly proxy
 - `isComputed` - Check if a value is a computed ref
@@ -27,4 +28,4 @@ This section provides detailed documentation for all the functions and types exp
 - `WatchSource<T>` - Type for sources that can be watched
 - `WatchEffect` - Type for watch effect handlers
 - `WatchOptions` - Type for watch options
-- `StateEvent` - Type for state change events 
+- `StateEvent` - Type for state change events
