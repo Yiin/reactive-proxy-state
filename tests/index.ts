@@ -11,5 +11,6 @@ import './complex.bun.test';
 import './edge-cases.bun.test';
 import './watch.bun.test';
 import './watchEffect.bun.test';
+import './markRaw.bun.test';
 
 console.log("All tests completed!"); 

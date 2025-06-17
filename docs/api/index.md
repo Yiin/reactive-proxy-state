@@ -10,6 +10,7 @@ This section provides detailed documentation for all the functions and types exp
 - [`watchEffect`](/api/watch-effect) - Run and automatically re-run functions when dependencies change
 - [`watch`](/api/watch) - Watch specific reactive sources for changes
 - [`updateState`](/api/update-state) - Apply state change events to objects
+- [`markRaw`](/api/mark-raw) - Flag an object so it is never made reactive
 
 ## Helper Functions
 

@@ -41,6 +41,11 @@ export function reactive<T extends object>(
   emit?: EmitFunction,
   path: Path = []
 ): T {
+  // If the object is explicitly marked as raw, return it as-is without wrapping.
+  if ((obj as any)[ReactiveFlags.SKIP]) {
+    return obj;
+  }
+
   // prevent infinite recursion with circular references
   if (globalSeen.has(obj)) return globalSeen.get(obj);
 

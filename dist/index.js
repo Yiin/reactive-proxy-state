@@ -1240,6 +1240,9 @@ function toRaw(observed) {
   return raw ? toRaw(raw) : observed;
 }
 function reactive(obj, emit, path = []) {
+  if (obj["__v_skip" /* SKIP */]) {
+    return obj;
+  }
   if (globalSeen.has(obj))
     return globalSeen.get(obj);
   if (emit && path.length === 0) {
@@ -1524,6 +1527,18 @@ function watch(source, callback, options = {}) {
   });
   return stopEffect;
 }
+// src/mark-raw.ts
+function markRaw(obj) {
+  if (obj && typeof obj === "object") {
+    Object.defineProperty(obj, "__v_skip" /* SKIP */, {
+      value: true,
+      enumerable: false,
+      configurable: false,
+      writable: false
+    });
+  }
+  return obj;
+}
 export {
   wrapperCache,
   wrapSet,
@@ -1548,6 +1563,7 @@ export {
   reactive,
   pathConcatCache,
   pathCache,
+  markRaw,
   isRefSymbol,
   isRef,
   isReactive,
