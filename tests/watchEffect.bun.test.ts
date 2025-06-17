@@ -1,5 +1,5 @@
-import { expect, test, describe, mock, spyOn } from "bun:test";
-import { reactive, watchEffect, StateEvent, EmitFunction } from '../src/index';
+import { expect, test, describe, mock } from "bun:test";
+import { reactive, watchEffect } from '../src/index';
 import { createEventCollector } from './test-utils';
 
 describe("WatchEffect Tests", () => {
@@ -461,5 +461,158 @@ describe("WatchEffect Tests", () => {
     expect(getterMock).toHaveBeenCalledTimes(3); 
 
     stop(); // Clean up
+  });
+
+  test('watchEffect supports onCleanup - basic cleanup on re-run', () => {
+    const state = reactive({ count: 0 }, () => {});
+    const cleanupFn = mock(() => {});
+    
+    const effectFn = mock((onCleanup: (fn: () => void) => void) => {
+      onCleanup(cleanupFn);
+      return state.count;
+    });
+    
+    const stop = watchEffect(effectFn);
+    
+    expect(effectFn).toHaveBeenCalledTimes(1);
+    expect(cleanupFn).toHaveBeenCalledTimes(0); // No cleanup on first run
+    
+    // Trigger re-run - should call cleanup before re-running
+    state.count = 1;
+    
+    expect(effectFn).toHaveBeenCalledTimes(2);
+    expect(cleanupFn).toHaveBeenCalledTimes(1); // Cleanup called before re-run
+    
+    stop();
+  });
+
+  test('watchEffect supports onCleanup - cleanup on stop', () => {
+    const state = reactive({ count: 0 }, () => {});
+    const cleanupFn = mock(() => {});
+    
+    const effectFn = mock((onCleanup: (fn: () => void) => void) => {
+      onCleanup(cleanupFn);
+      return state.count;
+    });
+    
+    const stop = watchEffect(effectFn);
+    
+    expect(effectFn).toHaveBeenCalledTimes(1);
+    expect(cleanupFn).toHaveBeenCalledTimes(0);
+    
+    // Stop the effect - should call cleanup
+    stop();
+    
+    expect(cleanupFn).toHaveBeenCalledTimes(1); // Cleanup called on stop
+  });
+
+  test('watchEffect supports onCleanup - multiple cleanup functions', () => {
+    const state = reactive({ count: 0 }, () => {});
+    const cleanup1 = mock(() => {});
+    const cleanup2 = mock(() => {});
+    
+    const effectFn = mock((onCleanup: (fn: () => void) => void) => {
+      onCleanup(cleanup1);
+      onCleanup(cleanup2);
+      return state.count;
+    });
+    
+    const stop = watchEffect(effectFn);
+    
+    expect(effectFn).toHaveBeenCalledTimes(1);
+    expect(cleanup1).toHaveBeenCalledTimes(0);
+    expect(cleanup2).toHaveBeenCalledTimes(0);
+    
+    // Trigger re-run
+    state.count = 1;
+    
+    expect(effectFn).toHaveBeenCalledTimes(2);
+    expect(cleanup1).toHaveBeenCalledTimes(1); // Both cleanup functions called
+    expect(cleanup2).toHaveBeenCalledTimes(1);
+    
+    stop();
+    
+    // On stop, the new cleanup functions should be called
+    expect(cleanup1).toHaveBeenCalledTimes(2);
+    expect(cleanup2).toHaveBeenCalledTimes(2);
+  });
+
+  test('watchEffect supports onCleanup - cleanup exceptions do not break effect', () => {
+    const state = reactive({ count: 0 }, () => {});
+    const workingCleanup = mock(() => {});
+    const brokenCleanup = mock(() => {
+      throw new Error("Cleanup error");
+    });
+    
+    const effectFn = mock((onCleanup: (fn: () => void) => void) => {
+      onCleanup(brokenCleanup);
+      onCleanup(workingCleanup);
+      return state.count;
+    });
+    
+    const stop = watchEffect(effectFn);
+    
+    expect(effectFn).toHaveBeenCalledTimes(1);
+    
+    // Trigger re-run - should handle cleanup errors gracefully
+    state.count = 1;
+    
+    expect(effectFn).toHaveBeenCalledTimes(2); // Effect still runs despite cleanup error
+    expect(brokenCleanup).toHaveBeenCalledTimes(1);
+    expect(workingCleanup).toHaveBeenCalledTimes(1);
+    
+    stop();
+  });
+
+  test('watchEffect supports onCleanup - cleanup with async operations', () => {
+    const state = reactive({ count: 0 }, () => {});
+    const cleanupFn = mock(() => {});
+    let intervalId: NodeJS.Timeout;
+    
+    const effectFn = mock((onCleanup: (fn: () => void) => void) => {
+      // Simulate setting up an async operation
+      intervalId = setInterval(() => {}, 100);
+      
+      onCleanup(() => {
+        cleanupFn();
+        clearInterval(intervalId);
+      });
+      
+      return state.count;
+    });
+    
+    const stop = watchEffect(effectFn);
+    
+    expect(effectFn).toHaveBeenCalledTimes(1);
+    expect(cleanupFn).toHaveBeenCalledTimes(0);
+    
+    // Trigger re-run
+    state.count = 1;
+    
+    expect(effectFn).toHaveBeenCalledTimes(2);
+    expect(cleanupFn).toHaveBeenCalledTimes(1); // Cleanup called, interval cleared
+    
+    stop();
+    
+    expect(cleanupFn).toHaveBeenCalledTimes(2); // Final cleanup on stop
+  });
+
+  test('watchEffect onCleanup - no cleanup function provided should work normally', () => {
+    const state = reactive({ count: 0 }, () => {});
+    
+    // Effect that doesn't use onCleanup parameter
+    const effectFn = mock(() => {
+      return state.count;
+    });
+    
+    const stop = watchEffect(effectFn);
+    
+    expect(effectFn).toHaveBeenCalledTimes(1);
+    
+    // Should work normally without cleanup
+    state.count = 1;
+    expect(effectFn).toHaveBeenCalledTimes(2);
+    
+    stop();
   });
 }); 

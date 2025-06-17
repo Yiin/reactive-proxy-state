@@ -1,4 +1,4 @@
-type EffectCallback<T = any> = () => T;
+type EffectCallback<T = any> = (onCleanup?: (cleanupFn: () => void) => void) => T;
 type Scheduler = (job: () => void) => void;
 export interface WatchEffectStopHandle<T = any> {
     (): void;
@@ -11,6 +11,7 @@ export interface TrackedEffect<T = any> {
     active?: boolean;
     _rawCallback: EffectCallback<T>;
     triggerDepth?: number;
+    cleanupFns?: (() => void)[];
 }
 export declare let activeEffect: TrackedEffect<any> | null;
 export declare function setActiveEffect(effect: TrackedEffect<any> | null): void;
@@ -19,6 +20,11 @@ export declare function setActiveEffect(effect: TrackedEffect<any> | null): void
  * this is crucial to prevent memory leaks and unnecessary updates when an effect is stopped or re-run.
  */
 export declare function cleanupEffect(effect: TrackedEffect<any>): void;
+/**
+ * runs all cleanup functions registered for an effect and clears them.
+ * called before re-running an effect or when stopping it.
+ */
+export declare function runCleanupFunctions(effect: TrackedEffect<any>): void;
 /**
  * establishes a dependency between the currently active effect and a specific object property.
  * called by proxy getters or ref getters.

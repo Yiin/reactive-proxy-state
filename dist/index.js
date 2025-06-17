@@ -410,6 +410,18 @@ function cleanupEffect(effect) {
     effect.dependencies.clear();
   }
 }
+function runCleanupFunctions(effect) {
+  if (effect.cleanupFns && effect.cleanupFns.length > 0) {
+    effect.cleanupFns.forEach((cleanupFn) => {
+      try {
+        cleanupFn();
+      } catch (error) {
+        console.error("Error in effect cleanup function:", error);
+      }
+    });
+    effect.cleanupFns = [];
+  }
+}
 function track(target, key) {
   if (!activeEffect || !activeEffect.active)
     return;
@@ -510,9 +522,16 @@ function watchEffect(effectCallback, options = {}) {
     }
     const previousEffect = activeEffect;
     try {
+      runCleanupFunctions(effectFn);
       cleanupEffect(effectFn);
       setActiveEffect(effectFn);
-      return effectCallback();
+      const onCleanup = (cleanupFn) => {
+        if (!effectFn.cleanupFns) {
+          effectFn.cleanupFns = [];
+        }
+        effectFn.cleanupFns.push(cleanupFn);
+      };
+      return effectCallback(onCleanup);
     } finally {
       setActiveEffect(previousEffect);
     }
@@ -522,13 +541,15 @@ function watchEffect(effectCallback, options = {}) {
     dependencies: new Set,
     options,
     active: true,
-    _rawCallback: effectCallback
+    _rawCallback: effectCallback,
+    cleanupFns: []
   };
   if (!options.lazy) {
     effectFn.run();
   }
   const stopHandle = () => {
     if (effectFn.active) {
+      runCleanupFunctions(effectFn);
       cleanupEffect(effectFn);
       effectFn.active = false;
       queuedEffects.delete(effectFn);
@@ -539,12 +560,12 @@ function watchEffect(effectCallback, options = {}) {
 }
 
 // src/wrap-set.ts
-function wrapSet(set, emit, path = [], seen = globalSeen) {
+function wrapSet(set, emit, path = []) {
   const cachedProxy = wrapperCache.get(set);
   if (cachedProxy)
     return cachedProxy;
-  if (seen.has(set))
-    return seen.get(set);
+  if (globalSeen.has(set))
+    return globalSeen.get(set);
   const methodCache = {};
   const proxy = new Proxy(set, {
     get(target, prop, receiver) {
@@ -657,8 +678,8 @@ function wrapSet(set, emit, path = [], seen = globalSeen) {
             track(target, String(index));
             let wrappedValue = valueToWrap;
             if (valueToWrap && typeof valueToWrap === "object") {
-              if (seen.has(valueToWrap)) {
-                wrappedValue = seen.get(valueToWrap);
+              if (globalSeen.has(valueToWrap)) {
+                wrappedValue = globalSeen.get(valueToWrap);
               } else {
                 const cachedValueProxy = wrapperCache.get(valueToWrap);
                 if (cachedValueProxy) {
@@ -672,15 +693,15 @@ function wrapSet(set, emit, path = [], seen = globalSeen) {
                     setPathConcat(pathKey, newPath);
                   }
                   if (valueToWrap instanceof Map)
-                    wrappedValue = wrapMap(valueToWrap, emit, newPath, seen);
+                    wrappedValue = wrapMap(valueToWrap, emit, newPath);
                   else if (valueToWrap instanceof Set)
-                    wrappedValue = wrapSet(valueToWrap, emit, newPath, seen);
+                    wrappedValue = wrapSet(valueToWrap, emit, newPath);
                   else if (Array.isArray(valueToWrap))
-                    wrappedValue = wrapArray(valueToWrap, emit, newPath, seen);
+                    wrappedValue = wrapArray(valueToWrap, emit, newPath);
                   else if (valueToWrap instanceof Date)
                     wrappedValue = new Date(valueToWrap.getTime());
                   else
-                    wrappedValue = reactive(valueToWrap, emit, newPath, seen);
+                    wrappedValue = reactive(valueToWrap, emit, newPath);
                 }
               }
             }
@@ -705,18 +726,18 @@ function wrapSet(set, emit, path = [], seen = globalSeen) {
       return value;
     }
   });
-  seen.set(set, proxy);
+  globalSeen.set(set, proxy);
   wrapperCache.set(set, proxy);
   return proxy;
 }
 
 // src/wrap-map.ts
-function wrapMap(map, emit, path = [], seen = globalSeen) {
+function wrapMap(map, emit, path = []) {
   const cachedProxy = wrapperCache.get(map);
   if (cachedProxy)
     return cachedProxy;
-  if (seen.has(map))
-    return seen.get(map);
+  if (globalSeen.has(map))
+    return globalSeen.get(map);
   const methodCache = {};
   const proxy = new Proxy(map, {
     get(target, prop, receiver) {
@@ -823,8 +844,8 @@ function wrapMap(map, emit, path = [], seen = globalSeen) {
           const value2 = target.get(key);
           if (!value2 || typeof value2 !== "object")
             return value2;
-          if (seen.has(value2))
-            return seen.get(value2);
+          if (globalSeen.has(value2))
+            return globalSeen.get(value2);
           const cachedValueProxy = wrapperCache.get(value2);
           if (cachedValueProxy)
             return cachedValueProxy;
@@ -836,14 +857,14 @@ function wrapMap(map, emit, path = [], seen = globalSeen) {
             setPathConcat(pathKey, newPath);
           }
           if (value2 instanceof Map)
-            return wrapMap(value2, emit, newPath, seen);
+            return wrapMap(value2, emit, newPath);
           if (value2 instanceof Set)
-            return wrapSet(value2, emit, newPath, seen);
+            return wrapSet(value2, emit, newPath);
           if (Array.isArray(value2))
-            return wrapArray(value2, emit, newPath, seen);
+            return wrapArray(value2, emit, newPath);
           if (value2 instanceof Date)
             return new Date(value2.getTime());
-          return reactive(value2, emit, newPath, seen);
+          return reactive(value2, emit, newPath);
         };
         return methodCache[prop];
       }
@@ -880,8 +901,8 @@ function wrapMap(map, emit, path = [], seen = globalSeen) {
             }
             let wrappedKey = keyToWrap;
             if (isEntry && keyToWrap && typeof keyToWrap === "object") {
-              if (seen.has(keyToWrap)) {
-                wrappedKey = seen.get(keyToWrap);
+              if (globalSeen.has(keyToWrap)) {
+                wrappedKey = globalSeen.get(keyToWrap);
               } else {
                 const pathKey = path.length > 0 ? `${path.join(".")}.${String(keyToWrap)}` : String(keyToWrap);
                 let keyPath = getPathConcat(pathKey);
@@ -889,13 +910,13 @@ function wrapMap(map, emit, path = [], seen = globalSeen) {
                   keyPath = path.concat(String(keyToWrap));
                   setPathConcat(pathKey, keyPath);
                 }
-                wrappedKey = reactive(keyToWrap, emit, keyPath, seen);
+                wrappedKey = reactive(keyToWrap, emit, keyPath);
               }
             }
             let wrappedValue = valueToWrap;
             if (valueToWrap && typeof valueToWrap === "object") {
-              if (seen.has(valueToWrap)) {
-                wrappedValue = seen.get(valueToWrap);
+              if (globalSeen.has(valueToWrap)) {
+                wrappedValue = globalSeen.get(valueToWrap);
               } else {
                 const cachedValueProxy = wrapperCache.get(valueToWrap);
                 if (cachedValueProxy) {
@@ -909,15 +930,15 @@ function wrapMap(map, emit, path = [], seen = globalSeen) {
                     setPathConcat(pathKey, newPath);
                   }
                   if (valueToWrap instanceof Map)
-                    wrappedValue = wrapMap(valueToWrap, emit, newPath, seen);
+                    wrappedValue = wrapMap(valueToWrap, emit, newPath);
                   else if (valueToWrap instanceof Set)
-                    wrappedValue = wrapSet(valueToWrap, emit, newPath, seen);
+                    wrappedValue = wrapSet(valueToWrap, emit, newPath);
                   else if (Array.isArray(valueToWrap))
-                    wrappedValue = wrapArray(valueToWrap, emit, newPath, seen);
+                    wrappedValue = wrapArray(valueToWrap, emit, newPath);
                   else if (valueToWrap instanceof Date)
                     wrappedValue = new Date(valueToWrap.getTime());
                   else
-                    wrappedValue = reactive(valueToWrap, emit, newPath, seen);
+                    wrappedValue = reactive(valueToWrap, emit, newPath);
                 }
               }
             }
@@ -943,7 +964,7 @@ function wrapMap(map, emit, path = [], seen = globalSeen) {
       return value;
     }
   });
-  seen.set(map, proxy);
+  globalSeen.set(map, proxy);
   wrapperCache.set(map, proxy);
   return proxy;
 }
@@ -952,12 +973,12 @@ function wrapMap(map, emit, path = [], seen = globalSeen) {
 function isObject2(v) {
   return v && typeof v === "object";
 }
-function wrapArray(arr, emit, path = [], seen = globalSeen) {
+function wrapArray(arr, emit, path = []) {
   const cachedProxy = wrapperCache.get(arr);
   if (cachedProxy)
     return cachedProxy;
-  if (seen.has(arr))
-    return seen.get(arr);
+  if (globalSeen.has(arr))
+    return globalSeen.get(arr);
   const methodCache = {};
   const proxy = new Proxy(arr, {
     get(target, prop, receiver) {
@@ -1111,8 +1132,8 @@ function wrapArray(arr, emit, path = [], seen = globalSeen) {
         track(target, String(prop));
         if (!isObject2(value))
           return value;
-        if (seen.has(value))
-          return seen.get(value);
+        if (globalSeen.has(value))
+          return globalSeen.get(value);
         const cachedValueProxy = wrapperCache.get(value);
         if (cachedValueProxy)
           return cachedValueProxy;
@@ -1124,14 +1145,14 @@ function wrapArray(arr, emit, path = [], seen = globalSeen) {
           setPathConcat(pathKey, newPath);
         }
         if (Array.isArray(value))
-          return wrapArray(value, emit, newPath, seen);
+          return wrapArray(value, emit, newPath);
         if (value instanceof Map)
-          return wrapMap(value, emit, newPath, seen);
+          return wrapMap(value, emit, newPath);
         if (value instanceof Set)
-          return wrapSet(value, emit, newPath, seen);
+          return wrapSet(value, emit, newPath);
         if (value instanceof Date)
           return new Date(value.getTime());
-        return reactive(value, emit, newPath, seen);
+        return reactive(value, emit, newPath);
       }
       if (typeof value === "function") {
         return value.bind(target);
@@ -1167,7 +1188,7 @@ function wrapArray(arr, emit, path = [], seen = globalSeen) {
       return result;
     }
   });
-  seen.set(arr, proxy);
+  globalSeen.set(arr, proxy);
   wrapperCache.set(arr, proxy);
   return proxy;
 }
@@ -1191,9 +1212,9 @@ function toRaw(observed) {
   const raw = observed && observed["__v_raw" /* RAW */];
   return raw ? toRaw(raw) : observed;
 }
-function reactive(obj, emit, path = [], seen = globalSeen) {
-  if (seen.has(obj))
-    return seen.get(obj);
+function reactive(obj, emit, path = []) {
+  if (globalSeen.has(obj))
+    return globalSeen.get(obj);
   if (emit && path.length === 0) {
     try {
       const initialEvent = {
@@ -1207,28 +1228,28 @@ function reactive(obj, emit, path = [], seen = globalSeen) {
     }
   }
   if (Array.isArray(obj)) {
-    return wrapArray(obj, emit, path, seen);
+    return wrapArray(obj, emit, path);
   }
   if (obj instanceof Map) {
-    return wrapMap(obj, emit, path, seen);
+    return wrapMap(obj, emit, path);
   }
   if (obj instanceof Set) {
-    return wrapSet(obj, emit, path, seen);
+    return wrapSet(obj, emit, path);
   }
   function wrapValue(val, subPath) {
     if (!isObject3(val))
       return val;
-    if (seen.has(val))
-      return seen.get(val);
+    if (globalSeen.has(val))
+      return globalSeen.get(val);
     if (Array.isArray(val))
       return wrapArray(val, emit, subPath);
     if (val instanceof Map)
-      return wrapMap(val, emit, subPath, seen);
+      return wrapMap(val, emit, subPath);
     if (val instanceof Set)
-      return wrapSet(val, emit, subPath, seen);
+      return wrapSet(val, emit, subPath);
     if (val instanceof Date)
       return new Date(val.getTime());
-    return reactive(val, emit, subPath, seen);
+    return reactive(val, emit, subPath);
   }
   const proxy = new Proxy(obj, {
     get(target, prop, receiver) {
@@ -1301,7 +1322,7 @@ function reactive(obj, emit, path = [], seen = globalSeen) {
       return result;
     }
   });
-  seen.set(obj, proxy);
+  globalSeen.set(obj, proxy);
   return proxy;
 }
 // src/watch.ts
@@ -1454,6 +1475,7 @@ export {
   setPathConcat,
   setInPathCache,
   setActiveEffect,
+  runCleanupFunctions,
   ref,
   reactive,
   pathConcatCache,

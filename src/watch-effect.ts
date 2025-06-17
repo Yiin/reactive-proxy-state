@@ -1,6 +1,6 @@
 import { StateEvent } from './types';
 
-type EffectCallback<T = any> = () => T;
+type EffectCallback<T = any> = (onCleanup?: (cleanupFn: () => void) => void) => T;
 type Scheduler = (job: () => void) => void;
 
 // stop handle returned by watchEffect, allows stopping the effect
@@ -18,6 +18,7 @@ export interface TrackedEffect<T = any> {
   active?: boolean; // flag indicating if the effect is currently active (not stopped)
   _rawCallback: EffectCallback<T>; // the original user-provided callback function
   triggerDepth?: number; // tracks at what depth this effect was triggered (used for batching)
+  cleanupFns?: (() => void)[]; // cleanup functions registered via onCleanup
 }
 
 // tracks the currently executing effect to establish dependencies
@@ -48,6 +49,23 @@ export function cleanupEffect(effect: TrackedEffect<any>) {
     });
     // clear the effect's own list of dependencies for the next run
     effect.dependencies.clear();
+  }
+}
+
+/**
+ * runs all cleanup functions registered for an effect and clears them.
+ * called before re-running an effect or when stopping it.
+ */
+export function runCleanupFunctions(effect: TrackedEffect<any>) {
+  if (effect.cleanupFns && effect.cleanupFns.length > 0) {
+    effect.cleanupFns.forEach(cleanupFn => {
+      try {
+        cleanupFn();
+      } catch (error) {
+        console.error('Error in effect cleanup function:', error);
+      }
+    });
+    effect.cleanupFns = []; // clear cleanup functions after running them
   }
 }
 
@@ -223,9 +241,21 @@ export function watchEffect<T>(
 
     const previousEffect = activeEffect;
     try {
+      // Run cleanup functions before re-running the effect
+      runCleanupFunctions(effectFn);
+      
       cleanupEffect(effectFn); // clean up dependencies from the previous run
       setActiveEffect(effectFn); // set this effect as the one currently tracking
-      return effectCallback(); // execute the user's function, triggering tracks
+      
+      // Create the onCleanup function that the user callback can use
+      const onCleanup = (cleanupFn: () => void) => {
+        if (!effectFn.cleanupFns) {
+          effectFn.cleanupFns = [];
+        }
+        effectFn.cleanupFns.push(cleanupFn);
+      };
+      
+      return effectCallback(onCleanup); // execute the user's function with onCleanup, triggering tracks
     } finally {
       setActiveEffect(previousEffect); // restore the previous active effect
     }
@@ -237,7 +267,8 @@ export function watchEffect<T>(
       dependencies: new Set(), // initialize empty dependencies
       options: options,
       active: true, // start as active
-      _rawCallback: effectCallback // store the original callback
+      _rawCallback: effectCallback, // store the original callback
+      cleanupFns: [] // initialize cleanup functions
   };
 
   // run the effect immediately unless the `lazy` option is true
@@ -248,6 +279,7 @@ export function watchEffect<T>(
   // create the function that stops the effect
   const stopHandle: WatchEffectStopHandle<T> = () => {
     if (effectFn.active) {
+      runCleanupFunctions(effectFn); // run any registered cleanup functions
       cleanupEffect(effectFn); // remove from dependency lists
       effectFn.active = false; // mark as inactive
       // Remove from queued effects if present
