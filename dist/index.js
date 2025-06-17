@@ -1444,7 +1444,8 @@ function computed(getterOrOptions) {
       } else {
         console.warn("computed value is read-only");
       }
-    }
+    },
+    effect: stopHandle
   };
   return computedRef;
 }

@@ -9,12 +9,14 @@ export interface ComputedRef<T = any> extends Omit<Ref<T>, 'value'> {
   readonly value: T;
   readonly [isComputedSymbol]: true;
   readonly [isRefSymbol]: true; // mark as ref-like for type checks
+  readonly effect: WatchEffectStopHandle<T>; // expose the underlying effect for manual cleanup
 }
 
 // interface for writable computed refs
 export interface WritableComputedRef<T> extends Ref<T> {
     readonly [isComputedSymbol]: true;
     readonly [isRefSymbol]: true;
+    readonly effect: WatchEffectStopHandle<T>; // expose the underlying effect for manual cleanup
 }
 
 type ComputedGetter<T> = () => T;
@@ -85,7 +87,7 @@ export function computed<T>(getterOrOptions: ComputedGetter<T> | WritableCompute
            console.warn('computed value is read-only');
        }
     },
-    // stop: stopHandle // potentially expose stop handle
+    effect: stopHandle // expose the stop handle for manual cleanup
   };
 
   return computedRef;
