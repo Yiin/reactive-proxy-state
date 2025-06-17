@@ -5,12 +5,12 @@ export interface ComputedRef<T = any> extends Omit<Ref<T>, 'value'> {
     readonly value: T;
     readonly [isComputedSymbol]: true;
     readonly [isRefSymbol]: true;
-    readonly effect: WatchEffectStopHandle<T>;
+    readonly stop: WatchEffectStopHandle<T>;
 }
 export interface WritableComputedRef<T> extends Ref<T> {
     readonly [isComputedSymbol]: true;
     readonly [isRefSymbol]: true;
-    readonly effect: WatchEffectStopHandle<T>;
+    readonly stop: WatchEffectStopHandle<T>;
 }
 type ComputedGetter<T> = () => T;
 type ComputedSetter<T> = (v: T) => void;

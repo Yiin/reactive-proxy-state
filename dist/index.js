@@ -1449,7 +1449,7 @@ function computed(getterOrOptions) {
         console.warn("computed value is read-only");
       }
     },
-    effect: stopHandle
+    stop: stopHandle
   };
   return computedRef;
 }
