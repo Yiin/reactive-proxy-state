@@ -1,4 +1,4 @@
-type EffectCallback<T = any> = (onCleanup?: (cleanupFn: () => void) => void) => T;
+type EffectCallback<T = any> = (onCleanup: (cleanupFn: () => void) => void) => T;
 type Scheduler = (job: () => void) => void;
 export interface WatchEffectStopHandle<T = any> {
     (): void;

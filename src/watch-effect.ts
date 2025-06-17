@@ -1,6 +1,6 @@
 import { StateEvent } from './types';
 
-type EffectCallback<T = any> = (onCleanup?: (cleanupFn: () => void) => void) => T;
+type EffectCallback<T = any> = (onCleanup: (cleanupFn: () => void) => void) => T;
 type Scheduler = (job: () => void) => void;
 
 // stop handle returned by watchEffect, allows stopping the effect
@@ -228,15 +228,7 @@ export function watchEffect<T>(
   // the wrapper function that manages the effect lifecycle (cleanup, tracking, execution)
   const run = (): T => {
     if (!effectFn.active) {
-        // if stopped, potentially run the callback once without tracking, though behavior might be undefined
-        // vue's behavior here might differ, review needed if exact compatibility matters
-        try {
-             return effectCallback();
-        } catch (e) {
-             console.error("error in stopped watchEffect callback:", e);
-             // decide on return value for stopped effects that error
-             return undefined as T; // or rethrow?
-        }
+        throw new Error("Trying to run a stopped effect");
     }
 
     const previousEffect = activeEffect;

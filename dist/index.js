@@ -513,12 +513,7 @@ function trigger(target, key) {
 function watchEffect(effectCallback, options = {}) {
   const run = () => {
     if (!effectFn.active) {
-      try {
-        return effectCallback();
-      } catch (e) {
-        console.error("error in stopped watchEffect callback:", e);
-        return;
-      }
+      throw new Error("Trying to run a stopped effect");
     }
     const previousEffect = activeEffect;
     try {
