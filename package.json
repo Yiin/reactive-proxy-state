@@ -7,6 +7,8 @@
     "url": "git+https://github.com/Yiin/reactive-proxy-state.git"
   },
   "main": "dist/index.js",
+  "module": "dist/index.js",
+  "type": "module",
   "devDependencies": {
     "bun-types": "^1.2.8",
     "typescript": "^5.0.4",
@@ -16,7 +18,9 @@
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
-      "require": "./dist/index.js"
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs",
+      "default": "./dist/index.js"
     }
   },
   "bugs": {
@@ -45,7 +49,7 @@
     "access": "public"
   },
   "scripts": {
-    "build": "bun build src/index.ts --outdir dist --target node --format esm && tsc --emitDeclarationOnly --outDir dist",
+    "build": "bun build src/index.ts --outdir dist --target node --format esm && bun build src/index.ts --outfile dist/index.cjs --target node --format cjs && tsc --emitDeclarationOnly --outDir dist",
     "test": "bun test",
     "test:watch": "bun test --watch",
     "test:bench": "bun --bun ./benchmarks/state-sync.bench.ts",
