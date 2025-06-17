@@ -209,6 +209,11 @@ export function wrapSet<T>(
         return target.size;
       }
 
+      // Forward constructor property for instanceof checks
+      if (prop === "constructor") {
+        return Set;
+      }
+
       const value = Reflect.get(target, prop, receiver);
       if (typeof value === "function") {
         return value.bind(target);

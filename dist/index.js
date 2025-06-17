@@ -58,6 +58,26 @@ function deepEqual(a, b, seen = globalSeen) {
   let result;
   if (Array.isArray(a)) {
     result = a.length === b.length && a.every((val, idx) => deepEqual(val, b[idx], seen));
+  } else if (a instanceof Map && b instanceof Map) {
+    result = a.size === b.size;
+    if (result) {
+      for (const [key, value] of a) {
+        if (!b.has(key) || !deepEqual(value, b.get(key), seen)) {
+          result = false;
+          break;
+        }
+      }
+    }
+  } else if (a instanceof Set && b instanceof Set) {
+    result = a.size === b.size;
+    if (result) {
+      for (const value of a) {
+        if (!b.has(value)) {
+          result = false;
+          break;
+        }
+      }
+    }
   } else {
     const keysA = Object.keys(a);
     const keysB = Object.keys(b);
@@ -120,7 +140,8 @@ function traverse(value, seen = new Set) {
       traverse(value[i], seen);
     }
   } else if (value instanceof Set || value instanceof Map) {
-    for (const v of value) {
+    const rawValue = value.__v_raw || value;
+    for (const v of rawValue) {
       if (Array.isArray(v)) {
         traverse(v[0], seen);
         traverse(v[1], seen);
@@ -465,12 +486,17 @@ function flushEffects() {
       }
     }
     for (const effect of effectsToRun) {
-      if (effect.active) {
-        if (effect.options?.scheduler) {
-          effect.options.scheduler(effect.run);
-        } else {
-          effect.run();
-        }
+      if (!effect.active)
+        continue;
+      if (effect.options?.scheduler) {
+        effect.options.scheduler(effect.run);
+      }
+    }
+    for (const effect of effectsToRun) {
+      if (!effect.active)
+        continue;
+      if (!effect.options?.scheduler) {
+        effect.run();
       }
     }
   } finally {
@@ -714,6 +740,9 @@ function wrapSet(set, emit, path = []) {
         track(target, "size");
         return target.size;
       }
+      if (prop === "constructor") {
+        return Set;
+      }
       const value = Reflect.get(target, prop, receiver);
       if (typeof value === "function") {
         return value.bind(target);
@@ -951,6 +980,9 @@ function wrapMap(map, emit, path = []) {
       if (prop === "size") {
         track(target, "size");
         return target.size;
+      }
+      if (prop === "constructor") {
+        return Map;
       }
       const value = Reflect.get(target, prop, receiver);
       if (typeof value === "function") {
@@ -1320,35 +1352,6 @@ function reactive(obj, emit, path = []) {
   globalSeen.set(obj, proxy);
   return proxy;
 }
-// src/watch.ts
-function watch(sourceInput, callback, options = {}) {
-  const { immediate = false, deep = true } = options;
-  const source = typeof sourceInput === "function" ? sourceInput : () => sourceInput;
-  let oldValue;
-  let initialized = false;
-  const stopEffect = watchEffect(() => {
-    const currentValue = source();
-    if (deep) {
-      traverse(currentValue);
-    }
-    if (initialized) {
-      let hasChanged = false;
-      hasChanged = deep || currentValue !== oldValue;
-      if (hasChanged) {
-        const prevOldValue = oldValue;
-        oldValue = deep ? deepClone(currentValue) : currentValue;
-        callback(currentValue, prevOldValue);
-      }
-    } else {
-      oldValue = deep ? deepClone(currentValue) : currentValue;
-      initialized = true;
-      if (immediate) {
-        callback(currentValue, undefined);
-      }
-    }
-  }, { lazy: false });
-  return stopEffect;
-}
 // src/ref.ts
 var isRefSymbol = Symbol("isRef");
 function ref(value) {
@@ -1402,6 +1405,7 @@ function toRef(object, key) {
 function triggerRef(ref2) {
   trigger(ref2, "value");
 }
+
 // src/computed.ts
 var isComputedSymbol = Symbol("isComputed");
 function computed(getterOrOptions) {
@@ -1451,6 +1455,74 @@ function computed(getterOrOptions) {
 }
 function isComputed(c) {
   return !!(c && c[isComputedSymbol]);
+}
+
+// src/watch.ts
+function watch(source, callback, options = {}) {
+  const { immediate = false, deep = true } = options;
+  const isMultiSource = Array.isArray(source);
+  const getter = () => {
+    if (isMultiSource) {
+      return source.map((s) => {
+        if (isRef(s))
+          return s.value;
+        if (isComputed(s))
+          return s.value;
+        if (typeof s === "function")
+          return s();
+        return s;
+      });
+    }
+    if (isRef(source))
+      return source.value;
+    if (isComputed(source))
+      return source.value;
+    if (typeof source === "function")
+      return source();
+    return source;
+  };
+  let oldValue;
+  let initialized = false;
+  const stopEffect = watchEffect(() => {
+    let currentValue = getter();
+    if (deep) {
+      traverse(currentValue);
+    }
+    const job = () => {
+      if (initialized) {
+        let hasChanged = false;
+        if (isMultiSource) {
+          if (!Array.isArray(oldValue) || currentValue.length !== oldValue.length) {
+            hasChanged = true;
+          } else {
+            hasChanged = currentValue.some((val, i) => {
+              return deep ? !deepEqual(val, oldValue[i]) : val !== oldValue[i];
+            });
+          }
+        } else {
+          hasChanged = deep ? !deepEqual(currentValue, oldValue) : currentValue !== oldValue;
+        }
+        if (hasChanged) {
+          const prevOldValue = oldValue;
+          if (isMultiSource) {
+            currentValue = getter();
+          }
+          const valueToClone = currentValue && typeof currentValue === "object" && currentValue.__v_raw ? currentValue.__v_raw : currentValue;
+          oldValue = deep ? deepClone(valueToClone) : currentValue;
+          callback(currentValue, prevOldValue);
+        }
+      } else {
+        const valueToClone = currentValue && typeof currentValue === "object" && currentValue.__v_raw ? currentValue.__v_raw : currentValue;
+        oldValue = deep ? deepClone(valueToClone) : currentValue;
+        initialized = true;
+        if (immediate) {
+          callback(currentValue, undefined);
+        }
+      }
+    };
+    job();
+  });
+  return stopEffect;
 }
 export {
   wrapperCache,

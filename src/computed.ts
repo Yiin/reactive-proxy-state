@@ -75,6 +75,9 @@ export function computed<T>(getterOrOptions: ComputedGetter<T> | WritableCompute
       track(computedRef, 'value');
       // if dirty, recompute value by running the getter
       if (_dirty) {
+        // Force immediate recomputation to ensure we get the latest value
+        // This is especially important during effect flushing when multiple
+        // effects might be running in sequence
         _value = effectRunner.run();
         _dirty = false; // mark as clean after successful run
       }

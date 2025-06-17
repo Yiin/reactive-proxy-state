@@ -135,14 +135,25 @@ function flushEffects() {
       }
     }
     
-    // Run the effects at the current depth level
+    // Run effects with a custom scheduler first (e.g., computed refs) so that
+    // they can update their internal state (set dirty flags, enqueue
+    // downstream triggers, etc.) before ordinary reactive effects run. This
+    // guarantees that consumers reading computed values within the same flush
+    // cycle will observe the latest value.
+
+    // 1) Effects with a scheduler (like computed) – they *schedule* work.
     for (const effect of effectsToRun) {
-      if (effect.active) { // Double check the effect is still active
-        if (effect.options?.scheduler) {
-          effect.options.scheduler(effect.run);
-        } else {
-          effect.run();
-        }
+      if (!effect.active) continue;
+      if (effect.options?.scheduler) {
+        effect.options.scheduler(effect.run);
+      }
+    }
+
+    // 2) Effects without a scheduler – typical reactive/watch effects.
+    for (const effect of effectsToRun) {
+      if (!effect.active) continue;
+      if (!effect.options?.scheduler) {
+        effect.run();
       }
     }
   } finally {

@@ -71,6 +71,26 @@ export function deepEqual(a: any, b: any, seen: WeakMap<any, any> = globalSeen):
     let result: boolean;
     if (Array.isArray(a)) {
         result = a.length === b.length && a.every((val, idx) => deepEqual(val, b[idx], seen));
+    } else if (a instanceof Map && b instanceof Map) {
+        result = a.size === b.size;
+        if (result) {
+            for (const [key, value] of a) {
+                if (!b.has(key) || !deepEqual(value, b.get(key), seen)) {
+                    result = false;
+                    break;
+                }
+            }
+        }
+    } else if (a instanceof Set && b instanceof Set) {
+        result = a.size === b.size;
+        if (result) {
+            for (const value of a) {
+                if (!b.has(value)) {
+                    result = false;
+                    break;
+                }
+            }
+        }
     } else {
         const keysA = Object.keys(a);
         const keysB = Object.keys(b);
@@ -153,7 +173,9 @@ export function traverse(value: any, seen: Set<any> = new Set()) {
       traverse(value[i], seen);
     }
   } else if (value instanceof Set || value instanceof Map) {
-      for (const v of value) {
+      // For reactive Map/Set, use the raw object to avoid triggering iterator tracking
+      const rawValue = (value as any).__v_raw || value;
+      for (const v of rawValue) {
           if (Array.isArray(v)) { // map entries [key, value]
               traverse(v[0], seen); // key
               traverse(v[1], seen); // value

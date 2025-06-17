@@ -12,3 +12,11 @@ export interface StateEvent {
     oldValues?: any[];
 }
 export type EmitFunction = (event: StateEvent) => void;
+import { Ref } from './ref';
+import { ComputedRef } from './computed';
+export type BaseWatchSource<T = any> = Ref<T> | ComputedRef<T> | (() => T);
+export type WatchSource<T = any> = BaseWatchSource<T> | T;
+export type UnwrapWatchSource<T> = T extends BaseWatchSource<infer V> ? V : T extends object ? T : T;
+export type UnwrapWatchSources<T> = {
+    -readonly [K in keyof T]: UnwrapWatchSource<T[K]>;
+};
