@@ -43,6 +43,11 @@ export default defineConfig({
 
     socialLinks: [
       { icon: 'github', link: 'https://github.com/Yiin/reactive-proxy-state' }
-    ]
+    ],
+
+    appearance: true, // show light/dark toggle (enabled by default, but explicit)
+    search: {
+      provider: 'local'
+    }
   }
-}) 
+})

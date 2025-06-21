@@ -18,7 +18,11 @@ This section provides detailed documentation for all the functions and types exp
 - `unref` - Unwrap a ref to get its inner value
 - `toRefs` - Convert reactive object properties to individual refs
 - `isReactive` - Check if an object is a reactive proxy
-- `isReadonly` - Check if an object is a readonly proxy
+- `toRaw` - Retrieve the original (unproxied) object from a reactive proxy
+- `toRef` - Create a ref linked to a property on an object
+- `triggerRef` - Manually trigger effects that depend on a ref
+- `deepClone` - Deep-clone any value with cycle detection
+- `traverse` - Recursively access every property to establish reactive deps (used internally by watch)
 - `isComputed` - Check if a value is a computed ref
 
 ## Type Definitions

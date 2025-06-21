@@ -79,6 +79,24 @@ user.name = "Bob";
 2. Each dependent effect is added to a queue to be re-executed
 3. Effects are then synchronously executed
 
+```mermaid
+sequenceDiagram
+  participant Effect
+  participant ReactiveGetter
+  participant Track
+  participant ReactiveSetter
+  participant Trigger
+  participant Scheduler
+
+  Effect->>ReactiveGetter: read reactive property
+  ReactiveGetter->>Track: track(target, key)
+  Note right of Track: "dependency recorded"
+
+  ReactiveSetter->>Trigger: write reactive property
+  Trigger->>Scheduler: queue effect
+  Scheduler->>Effect: re-run effect
+```
+
 ## Computed Properties
 
 Computed properties are derived values based on other reactive state. They have two key characteristics:

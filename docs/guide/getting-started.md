@@ -23,12 +23,12 @@ pnpm add @yiin/reactive-proxy-state
 Here's a minimal example demonstrating the core functionality of `reactive-proxy-state`:
 
 ```js
-import { reactive, watchEffect } from '@yiin/reactive-proxy-state';
+import { reactive, watchEffect } from "@yiin/reactive-proxy-state";
 
 // Create a reactive state object
 const state = reactive({
   count: 0,
-  message: 'Hello'
+  message: "Hello",
 });
 
 // Create an effect that automatically reruns when dependencies change
@@ -41,7 +41,7 @@ watchEffect(() => {
 state.count++;
 // Output: Count is 1, message is "Hello"
 
-state.message = 'Reactive State is awesome!';
+state.message = "Reactive State is awesome!";
 // Output: Count is 1, message is "Reactive State is awesome!"
 ```
 
@@ -52,34 +52,34 @@ state.message = 'Reactive State is awesome!';
 For nested objects, arrays, maps, and sets:
 
 ```js
-import { reactive, watchEffect } from '@yiin/reactive-proxy-state';
+import { reactive, watchEffect } from "@yiin/reactive-proxy-state";
 
 const user = reactive({
-  name: 'Alice',
+  name: "Alice",
   age: 30,
   preferences: {
-    theme: 'dark',
-    notifications: true
+    theme: "dark",
+    notifications: true,
   },
-  hobbies: ['reading', 'hiking']
+  hobbies: ["reading", "hiking"],
 });
 
 watchEffect(() => {
   console.log(`${user.name} is ${user.age} years old`);
   console.log(`Theme: ${user.preferences.theme}`);
-  console.log(`Hobbies: ${user.hobbies.join(', ')}`);
+  console.log(`Hobbies: ${user.hobbies.join(", ")}`);
 });
 
 // Updating properties triggers the effect
 user.age = 31;
-user.preferences.theme = 'light';
-user.hobbies.push('coding');
+user.preferences.theme = "light";
+user.hobbies.push("coding");
 ```
 
 ### Using Refs for Primitive Values
 
 ```js
-import { ref, watchEffect } from '@yiin/reactive-proxy-state';
+import { ref, watchEffect } from "@yiin/reactive-proxy-state";
 
 const count = ref(0);
 const enabled = ref(true);
@@ -96,7 +96,7 @@ enabled.value = false;
 ### Using Computed Properties
 
 ```js
-import { ref, computed, watchEffect } from '@yiin/reactive-proxy-state';
+import { ref, computed, watchEffect } from "@yiin/reactive-proxy-state";
 
 const width = ref(5);
 const height = ref(10);
@@ -110,7 +110,7 @@ const perimeter = computed({
   set: (newValue) => {
     // Adjust width to match new perimeter (keeping height constant)
     width.value = newValue / 2 - height.value;
-  }
+  },
 });
 
 watchEffect(() => {
@@ -129,4 +129,5 @@ perimeter.value = 50; // Adjusts width to make perimeter 50
 
 - Read the [Core Concepts](/guide/core-concepts) to understand how the reactivity system works
 - Explore the [API Reference](/api/) for detailed documentation of all functions and types
-- See more detailed examples in the example repository (coming soon) 
+- Browse the [Cookbook](/guide/cookbook) for ready-made patterns
+- See more detailed examples in the example repository (coming soon)

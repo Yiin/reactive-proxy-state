@@ -29,43 +29,30 @@ var __export = (target, all) => {
 // src/index.ts
 var exports_src = {};
 __export(exports_src, {
-  wrapperCache: () => wrapperCache,
-  wrapSet: () => wrapSet,
-  wrapMap: () => wrapMap,
-  wrapArray: () => wrapArray,
   watchEffect: () => watchEffect,
   watch: () => watch,
   updateState: () => updateState,
   unref: () => unref,
   triggerRef: () => triggerRef,
   trigger: () => trigger,
-  traverse: () => traverse,
   track: () => track,
   toRefs: () => toRefs,
   toRef: () => toRef,
   toRaw: () => toRaw,
-  setPathConcat: () => setPathConcat,
-  setInPathCache: () => setInPathCache,
   setActiveEffect: () => setActiveEffect,
   runCleanupFunctions: () => runCleanupFunctions,
   ref: () => ref,
   reactive: () => reactive,
-  pathConcatCache: () => pathConcatCache,
-  pathCache: () => pathCache,
   markRaw: () => markRaw,
   isRefSymbol: () => isRefSymbol,
   isRef: () => isRef,
   isReactive: () => isReactive,
   isComputed: () => isComputed,
-  globalSeen: () => globalSeen,
-  getPathConcat: () => getPathConcat,
-  getFromPathCache: () => getFromPathCache,
   deepEqual: () => deepEqual,
   deepClone: () => deepClone,
   computed: () => computed,
   cleanupEffect: () => cleanupEffect,
-  activeEffect: () => activeEffect,
-  ReactiveFlags: () => ReactiveFlags
+  activeEffect: () => activeEffect
 });
 module.exports = __toCommonJS(exports_src);
 
@@ -155,17 +142,6 @@ function deepEqual(a, b, seen = globalSeen) {
     result = keysA.length === keysB.length && keysA.every((key) => Object.prototype.hasOwnProperty.call(b, key) && deepEqual(a[key], b[key], seen));
   }
   deepEqualCache.get(a).set(b, result);
-  return result;
-}
-function getFromPathCache(root, pathKey) {
-  const cache = pathCache.get(root);
-  if (!cache)
-    return;
-  const result = cache.get(pathKey);
-  if (result !== undefined) {
-    cache.delete(pathKey);
-    cache.set(pathKey, result);
-  }
   return result;
 }
 function setInPathCache(root, pathKey, value) {
@@ -1290,14 +1266,6 @@ function wrapArray(arr, emit, path = []) {
   wrapperCache.set(arr, proxy);
   return proxy;
 }
-
-// src/constants.ts
-var ReactiveFlags;
-((ReactiveFlags2) => {
-  ReactiveFlags2["RAW"] = "__v_raw";
-  ReactiveFlags2["IS_REACTIVE"] = "__v_isReactive";
-  ReactiveFlags2["SKIP"] = "__v_skip";
-})(ReactiveFlags ||= {});
 
 // src/reactive.ts
 function isObject3(v) {

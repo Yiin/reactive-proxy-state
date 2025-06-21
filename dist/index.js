@@ -86,17 +86,6 @@ function deepEqual(a, b, seen = globalSeen) {
   deepEqualCache.get(a).set(b, result);
   return result;
 }
-function getFromPathCache(root, pathKey) {
-  const cache = pathCache.get(root);
-  if (!cache)
-    return;
-  const result = cache.get(pathKey);
-  if (result !== undefined) {
-    cache.delete(pathKey);
-    cache.set(pathKey, result);
-  }
-  return result;
-}
 function setInPathCache(root, pathKey, value) {
   if (!pathCache.has(root)) {
     pathCache.set(root, new Map);
@@ -1220,14 +1209,6 @@ function wrapArray(arr, emit, path = []) {
   return proxy;
 }
 
-// src/constants.ts
-var ReactiveFlags;
-((ReactiveFlags2) => {
-  ReactiveFlags2["RAW"] = "__v_raw";
-  ReactiveFlags2["IS_REACTIVE"] = "__v_isReactive";
-  ReactiveFlags2["SKIP"] = "__v_skip";
-})(ReactiveFlags ||= {});
-
 // src/reactive.ts
 function isObject3(v) {
   return v && typeof v === "object";
@@ -1540,41 +1521,28 @@ function markRaw(obj) {
   return obj;
 }
 export {
-  wrapperCache,
-  wrapSet,
-  wrapMap,
-  wrapArray,
   watchEffect,
   watch,
   updateState,
   unref,
   triggerRef,
   trigger,
-  traverse,
   track,
   toRefs,
   toRef,
   toRaw,
-  setPathConcat,
-  setInPathCache,
   setActiveEffect,
   runCleanupFunctions,
   ref,
   reactive,
-  pathConcatCache,
-  pathCache,
   markRaw,
   isRefSymbol,
   isRef,
   isReactive,
   isComputed,
-  globalSeen,
-  getPathConcat,
-  getFromPathCache,
   deepEqual,
   deepClone,
   computed,
   cleanupEffect,
-  activeEffect,
-  ReactiveFlags
+  activeEffect
 };

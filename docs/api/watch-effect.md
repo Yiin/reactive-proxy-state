@@ -270,3 +270,10 @@ Unlike `watch`, which focuses on specific sources and gives you access to old an
 - `watchEffect` runs immediately by default
 
 If you need to compare old and new values, or have more control over when the callback is executed, use `watch` instead.
+
+## Related
+
+- [`watch`](/api/watch) – watch specific sources with old/new comparison
+- [`computed`](/api/computed) – cached derived reactive values that internally use watchEffect
+- [`ref`](/api/ref) – reactive primitive wrapper commonly used inside watchEffect
+- [`reactive`](/api/reactive) – create reactive objects that supply dependencies

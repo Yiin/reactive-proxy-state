@@ -1,13 +1,9 @@
 export * from './types';
-export * from './utils';
+export { deepClone, deepEqual } from './utils';
 export * from './state';
 export * from './reactive';
-export * from './wrap-array';
-export * from './wrap-map';
-export * from './wrap-set';
 export * from './watch';
 export * from './watch-effect'
 export * from './ref';
 export * from './computed';
-export * from './constants';
 export * from './mark-raw';

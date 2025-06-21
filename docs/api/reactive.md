@@ -32,18 +32,31 @@ interface StateEvent {
   action:
     | "set"
     | "delete"
+    | "array-push"
+    | "array-pop"
+    | "array-splice"
+    | "array-shift"
+    | "array-unshift"
+    | "map-set"
+    | "map-delete"
+    | "map-clear"
     | "set-add"
     | "set-delete"
-    | "map-set"
-    | "array-splice"
+    | "set-clear"
     | "replace";
-  path: (string | number)[]; // Path to the target property/collection
-  newValue?: any; // Value for 'set', 'map-set', 'replace'
-  oldValue?: any; // Previous value (if applicable)
-  value?: any; // Value for 'set-add', 'set-delete'
-  key?: number; // Index/key for 'map-set', 'array-splice'
-  deleteCount?: number; // For 'array-splice'
-  items?: any[]; // For 'array-splice'
+
+  // Path to the *collection* that was mutated, or to the parent object for simple set/delete
+  path: (string | number)[];
+
+  // Common payload fields (only some will be defined based on action)
+  newValue?: any; // For 'set', 'map-set', and 'replace'
+  oldValue?: any; // For 'set', 'delete', pop/shift etc.
+
+  // Array & Map specific
+  key?: any; // Index for array-splice or Map key for map-set / map-delete
+
+  // Set-specific
+  value?: any; // Value added/removed for set-add / set-delete
 }
 
 // Emit function type
