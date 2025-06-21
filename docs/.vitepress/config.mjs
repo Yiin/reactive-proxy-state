@@ -22,6 +22,7 @@ export default defineConfig({
             { text: 'Introduction', link: '/guide/' },
             { text: 'Getting Started', link: '/guide/getting-started' },
             { text: 'Core Concepts', link: '/guide/core-concepts' },
+            { text: 'Cookbook', link: '/guide/cookbook' },
           ]
         }
       ],
