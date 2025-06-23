@@ -23,6 +23,7 @@ export default defineConfig({
             { text: 'Getting Started', link: '/guide/getting-started' },
             { text: 'Core Concepts', link: '/guide/core-concepts' },
             { text: 'Cookbook', link: '/guide/cookbook' },
+            { text: 'Troubleshooting', link: '/guide/troubleshooting' },
           ]
         }
       ],
@@ -34,6 +35,7 @@ export default defineConfig({
             { text: 'reactive', link: '/api/reactive' },
             { text: 'ref', link: '/api/ref' },
             { text: 'computed', link: '/api/computed' },
+            { text: 'markRaw', link: '/api/mark-raw' },
             { text: 'watchEffect', link: '/api/watch-effect' },
             { text: 'watch', link: '/api/watch' },
             { text: 'updateState', link: '/api/update-state' },

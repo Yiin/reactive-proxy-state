@@ -4,7 +4,6 @@ import {
   globalSeen,
   getPathConcat,
   setPathConcat,
-  deepClone,
 } from "./utils";
 import { wrapArray } from "./wrap-array";
 import { wrapMap } from "./wrap-map";
