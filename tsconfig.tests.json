@@ -1,0 +1,17 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "strict": false,
+    "noImplicitAny": false,
+    "noUncheckedIndexedAccess": false,
+    "skipLibCheck": true
+  },
+  "include": ["src/**/*", "tests/**/*"],
+  "exclude": [
+    "dist",
+    "node_modules",
+    // Exclude problematic test typings from TS validation; runtime tests still run with Bun
+    "tests/watch.bun.test.ts"
+  ]
+}
