@@ -45,6 +45,12 @@ export function trackVueReactiveEvents<T extends object>(
   );
 
   function diffAndEmit(curr: any, old: any, basePath: Path) {
+    if (curr instanceof Date && old instanceof Date) {
+      if (+curr !== +old) {
+        emit({ action: 'set', path: basePath, oldValue: old, newValue: new Date(+curr) });
+      }
+      return;
+    }
     if (Array.isArray(curr) && Array.isArray(old)) {
       diffArray(curr, old, basePath);
       return;
