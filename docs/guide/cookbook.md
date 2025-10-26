@@ -161,6 +161,60 @@ function invertEvent(ev: StateEvent): StateEvent {
 
 ---
 
+## 4. Vue 3 + Electron (Bidirectional Sync)
+
+Use Vue 3 state in components and synchronize with another context (e.g. Electron main) using RPS `StateEvent`s.
+
+Outbound (Vue → main): use `trackVueReactiveEvents` to emit events when Vue state changes.
+Inbound (main → Vue): call `updateState(vueState, event)` to apply remote diffs to the Vue proxy.
+
+```ts
+// renderer.ts
+import { reactive as vueReactive } from 'vue';
+import { trackVueReactiveEvents, updateState, StateEvent } from '@yiin/reactive-proxy-state';
+
+const { ipcRenderer } = window.require?.('electron') ?? {};
+
+export const state = vueReactive({
+  todos: [],
+  user: { name: 'Alice' },
+  prefs: new Map([["theme", "light"]])
+});
+
+// Vue -> main
+const stop = trackVueReactiveEvents(state, (ev: StateEvent) => ipcRenderer?.send('state:mutation', ev));
+
+// main -> Vue
+ipcRenderer?.on('state:mutation', (_evt: any, ev: StateEvent) => updateState(state, ev));
+```
+
+```vue
+<!-- Example.vue -->
+<script setup lang="ts">
+import { computed } from 'vue';
+import { state } from './renderer';
+
+const todoCount = computed(() => state.todos.length);
+function addTodo(title: string) {
+  state.todos.push({ title, done: false });
+}
+</script>
+
+<template>
+  <div>
+    <p>{{ todoCount }} items</p>
+  </div>
+</template>
+```
+
+Notes
+
+- Array diffs are emitted as index `set`s plus a `length` update. `updateState` applies them correctly.
+- For Maps/Sets, events use `map-set`/`map-delete` and `set-add`/`set-delete`.
+- No granular array ops are emitted (like `array-splice`); Vue’s public reactivity does not surface such triggers directly.
+
+---
+
 ### Where to go from here
 
 - Share your own patterns in issues/PRs – the cookbook is intended to grow.

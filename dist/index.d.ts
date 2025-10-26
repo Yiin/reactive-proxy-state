@@ -7,3 +7,4 @@ export * from './watch-effect';
 export * from './ref';
 export * from './computed';
 export * from './mark-raw';
+export * from './integrations/vue3';

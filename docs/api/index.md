@@ -12,6 +12,10 @@ This section provides detailed documentation for all the functions and types exp
 - [`updateState`](/api/update-state) - Apply state change events to objects
 - [`markRaw`](/api/mark-raw) - Flag an object so it is never made reactive
 
+## Integrations
+
+- [`trackVueReactiveEvents`](/api/vue3) - Emit RPS StateEvents from Vue 3 reactivity
+
 ## Helper Functions
 
 - `isRef` - Check if a value is a ref object
