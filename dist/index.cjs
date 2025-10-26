@@ -36408,6 +36408,12 @@ function trackVueReactiveEvents(vueState, emit, options = {}) {
     }
   }, { deep: true, flush: "sync" });
   function diffAndEmit(curr, old, basePath) {
+    if (curr instanceof Date && old instanceof Date) {
+      if (+curr !== +old) {
+        emit({ action: "set", path: basePath, oldValue: old, newValue: new Date(+curr) });
+      }
+      return;
+    }
     if (Array.isArray(curr) && Array.isArray(old)) {
       diffArray(curr, old, basePath);
       return;
