@@ -8,3 +8,4 @@ export * from './ref';
 export * from './computed';
 export * from './mark-raw';
 export * from './integrations/vue3';
+export * from './integrations/electron-bridge';

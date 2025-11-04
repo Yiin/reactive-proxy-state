@@ -15,6 +15,7 @@ This section provides detailed documentation for all the functions and types exp
 ## Integrations
 
 - [`trackVueReactiveEvents`](/api/vue3) - Emit RPS StateEvents from Vue 3 reactivity
+- [`Electron Bridge`](/api/electron-bridge) - Loop-safe bi-directional sync for Electron
 
 ## Helper Functions
 

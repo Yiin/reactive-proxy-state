@@ -34856,6 +34856,9 @@ __export(exports_src, {
   isComputed: () => isComputed,
   deepEqual: () => deepEqual,
   deepClone: () => deepClone,
+  createRendererBridgeEmitter: () => createRendererBridgeEmitter,
+  createMainBridgeEmitter: () => createMainBridgeEmitter,
+  createBridgeEmitter: () => createBridgeEmitter,
   computed: () => computed,
   cleanupEffect: () => cleanupEffect,
   activeEffect: () => activeEffect
@@ -36486,4 +36489,95 @@ function trackVueReactiveEvents(vueState, emit, options = {}) {
     }
   }
   return stop;
+}
+// src/integrations/electron-bridge.ts
+function makeTx() {
+  try {
+    const g = globalThis;
+    if (g.crypto && typeof g.crypto.randomUUID === "function") {
+      return g.crypto.randomUUID();
+    }
+  } catch {}
+  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+}
+function createBridgeEmitter(opts) {
+  const { id, apply, send, onMessage, forward, seenLimit = 1000 } = opts;
+  let muteCount = 0;
+  const mute = (fn) => {
+    muteCount++;
+    try {
+      return fn();
+    } finally {
+      muteCount--;
+    }
+  };
+  const seen = new Set;
+  const order = [];
+  const markSeen = (tx) => {
+    if (seen.has(tx))
+      return;
+    seen.add(tx);
+    order.push(tx);
+    if (order.length > seenLimit) {
+      const oldest = order.shift();
+      seen.delete(oldest);
+    }
+  };
+  const emit = (event) => {
+    if (muteCount > 0)
+      return;
+    const msg = { tx: makeTx(), origin: id, event };
+    markSeen(msg.tx);
+    send(msg);
+  };
+  const unsubscribe = onMessage((msg, ctx) => {
+    if (!msg || !msg.tx)
+      return;
+    if (seen.has(msg.tx))
+      return;
+    markSeen(msg.tx);
+    if (msg.origin === id)
+      return;
+    mute(() => apply(msg.event));
+    if (forward)
+      forward(msg, ctx);
+  });
+  const stop = () => unsubscribe();
+  return { emit, stop, mute };
+}
+function createRendererBridgeEmitter(opts) {
+  const { id, channel, ipcRenderer, apply, seenLimit } = opts;
+  return createBridgeEmitter({
+    id,
+    apply,
+    seenLimit,
+    send: (msg) => ipcRenderer.send(channel, msg),
+    onMessage: (cb) => {
+      const handler = (_e, msg) => cb(msg);
+      ipcRenderer.on(channel, handler);
+      return () => ipcRenderer.off(channel, handler);
+    }
+  });
+}
+function createMainBridgeEmitter(opts) {
+  const { id = "main", channel, ipcMain, windows, apply, seenLimit } = opts;
+  const broadcast = (msg, exceptId) => {
+    for (const w of windows()) {
+      if (exceptId != null && w.webContents.id === exceptId)
+        continue;
+      w.webContents.send(channel, msg);
+    }
+  };
+  return createBridgeEmitter({
+    id,
+    apply,
+    seenLimit,
+    send: (msg) => broadcast(msg),
+    onMessage: (cb) => {
+      const handler = (e, msg) => cb(msg, { senderId: e?.sender?.id });
+      ipcMain.on(channel, handler);
+      return () => ipcMain.off(channel, handler);
+    },
+    forward: (msg, ctx) => broadcast(msg, ctx?.senderId)
+  });
 }
