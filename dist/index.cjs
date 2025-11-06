@@ -35989,6 +35989,80 @@ function wrapArray(arr, emit, path = []) {
             return result;
           };
           return methodCache[prop];
+        case "find": {
+          track(target, Symbol.iterator);
+          if (!methodCache[prop]) {
+            methodCache[prop] = function(predicate, thisArg) {
+              const idx = Array.prototype.findIndex.call(target, predicate, thisArg);
+              if (idx === -1)
+                return;
+              const value2 = target[idx];
+              if (!isObject2(value2))
+                return value2;
+              const propKey = String(idx);
+              const pathKey = path.length > 0 ? `${path.join(".")}.${propKey}` : propKey;
+              let newPath = getPathConcat(pathKey);
+              if (newPath === undefined) {
+                newPath = path.concat(propKey);
+                setPathConcat(pathKey, newPath);
+              }
+              if (globalSeen.has(value2))
+                return globalSeen.get(value2);
+              const cachedValueProxy = wrapperCache.get(value2);
+              if (cachedValueProxy)
+                return cachedValueProxy;
+              if (Array.isArray(value2))
+                return wrapArray(value2, emit, newPath);
+              if (value2 instanceof Map)
+                return wrapMap(value2, emit, newPath);
+              if (value2 instanceof Set)
+                return wrapSet(value2, emit, newPath);
+              if (value2 instanceof Date)
+                return new Date(value2.getTime());
+              return reactive(value2, emit, newPath);
+            };
+          }
+          return methodCache[prop];
+        }
+        case "at": {
+          track(target, Symbol.iterator);
+          if (!methodCache[prop]) {
+            methodCache[prop] = function(index) {
+              let idx = Number(index);
+              if (!Number.isInteger(idx))
+                idx = Math.trunc(idx);
+              if (idx < 0)
+                idx = target.length + idx;
+              if (idx < 0 || idx >= target.length)
+                return;
+              const value2 = target[idx];
+              if (!isObject2(value2))
+                return value2;
+              const propKey = String(idx);
+              const pathKey = path.length > 0 ? `${path.join(".")}.${propKey}` : propKey;
+              let newPath = getPathConcat(pathKey);
+              if (newPath === undefined) {
+                newPath = path.concat(propKey);
+                setPathConcat(pathKey, newPath);
+              }
+              if (globalSeen.has(value2))
+                return globalSeen.get(value2);
+              const cachedValueProxy = wrapperCache.get(value2);
+              if (cachedValueProxy)
+                return cachedValueProxy;
+              if (Array.isArray(value2))
+                return wrapArray(value2, emit, newPath);
+              if (value2 instanceof Map)
+                return wrapMap(value2, emit, newPath);
+              if (value2 instanceof Set)
+                return wrapSet(value2, emit, newPath);
+              if (value2 instanceof Date)
+                return new Date(value2.getTime());
+              return reactive(value2, emit, newPath);
+            };
+          }
+          return methodCache[prop];
+        }
         case Symbol.iterator:
         case "values":
         case "keys":
@@ -35998,7 +36072,6 @@ function wrapArray(arr, emit, path = []) {
         case "filter":
         case "reduce":
         case "reduceRight":
-        case "find":
         case "findIndex":
         case "every":
         case "some":
@@ -36403,13 +36476,13 @@ function trackVueReactiveEvents(vueState, emit, options = {}) {
     } catch (e) {}
   }
   let prev = deepClone(vueState);
-  const stop = exports_vue.watch(() => vueState, () => {
+  const stop = exports_vue.watch(() => traverse(vueState), () => {
     try {
       diffAndEmit(vueState, prev, []);
     } finally {
       prev = deepClone(vueState);
     }
-  }, { deep: true, flush: "sync" });
+  }, { flush: "sync" });
   function diffAndEmit(curr, old, basePath) {
     if (curr instanceof Date && old instanceof Date) {
       if (+curr !== +old) {

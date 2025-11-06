@@ -1,4 +1,4 @@
-import { deepClone, deepEqual } from "../utils";
+import { deepClone, deepEqual, traverse } from "../utils";
 import type { Path, StateEvent } from "../types";
 import { watch } from "vue";
 export type TrackVueReactiveEventsOptions = {
@@ -33,7 +33,8 @@ export function trackVueReactiveEvents<T extends object>(
   let prev = deepClone(vueState);
 
   const stop = watch(
-    () => vueState as any,
+    // Traverse to ensure deep dependency collection across nested structures
+    () => traverse(vueState as any),
     () => {
       try {
         diffAndEmit(vueState as any, prev, []);
@@ -41,7 +42,7 @@ export function trackVueReactiveEvents<T extends object>(
         prev = deepClone(vueState);
       }
     },
-    { deep: true, flush: 'sync' as any }
+    { flush: 'sync' as any }
   );
 
   function diffAndEmit(curr: any, old: any, basePath: Path) {
