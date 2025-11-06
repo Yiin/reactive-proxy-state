@@ -42,7 +42,7 @@ export function trackVueReactiveEvents<T extends object>(
         prev = deepClone(vueState);
       }
     },
-    { flush: 'sync' as any }
+    { deep: true as any, flush: 'sync' as any }
   );
 
   function diffAndEmit(curr: any, old: any, basePath: Path) {

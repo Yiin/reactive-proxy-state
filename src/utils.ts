@@ -168,12 +168,14 @@ export function traverse(value: any, seen: Set<any> = new Set()) {
   seen.add(value);
 
   if (Array.isArray(value)) {
-    value.length; // track length
+    value.length; // track length to catch push/pop/assign beyond length
     for (let i = 0; i < value.length; i++) {
       traverse(value[i], seen);
     }
   } else if (value instanceof Set || value instanceof Map) {
       // For reactive Map/Set, use the raw object to avoid triggering iterator tracking
+      // But still touch size on the reactive wrapper to establish a dependency for add/delete
+      (value as any).size;
       const rawValue = (value as any).__v_raw || value;
       for (const v of rawValue) {
           if (Array.isArray(v)) { // map entries [key, value]
@@ -185,6 +187,8 @@ export function traverse(value: any, seen: Set<any> = new Set()) {
       }
       return value; // no need to iterate plain object keys for map/set
   } else {
+      // Touch keys length explicitly to register ITERATE dependency for property add/delete
+      Object.keys(value as any).length;
       for (const key in value) {
           traverse((value as any)[key], seen);
       }

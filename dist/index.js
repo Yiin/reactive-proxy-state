@@ -34937,6 +34937,7 @@ function traverse(value, seen = new Set) {
       traverse(value[i], seen);
     }
   } else if (value instanceof Set || value instanceof Map) {
+    value.size;
     const rawValue = value.__v_raw || value;
     for (const v of rawValue) {
       if (Array.isArray(v)) {
@@ -34948,6 +34949,7 @@ function traverse(value, seen = new Set) {
     }
     return value;
   } else {
+    Object.keys(value).length;
     for (const key in value) {
       traverse(value[key], seen);
     }
@@ -36423,7 +36425,7 @@ function trackVueReactiveEvents(vueState, emit, options = {}) {
     } finally {
       prev = deepClone(vueState);
     }
-  }, { flush: "sync" });
+  }, { deep: true, flush: "sync" });
   function diffAndEmit(curr, old, basePath) {
     if (curr instanceof Date && old instanceof Date) {
       if (+curr !== +old) {
