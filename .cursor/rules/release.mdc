@@ -1,29 +1,17 @@
----
-description: 
-globs: 
-alwaysApply: true
----
-// Automated Release Pipeline
-// Usage: Type "release" in cursor and it will run the full pipeline
+Release 1.0.24
 
-When the user types "release", execute this pipeline:
+Summary
+- Fix: ensure array element aliases retrieved via `.find()` and `.at()` are reactive. Mutations on these aliases now emit `set` events with correct paths.
 
-1. Run `bun run build` to build the project
-2. Check git status for changes
-3. If there are changes:
-   - Stage all changes with `git add .`
-   - Generate a conventional commit message by analyzing the changes:
-     - Use "feat:" for new features/functionality
-     - Use "fix:" for bug fixes
-     - Use "chore:" for maintenance, docs, build changes
-     - Use "refactor:" for code restructuring
-     - Include a brief description of what changed
-4. Commit with the generated message
-5. Run `npm version patch` to bump patch version
-6. Push commits and tags with `git push && git push --tags`
-7. Publish to NPM with `npm publish`
+Details
+- Array proxy now wraps results of `find` and `at` using the same path construction as numeric index access. This preserves deep reactivity for aliased elements:
+  - `const acc = state.accounts.find(p => p.id === id); acc.name = 'x'` emits a `set` for `['accounts','i','name']`.
+  - `const acc = state.accounts.at(-1); acc.name = 'y'` emits a `set` for the last index.
+- Tests added to cover direct index alias, `.find()` alias, and `.at()` alias.
 
-Before executing each step, briefly explain what you're about to do.
-If any step fails, stop the pipeline and report the error.
+Files
+- src/wrap-array.ts
+- tests/array.bun.test.ts
 
-Always confirm the final version number and ask if the user wants to proceed before publishing to NPM. 
+Notes
+- No public API changes. Behavior is now consistent across index, find, and at aliasing.

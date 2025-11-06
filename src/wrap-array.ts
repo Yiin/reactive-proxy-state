@@ -174,6 +174,78 @@ export function wrapArray<T extends any[]>(
             return result;
           };
           return methodCache[prop];
+        // special wrapper for find to ensure returned element is reactive
+        case "find": {
+          track(target, Symbol.iterator);
+          if (!methodCache[prop]) {
+            methodCache[prop] = function (
+              predicate: (value: any, index: number, obj: any[]) => boolean,
+              thisArg?: any
+            ) {
+              const idx = Array.prototype.findIndex.call(target, predicate, thisArg);
+              if (idx === -1) return undefined;
+              const value = target[idx];
+              if (!isObject(value)) return value;
+
+              // construct path for the found index and wrap like numeric index access
+              const propKey = String(idx);
+              const pathKey =
+                path.length > 0 ? `${path.join(".")}.${propKey}` : propKey;
+              let newPath = getPathConcat(pathKey);
+              if (newPath === undefined) {
+                newPath = path.concat(propKey);
+                setPathConcat(pathKey, newPath);
+              }
+
+              if (globalSeen.has(value)) return globalSeen.get(value);
+              const cachedValueProxy = wrapperCache.get(value);
+              if (cachedValueProxy) return cachedValueProxy;
+
+              if (Array.isArray(value)) return wrapArray(value, emit, newPath);
+              if (value instanceof Map) return wrapMap(value, emit, newPath);
+              if (value instanceof Set) return wrapSet(value, emit, newPath);
+              if (value instanceof Date) return new Date(value.getTime());
+              return reactive(value, emit, newPath);
+            };
+          }
+          return methodCache[prop];
+        }
+        // special wrapper for at to ensure returned element is reactive
+        case "at": {
+          track(target, Symbol.iterator);
+          if (!methodCache[prop]) {
+            methodCache[prop] = function (index: number): any {
+              // emulate Array.prototype.at to support negative indexes
+              let idx = Number(index);
+              if (!Number.isInteger(idx)) idx = Math.trunc(idx);
+              if (idx < 0) idx = target.length + idx;
+              if (idx < 0 || idx >= target.length) return undefined;
+
+              const value = target[idx];
+              if (!isObject(value)) return value;
+
+              const propKey = String(idx);
+              const pathKey =
+                path.length > 0 ? `${path.join(".")}.${propKey}` : propKey;
+              let newPath = getPathConcat(pathKey);
+              if (newPath === undefined) {
+                newPath = path.concat(propKey);
+                setPathConcat(pathKey, newPath);
+              }
+
+              if (globalSeen.has(value)) return globalSeen.get(value);
+              const cachedValueProxy = wrapperCache.get(value);
+              if (cachedValueProxy) return cachedValueProxy;
+
+              if (Array.isArray(value)) return wrapArray(value, emit, newPath);
+              if (value instanceof Map) return wrapMap(value, emit, newPath);
+              if (value instanceof Set) return wrapSet(value, emit, newPath);
+              if (value instanceof Date) return new Date(value.getTime());
+              return reactive(value, emit, newPath);
+            };
+          }
+          return methodCache[prop];
+        }
         // handle methods that rely on iteration state
         case Symbol.iterator:
         case "values":
@@ -184,7 +256,6 @@ export function wrapArray<T extends any[]>(
         case "filter":
         case "reduce":
         case "reduceRight":
-        case "find":
         case "findIndex":
         case "every":
         case "some":

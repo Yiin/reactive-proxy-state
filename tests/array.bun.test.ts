@@ -9,6 +9,60 @@ function createEventCollector(): { events: StateEvent[], emit: EmitFunction } {
 }
 
 describe("Array Tests", () => {
+  test("deep mutation via direct index reference emits event", () => {
+    const { events, emit } = createEventCollector();
+    const state = reactive({ foos: [{ bar: 0 }] }, emit);
+
+    state.foos[0].bar++;
+
+    expect(events.length).toBe(2);
+    const setEvent = events[1];
+    expect(setEvent.action).toBe('set');
+    expect(setEvent.path).toEqual(['foos', '0', 'bar']);
+    expect(setEvent.newValue).toBe(1);
+  });
+
+  test("deep mutation via aliased array element emits event", () => {
+    const { events, emit } = createEventCollector();
+    const state = reactive({ foos: [{ bar: 0 }] }, emit);
+
+    const foo = state.foos[0];
+    foo.bar++;
+
+    expect(events.length).toBe(2);
+    const setEvent = events[1];
+    expect(setEvent.action).toBe('set');
+    expect(setEvent.path).toEqual(['foos', '0', 'bar']);
+    expect(setEvent.newValue).toBe(1);
+  });
+
+  test("deep mutation via .find() alias emits event", () => {
+    const { events, emit } = createEventCollector();
+    const state = reactive({ foos: [{ bar: 0 }, { bar: 5 }] }, emit);
+
+    const foo = state.foos.find((n) => n.bar === 0)!;
+    foo.bar++;
+
+    expect(events.length).toBe(2);
+    const setEvent = events[1];
+    expect(setEvent.action).toBe('set');
+    expect(setEvent.path).toEqual(['foos', '0', 'bar']);
+    expect(setEvent.newValue).toBe(1);
+  });
+
+  test("deep mutation via .at() alias emits event", () => {
+    const { events, emit } = createEventCollector();
+    const state = reactive({ foos: [{ bar: 0 }, { bar: 5 }] }, emit);
+
+    const foo = state.foos.at(1)!;
+    foo.bar++;
+
+    expect(events.length).toBe(2);
+    const setEvent = events[1];
+    expect(setEvent.action).toBe('set');
+    expect(setEvent.path).toEqual(['foos', '1', 'bar']);
+    expect(setEvent.newValue).toBe(6);
+  });
   test("array push emits event", () => {
     const { events, emit } = createEventCollector();
     const state = reactive({ arr: [1, 2] }, emit);
