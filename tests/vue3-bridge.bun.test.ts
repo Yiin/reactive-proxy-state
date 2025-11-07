@@ -135,12 +135,12 @@ describe('Vue 3 adapter (trackVueReactiveEvents)', () => {
 
   test('nested: add new array property then push (acc.jobs scenario)', () => {
     const emitted: StateEvent[] = [];
-    const vueState = vueReactive({ accounts: [{ id: 1 } as any] });
+    const vueState = vueReactive({ knowledge: { accounts: [{ id: 1 } as any] } });
     const stop = trackVueReactiveEvents(vueState, (e) => emitted.push(e));
     emitted.length = 0;
 
     // find current account and add a new array property, then push to it
-    const acc = vueState.accounts.find((a: any) => a.id === 1)!;
+    const acc = vueState.knowledge.accounts.find((a: any) => a.id === 1)!;
     if (!acc.jobs) {
       acc.jobs = [{ name: 'sched-1' }];
     } else {
@@ -151,10 +151,11 @@ describe('Vue 3 adapter (trackVueReactiveEvents)', () => {
     // quick visibility for debugging
     // console.log('emitted', JSON.stringify(emitted, null, 2));
     // apply emitted events to RPS state and compare
-    const remote = rpsReactive({ accounts: [{ id: 1 } as any] });
+    const remote = rpsReactive({ knowledge: { accounts: [{ id: 1 } as any] } });
     for (const ev of emitted) updateState(remote, ev);
 
     expect(remote).toEqual(vueState);
+    expect(remote).toEqual({ knowledge: { accounts: [{ id: 1, jobs: [{ name: 'sched-1' }, { name: 'sched-2' }] }] } })
     stop();
   });
 
