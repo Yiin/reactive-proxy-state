@@ -1,0 +1,1 @@
+import{_ as i,c as a,o as n,ag as t}from"./chunks/framework.DzTbpWAc.js";const g=JSON.parse('{"title":"watch","description":"","frontmatter":{},"headers":[],"relativePath":"api/watch.md","filePath":"api/watch.md"}'),h={name:"api/watch.md"};function l(e,s,k,p,E,r){return n(),a("div",null,s[0]||(s[0]=[t("",32)]))}const c=i(h,[["render",l]]);export{g as __pageData,c as default};

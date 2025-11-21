@@ -27,6 +27,7 @@ This section provides detailed documentation for all the functions and types exp
 - `toRef` - Create a ref linked to a property on an object
 - `triggerRef` - Manually trigger effects that depend on a ref
 - `deepClone` - Deep-clone any value with cycle detection
+- `deepToRaw` - Convert reactive/ref structures into plain, clone-safe data
 - `traverse` - Recursively access every property to establish reactive deps (used internally by watch)
 - `isComputed` - Check if a value is a computed ref
 

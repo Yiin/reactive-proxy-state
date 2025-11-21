@@ -49,6 +49,7 @@ __export(exports_src, {
   isRef: () => isRef,
   isReactive: () => isReactive,
   isComputed: () => isComputed,
+  deepToRaw: () => deepToRaw,
   deepEqual: () => deepEqual,
   deepClone: () => deepClone,
   createRendererBridgeEmitter: () => createRendererBridgeEmitter,
@@ -1847,4 +1848,57 @@ function createMainBridgeEmitter(opts) {
     },
     forward: (msg, ctx) => broadcast(msg, ctx?.senderId)
   });
+}
+// src/deep-to-raw.ts
+function deepToRaw(input, seen = new WeakMap) {
+  if (input === null || typeof input !== "object") {
+    return input;
+  }
+  if (isRef(input)) {
+    return deepToRaw(input.value, seen);
+  }
+  if (seen.has(input)) {
+    return seen.get(input);
+  }
+  if (Array.isArray(input)) {
+    const result = [];
+    seen.set(input, result);
+    for (const item of input) {
+      result.push(deepToRaw(item, seen));
+    }
+    return result;
+  }
+  if (input instanceof Date) {
+    return new Date(input.getTime());
+  }
+  if (input instanceof Map) {
+    const result = new Map;
+    seen.set(input, result);
+    for (const [key, value] of input) {
+      result.set(deepToRaw(key, seen), deepToRaw(value, seen));
+    }
+    return result;
+  }
+  if (input instanceof Set) {
+    const result = new Set;
+    seen.set(input, result);
+    for (const value of input) {
+      result.add(deepToRaw(value, seen));
+    }
+    return result;
+  }
+  const source = isReactive(input) ? toRaw(input) : input;
+  if (seen.has(source)) {
+    return seen.get(source);
+  }
+  if (source && typeof source === "object" && (source.constructor === Object || source.constructor === null)) {
+    const result = Object.create(Object.getPrototypeOf(source));
+    seen.set(input, result);
+    seen.set(source, result);
+    for (const key of Reflect.ownKeys(source)) {
+      result[key] = deepToRaw(source[key], seen);
+    }
+    return result;
+  }
+  return source;
 }

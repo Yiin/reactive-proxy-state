@@ -36,6 +36,7 @@ export default defineConfig({
             { text: 'ref', link: '/api/ref' },
             { text: 'computed', link: '/api/computed' },
             { text: 'markRaw', link: '/api/mark-raw' },
+            { text: 'deepToRaw', link: '/api/deep-to-raw' },
             { text: 'watchEffect', link: '/api/watch-effect' },
             { text: 'watch', link: '/api/watch' },
             { text: 'updateState', link: '/api/update-state' },

@@ -80,6 +80,14 @@ onServerEvent((event) => {
 serverState.count = 5; // Automatically synced to all clients
 ```
 
+If you need to relay state or events through `postMessage`, workers, or any structured-clone boundary, convert them first:
+
+```typescript
+import { deepToRaw } from "@yiin/reactive-proxy-state";
+
+worker.postMessage(deepToRaw(serverState));
+```
+
 See the [`updateState` documentation](./docs/api/update-state.md) and [`reactive` documentation](./docs/api/reactive.md) for more details on event emission and application.
 
 ## API

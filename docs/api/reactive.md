@@ -108,6 +108,16 @@ state.user.name = "Bob";
 // Emits: { action: 'set', path: ['user', 'name'], oldValue: 'Alice', newValue: 'Bob' }
 ```
 
+When forwarding events across workers or other structured-clone boundaries, convert them first:
+
+```ts
+import { reactive, deepToRaw } from "@yiin/reactive-proxy-state";
+
+const state = reactive({ count: 0 }, (event) =>
+  worker.postMessage(deepToRaw(event))
+);
+```
+
 ### Simple State Synchronization
 
 You can use event emission and [`updateState`](/api/update-state) to synchronize state:

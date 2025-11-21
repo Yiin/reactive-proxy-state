@@ -9,3 +9,4 @@ export * from './computed';
 export * from './mark-raw';
 export * from './integrations/vue3';
 export * from './integrations/electron-bridge';
+export { deepToRaw } from './deep-to-raw';
