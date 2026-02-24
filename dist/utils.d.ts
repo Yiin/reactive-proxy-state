@@ -5,6 +5,12 @@ export declare const wrapperCache: WeakMap<object, object>;
 export declare function deepEqual(a: any, b: any, seen?: WeakMap<any, any>): boolean;
 export declare function getFromPathCache(root: object, pathKey: string): any | undefined;
 export declare function setInPathCache(root: object, pathKey: string, value: any): void;
+/**
+ * Evict all cached paths that are descendants of the given path prefix.
+ * Called when a value at `pathKey` is replaced so that deeper cached references
+ * (which now point to the old, detached object) are not reused.
+ */
+export declare function evictDescendantsFromPathCache(root: object, pathKey: string): void;
 export declare function getPathConcat(path: string): any[] | undefined;
 export declare function setPathConcat(path: string, value: any[]): void;
 /**

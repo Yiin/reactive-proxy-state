@@ -1,6 +1,6 @@
 import { isReactive } from './reactive';
 import { StateEvent } from './types';
-import { pathCache, setInPathCache } from './utils';
+import { pathCache, setInPathCache, evictDescendantsFromPathCache } from './utils';
 
 // helper to abstract getting a value from a map or object property
 function getValue(obj: any, key: any): any {
@@ -234,4 +234,12 @@ export function updateState(root: any, event: StateEvent): void {
 
     // call the appropriate handler with the resolved target and key
     handler(targetForHandler, keyForHandler, event);
+
+    // When a 'set' replaces an object/array value, any cached paths below it
+    // now point to the old (detached) object. Evict them so the next lookup
+    // traverses through the new value.
+    if (action === 'set' && event.newValue != null && typeof event.newValue === 'object') {
+        const fullPathKey = path.join('.');
+        evictDescendantsFromPathCache(root, fullPathKey);
+    }
 }

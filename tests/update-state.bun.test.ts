@@ -104,4 +104,48 @@ describe("Update State Tests", () => {
     updateState(state, event);
     expect(state.items.size).toBe(0);
   });
-}); 
+
+  test("pathCache evicts descendants when parent array is replaced", () => {
+    // Simulates the bug: a deep property set populates the pathCache,
+    // then the parent array is replaced, and a subsequent deep set should
+    // target the new array's element — not the stale cached one.
+    const state = {
+      accounts: {
+        1: {
+          jobs: [
+            { id: 1, runHistory: [{ ts: 100 }] },
+            { id: 2, runHistory: [{ ts: 200 }] }
+          ]
+        }
+      }
+    };
+
+    // 1) Set a deep property — this populates pathCache for "accounts.1.jobs.0"
+    updateState(state, {
+      action: 'set',
+      path: ['accounts', '1', 'jobs', '0', 'runHistory'],
+      newValue: [{ ts: 101 }]
+    });
+    expect(state.accounts[1].jobs[0].runHistory).toEqual([{ ts: 101 }]);
+
+    // 2) Replace the jobs array (simulates provisioner doing jobs = jobs.filter(...))
+    updateState(state, {
+      action: 'set',
+      path: ['accounts', '1', 'jobs'],
+      newValue: [
+        { id: 10, runHistory: [{ ts: 1000 }] },
+        { id: 20, runHistory: [{ ts: 2000 }] }
+      ]
+    });
+    expect(state.accounts[1].jobs[0].id).toBe(10);
+
+    // 3) Set a deep property again — must target the NEW jobs[0], not the stale cached one
+    updateState(state, {
+      action: 'set',
+      path: ['accounts', '1', 'jobs', '0', 'runHistory'],
+      newValue: [{ ts: 1001 }]
+    });
+    expect(state.accounts[1].jobs[0].runHistory).toEqual([{ ts: 1001 }]);
+    expect(state.accounts[1].jobs[0].id).toBe(10);
+  });
+});

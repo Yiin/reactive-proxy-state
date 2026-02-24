@@ -2401,6 +2401,22 @@ function setInPathCache(root, pathKey, value) {
   cache.set(pathKey, value);
   cleanupPathCache(root);
 }
+function evictDescendantsFromPathCache(root, pathKey) {
+  const cache = pathCache.get(root);
+  if (!cache)
+    return;
+  const prefix = pathKey + ".";
+  let evicted = 0;
+  for (const key of cache.keys()) {
+    if (key.startsWith(prefix)) {
+      cache.delete(key);
+      evicted++;
+    }
+  }
+  if (evicted > 0) {
+    pathCacheSize.set(root, (pathCacheSize.get(root) ?? cache.size) - evicted);
+  }
+}
 function getPathConcat(path) {
   const result = pathConcatCache.get(path);
   if (result !== undefined) {
@@ -2705,6 +2721,10 @@ function updateState(root, event) {
     return;
   }
   handler(targetForHandler, keyForHandler, event);
+  if (action === "set" && event.newValue != null && typeof event.newValue === "object") {
+    const fullPathKey = path.join(".");
+    evictDescendantsFromPathCache(root, fullPathKey);
+  }
 }
 // src/watch-effect.ts
 var activeEffect = null;

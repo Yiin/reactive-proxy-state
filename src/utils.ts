@@ -133,6 +133,27 @@ export function setInPathCache(root: object, pathKey: string, value: any): void 
     cleanupPathCache(root); // check if cleanup is needed after adding
 }
 
+/**
+ * Evict all cached paths that are descendants of the given path prefix.
+ * Called when a value at `pathKey` is replaced so that deeper cached references
+ * (which now point to the old, detached object) are not reused.
+ */
+export function evictDescendantsFromPathCache(root: object, pathKey: string): void {
+    const cache = pathCache.get(root);
+    if (!cache) return;
+    const prefix = pathKey + '.';
+    let evicted = 0;
+    for (const key of cache.keys()) {
+        if (key.startsWith(prefix)) {
+            cache.delete(key);
+            evicted++;
+        }
+    }
+    if (evicted > 0) {
+        pathCacheSize.set(root, (pathCacheSize.get(root) ?? cache.size) - evicted);
+    }
+}
+
 export function getPathConcat(path: string): any[] | undefined {
     const result = pathConcatCache.get(path);
     if (result !== undefined) {
