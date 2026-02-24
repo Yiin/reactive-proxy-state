@@ -1,6 +1,8 @@
-import { deepClone, deepEqual, traverse } from "../utils";
+import { deepClone, deepEqual } from "../utils";
 import type { Path, StateEvent } from "../types";
-import { watch } from "vue";
+import { watchEffect } from "vue";
+import { pauseTracking, resetTracking } from "@vue/reactivity";
+
 export type TrackVueReactiveEventsOptions = {
   emitInitialReplace?: boolean;
 };
@@ -9,7 +11,11 @@ export type TrackVueReactiveEventsOptions = {
  * Observe a Vue 3 reactive object and emit RPS-compatible StateEvents
  * for each mutation performed through Vue reactivity.
  *
- * Returns a stop() function to tear down the watcher.
+ * Uses per-key watchEffect partitioning: one effect per root key so that
+ * only the affected subtree is diffed on mutation. A root structural effect
+ * tracks Object.keys() for key add/delete at the top level.
+ *
+ * Returns a stop() function to tear down all effects.
  */
 export function trackVueReactiveEvents<T extends object>(
   vueState: T,
@@ -17,10 +23,6 @@ export function trackVueReactiveEvents<T extends object>(
   options: TrackVueReactiveEventsOptions = {}
 ): () => void {
   const { emitInitialReplace = true } = options;
-
-  function isObject(v: any): v is object {
-    return v && typeof v === "object";
-  }
 
   if (emitInitialReplace) {
     try {
@@ -30,106 +32,304 @@ export function trackVueReactiveEvents<T extends object>(
     }
   }
 
-  let prev = deepClone(vueState);
+  const prev: Record<string, any> = {};
+  const pathStack: (string | number | symbol)[] = [];
+  const keyStops = new Map<string, () => void>();
 
-  const stop = watch(
-    // Traverse to ensure deep dependency collection across nested structures
-    () => traverse(vueState as any),
-    () => {
+  // Initialize prev snapshot (outside any effect — no accidental dep tracking)
+  for (const k of Object.keys(vueState)) {
+    prev[k] = deepClone((vueState as any)[k]);
+  }
+
+  function createKeyEffect(k: string) {
+    const stop = watchEffect(() => {
+      // Check existence through proxy (tracks 'has' dep)
+      if (!(k in (vueState as any))) return;
+
+      const currVal = (vueState as any)[k];
+      pathStack.push(k);
       try {
-        diffAndEmit(vueState as any, prev, []);
-      } finally {
-        prev = deepClone(vueState);
+        const result = diffAndClone(currVal, prev[k], pathStack, emit);
+        if (result !== prev[k]) {
+          prev[k] = result;
+        }
+      } catch (e) {
+        pathStack.length = 0;
+        prev[k] = deepClone((vueState as any)[k]);
+        return;
       }
-    },
-    { deep: true as any, flush: 'sync' as any }
-  );
+      pathStack.pop();
+    }, { flush: 'sync' as any });
+    keyStops.set(k, stop);
+  }
 
-  function diffAndEmit(curr: any, old: any, basePath: Path) {
-    if (curr instanceof Date && old instanceof Date) {
-      if (+curr !== +old) {
-        emit({ action: 'set', path: basePath, oldValue: old, newValue: new Date(+curr) });
+  // Create per-key effects (each runs immediately, establishing deps without emitting)
+  for (const k of Object.keys(prev)) {
+    createKeyEffect(k);
+  }
+
+  // Root structural effect — only tracks Object.keys() iterate dep
+  const stopRoot = watchEffect(() => {
+    const currKeys = Object.keys(vueState as any);
+    const currKeySet = new Set(currKeys);
+    const prevKeySet = new Set(Object.keys(prev));
+
+    // Added keys
+    for (const k of currKeys) {
+      if (!prevKeySet.has(k)) {
+        pauseTracking();
+        const cloned = deepClone((vueState as any)[k]);
+        resetTracking();
+
+        pathStack.push(k);
+        emit({ action: 'set', path: pathStack.slice(), newValue: cloned });
+        pathStack.pop();
+
+        prev[k] = cloned;
+        createKeyEffect(k);
       }
-      return;
     }
-    if (Array.isArray(curr) && Array.isArray(old)) {
-      diffArray(curr, old, basePath);
-      return;
+
+    // Deleted keys
+    for (const k of prevKeySet) {
+      if (!currKeySet.has(k)) {
+        pathStack.push(k);
+        emit({ action: 'delete', path: pathStack.slice(), oldValue: prev[k] });
+        pathStack.pop();
+
+        delete prev[k];
+        keyStops.get(k)?.();
+        keyStops.delete(k);
+      }
     }
-    if (curr instanceof Map && old instanceof Map) {
-      diffMap(curr, old, basePath);
-      return;
+  }, { flush: 'sync' as any });
+
+  return () => {
+    stopRoot();
+    for (const stop of keyStops.values()) stop();
+    keyStops.clear();
+  };
+}
+
+function typeTag(v: any): string {
+  if (v === null || typeof v !== 'object') return 'primitive';
+  if (Array.isArray(v)) return 'array';
+  if (v instanceof Map) return 'map';
+  if (v instanceof Set) return 'set';
+  if (v instanceof Date) return 'date';
+  return 'object';
+}
+
+/**
+ * Unified diff + clone pass with structural sharing.
+ * Returns the new `prev` snapshot. Unchanged subtrees reuse the old reference.
+ */
+function diffAndClone(
+  curr: any,
+  old: any,
+  pathStack: (string | number | symbol)[],
+  emit: (event: StateEvent) => void
+): any {
+  // Primitive or null — quick === check
+  if (curr === null || typeof curr !== 'object') {
+    if (curr !== old) {
+      emit({ action: 'set', path: pathStack.slice(), oldValue: old, newValue: curr });
     }
-    if (curr instanceof Set && old instanceof Set) {
-      diffSet(curr, old, basePath);
-      return;
+    return curr;
+  }
+
+  // Type transition — emit full set replacement
+  if (typeTag(curr) !== typeTag(old)) {
+    emit({ action: 'set', path: pathStack.slice(), oldValue: old, newValue: deepClone(curr) });
+    return deepClone(curr);
+  }
+
+  // Date
+  if (curr instanceof Date) {
+    if (!(old instanceof Date) || +curr !== +old) {
+      emit({ action: 'set', path: pathStack.slice(), oldValue: old, newValue: new Date(+curr) });
+      return new Date(+curr);
     }
-    if (isObject(curr) && isObject(old)) {
-      diffObject(curr, old, basePath);
-      return;
-    }
-    if (!deepEqual(curr, old)) {
-      emit({ action: 'set', path: basePath, oldValue: old, newValue: deepClone(curr) });
+    return old;
+  }
+
+  // Array
+  if (Array.isArray(curr)) {
+    return diffAndCloneArray(curr, old, pathStack, emit);
+  }
+
+  // Map
+  if (curr instanceof Map) {
+    return diffAndCloneMap(curr, old as Map<any, any>, pathStack, emit);
+  }
+
+  // Set
+  if (curr instanceof Set) {
+    return diffAndCloneSet(curr, old as Set<any>, pathStack, emit);
+  }
+
+  // Plain object
+  return diffAndCloneObject(curr, old, pathStack, emit);
+}
+
+function diffAndCloneObject(
+  curr: Record<string, any>,
+  old: Record<string, any>,
+  pathStack: (string | number | symbol)[],
+  emit: (event: StateEvent) => void
+): Record<string, any> {
+  const currKeys = Object.keys(curr);
+  const oldKeys = Object.keys(old);
+  let changed = false;
+  let result: Record<string, any> | null = null;
+
+  // Check for deleted keys
+  for (let i = 0; i < oldKeys.length; i++) {
+    const k = oldKeys[i];
+    if (!(k in curr)) {
+      if (!changed) { changed = true; result = { ...old }; }
+      pathStack.push(k);
+      emit({ action: 'delete', path: pathStack.slice(), oldValue: old[k] });
+      pathStack.pop();
+      delete result![k];
     }
   }
 
-  function diffObject(curr: Record<string, any>, old: Record<string, any>, basePath: Path) {
-    const keys = new Set([...Object.keys(curr), ...Object.keys(old)]);
-    for (const k of keys) {
-      const p = basePath.concat(k);
-      if (!(k in curr)) {
-        emit({ action: 'delete', path: p, oldValue: old[k] });
-      } else if (!(k in old)) {
-        emit({ action: 'set', path: p, newValue: deepClone(curr[k]) });
-      } else {
-        diffAndEmit(curr[k], old[k], p);
+  // Check existing + added keys
+  for (let i = 0; i < currKeys.length; i++) {
+    const k = currKeys[i];
+    if (!(k in old)) {
+      // Added key
+      if (!changed) { changed = true; result = { ...old }; }
+      pathStack.push(k);
+      emit({ action: 'set', path: pathStack.slice(), newValue: deepClone(curr[k]) });
+      pathStack.pop();
+      result![k] = deepClone(curr[k]);
+    } else {
+      // Existing key — recurse
+      pathStack.push(k);
+      const childResult = diffAndClone(curr[k], old[k], pathStack, emit);
+      pathStack.pop();
+      if (childResult !== old[k]) {
+        if (!changed) { changed = true; result = { ...old }; }
+        result![k] = childResult;
       }
     }
   }
 
-  function diffArray(curr: any[], old: any[], basePath: Path) {
-    const min = Math.min(curr.length, old.length);
-    // Compare existing indices
-    for (let i = 0; i < min; i++) {
-      diffAndEmit(curr[i], old[i], basePath.concat(i));
-    }
-    if (curr.length > old.length) {
-      // expand length first
-      emit({ action: 'set', path: basePath.concat('length'), newValue: curr.length, oldValue: old.length });
-      for (let i = old.length; i < curr.length; i++) {
-        emit({ action: 'set', path: basePath.concat(i), newValue: deepClone(curr[i]) });
-      }
-    } else if (curr.length < old.length) {
-      // shrink at end
-      emit({ action: 'set', path: basePath.concat('length'), newValue: curr.length, oldValue: old.length });
+  return changed ? result! : old;
+}
+
+function diffAndCloneArray(
+  curr: any[],
+  old: any[],
+  pathStack: (string | number | symbol)[],
+  emit: (event: StateEvent) => void
+): any[] {
+  const min = Math.min(curr.length, old.length);
+  let changed = false;
+  let result: any[] | null = null;
+
+  // Compare overlapping indices
+  for (let i = 0; i < min; i++) {
+    pathStack.push(i);
+    const childResult = diffAndClone(curr[i], old[i], pathStack, emit);
+    pathStack.pop();
+    if (childResult !== old[i]) {
+      if (!changed) { changed = true; result = old.slice(); }
+      result![i] = childResult;
     }
   }
 
-  function diffMap(curr: Map<any, any>, old: Map<any, any>, basePath: Path) {
-    // deletions
-    for (const [k, v] of old.entries()) {
-      if (!curr.has(k)) {
-        emit({ action: 'map-delete', path: basePath, key: k, oldValue: v });
-      }
+  if (curr.length > old.length) {
+    // Array grew — emit length first, then new indices
+    if (!changed) { changed = true; result = old.slice(); }
+    pathStack.push('length');
+    emit({ action: 'set', path: pathStack.slice(), newValue: curr.length, oldValue: old.length });
+    pathStack.pop();
+    result!.length = curr.length;
+    for (let i = old.length; i < curr.length; i++) {
+      pathStack.push(i);
+      emit({ action: 'set', path: pathStack.slice(), newValue: deepClone(curr[i]) });
+      pathStack.pop();
+      result![i] = deepClone(curr[i]);
     }
-    // additions/changes
-    for (const [k, v] of curr.entries()) {
-      if (!old.has(k)) {
-        emit({ action: 'map-set', path: basePath, key: k, newValue: deepClone(v) });
-      } else if (!deepEqual(v, old.get(k))) {
-        emit({ action: 'map-set', path: basePath, key: k, newValue: deepClone(v), oldValue: old.get(k) });
-      }
+  } else if (curr.length < old.length) {
+    // Array shrank
+    if (!changed) { changed = true; result = old.slice(); }
+    pathStack.push('length');
+    emit({ action: 'set', path: pathStack.slice(), newValue: curr.length, oldValue: old.length });
+    pathStack.pop();
+    result!.length = curr.length;
+  }
+
+  return changed ? result! : old;
+}
+
+function diffAndCloneMap(
+  curr: Map<any, any>,
+  old: Map<any, any>,
+  pathStack: (string | number | symbol)[],
+  emit: (event: StateEvent) => void
+): Map<any, any> {
+  let changed = false;
+  let result: Map<any, any> | null = null;
+  const path = pathStack.slice(); // Map events use the map's own path
+
+  // Deletions
+  for (const [k, v] of old.entries()) {
+    if (!curr.has(k)) {
+      if (!changed) { changed = true; result = new Map(old); }
+      emit({ action: 'map-delete', path, key: k, oldValue: v });
+      result!.delete(k);
     }
   }
 
-  function diffSet(curr: Set<any>, old: Set<any>, basePath: Path) {
-    for (const v of old.values()) {
-      if (!curr.has(v)) emit({ action: 'set-delete', path: basePath, value: v, oldValue: v });
-    }
-    for (const v of curr.values()) {
-      if (!old.has(v)) emit({ action: 'set-add', path: basePath, value: deepClone(v) });
+  // Additions / changes
+  for (const [k, v] of curr.entries()) {
+    // Always clone through the reactive proxy to establish deps on nested properties.
+    // Using deepEqual(reactiveProxy, plainClone) directly would hit a stale memoization
+    // cache from the initial watchEffect run, skipping reactive reads.
+    const vClone = deepClone(v);
+    if (!old.has(k)) {
+      if (!changed) { changed = true; result = new Map(old); }
+      emit({ action: 'map-set', path, key: k, newValue: vClone });
+      result!.set(k, vClone);
+    } else if (!deepEqual(vClone, old.get(k), new WeakMap())) {
+      if (!changed) { changed = true; result = new Map(old); }
+      emit({ action: 'map-set', path, key: k, newValue: vClone, oldValue: old.get(k) });
+      result!.set(k, vClone);
     }
   }
 
-  return stop;
+  return changed ? result! : old;
+}
+
+function diffAndCloneSet(
+  curr: Set<any>,
+  old: Set<any>,
+  pathStack: (string | number | symbol)[],
+  emit: (event: StateEvent) => void
+): Set<any> {
+  let changed = false;
+  let result: Set<any> | null = null;
+  const path = pathStack.slice();
+
+  for (const v of old.values()) {
+    if (!curr.has(v)) {
+      if (!changed) { changed = true; result = new Set(old); }
+      emit({ action: 'set-delete', path, value: v, oldValue: v });
+      result!.delete(v);
+    }
+  }
+
+  for (const v of curr.values()) {
+    if (!old.has(v)) {
+      if (!changed) { changed = true; result = new Set(old); }
+      emit({ action: 'set-add', path, value: deepClone(v) });
+      result!.add(deepClone(v));
+    }
+  }
+
+  return changed ? result! : old;
 }

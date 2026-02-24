@@ -1,1 +1,0 @@
-import{_ as i,c as a,o as n,ag as t}from"./chunks/framework.DzTbpWAc.js";const g=JSON.parse('{"title":"ref","description":"","frontmatter":{},"headers":[],"relativePath":"api/ref.md","filePath":"api/ref.md"}'),h={name:"api/ref.md"};function e(l,s,k,p,r,d){return n(),a("div",null,s[0]||(s[0]=[t("",34)]))}const y=i(h,[["render",e]]);export{g as __pageData,y as default};
