@@ -134,15 +134,19 @@ export function setInPathCache(root: object, pathKey: string, value: any): void 
 }
 
 /**
- * Evict all cached paths that are descendants of the given path prefix.
- * Called when a value at `pathKey` is replaced so that deeper cached references
- * (which now point to the old, detached object) are not reused.
+ * Evict the cached path entry at `pathKey` AND all its descendants.
+ * Called when a value at `pathKey` is replaced so that the stale cached reference
+ * (and any deeper ones) are not reused on subsequent mutations.
  */
 export function evictDescendantsFromPathCache(root: object, pathKey: string): void {
     const cache = pathCache.get(root);
     if (!cache) return;
-    const prefix = pathKey + '.';
     let evicted = 0;
+    if (cache.has(pathKey)) {
+        cache.delete(pathKey);
+        evicted++;
+    }
+    const prefix = pathKey + '.';
     for (const key of cache.keys()) {
         if (key.startsWith(prefix)) {
             cache.delete(key);

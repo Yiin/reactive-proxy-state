@@ -20,6 +20,40 @@ function deleteValue(obj: any, key: any): void {
     else delete obj[key];
 }
 
+/**
+ * Validate that a cached path reference is still reachable from the root.
+ * External proxy mutations (e.g. `obj.arr = obj.arr.filter(...)`) replace
+ * objects without going through updateState, so the pathCache can hold stale
+ * references to detached objects. This verifies by walking one step from the
+ * grandparent and comparing the reference at the last path segment.
+ *
+ * Returns the cached value if valid, or undefined if stale (evicting the entry).
+ */
+function validateCachedPath(root: any, fullPath: (string | number | symbol)[], pathKey: string, cached: any): any {
+    if (fullPath.length === 0) return cached;
+
+    // Walk from root to the grandparent (all segments except the last)
+    const lastKey = fullPath[fullPath.length - 1];
+    let grandparent = root;
+    for (let i = 0; i < fullPath.length - 1; i++) {
+        grandparent = grandparent ? getValue(grandparent, fullPath[i]) : undefined;
+        if (grandparent === undefined) break;
+    }
+
+    if (grandparent === undefined) {
+        evictDescendantsFromPathCache(root, pathKey);
+        return undefined;
+    }
+
+    // Check if the value at the last segment is the same reference as cached
+    const actual = getValue(grandparent, lastKey);
+    if (actual === cached) return cached;
+
+    // Stale reference — evict this entry and all descendants
+    evictDescendantsFromPathCache(root, pathKey);
+    return undefined;
+}
+
 // dispatch table for applying state events based on action type
 // this avoids a large switch statement and makes adding new actions easier
 const actionHandlers: { [key: string]: (target: any, key: any, event: StateEvent) => void } = {
@@ -191,6 +225,12 @@ export function updateState(root: any, event: StateEvent): void {
             const parentPathKey = parentPath.join('.');
             // try cache first for performance
             let parent = pathCache.get(root)?.get(parentPathKey);
+            if (parent !== undefined) {
+                // Validate cached reference: external proxy mutations (e.g. arr = arr.filter())
+                // can replace objects without invalidating pathCache. Verify the cached value
+                // is still reachable by checking the last segment from its grandparent.
+                parent = validateCachedPath(root, parentPath, parentPathKey, parent);
+            }
             if (parent === undefined) {
                 // traverse path manually if not in cache
                 parent = parentPath.reduce((acc: any, key: any) => acc ? getValue(acc, key) : undefined, root);
@@ -213,6 +253,9 @@ export function updateState(root: any, event: StateEvent): void {
             const targetPathKey = targetPath.join('.');
             // try cache first
             let targetCollection = pathCache.get(root)?.get(targetPathKey);
+            if (targetCollection !== undefined) {
+                targetCollection = validateCachedPath(root, targetPath, targetPathKey, targetCollection);
+            }
             if (targetCollection === undefined) {
                  // traverse path manually if not in cache
                  targetCollection = targetPath.reduce((acc: any, key: any) => acc ? getValue(acc, key) : undefined, root);

@@ -2465,8 +2465,12 @@ function evictDescendantsFromPathCache(root, pathKey) {
   const cache = pathCache.get(root);
   if (!cache)
     return;
-  const prefix = pathKey + ".";
   let evicted = 0;
+  if (cache.has(pathKey)) {
+    cache.delete(pathKey);
+    evicted++;
+  }
+  const prefix = pathKey + ".";
   for (const key of cache.keys()) {
     if (key.startsWith(prefix)) {
       cache.delete(key);
@@ -2592,6 +2596,26 @@ function deleteValue(obj, key) {
     obj.delete(key);
   else
     delete obj[key];
+}
+function validateCachedPath(root, fullPath, pathKey, cached) {
+  if (fullPath.length === 0)
+    return cached;
+  const lastKey = fullPath[fullPath.length - 1];
+  let grandparent = root;
+  for (let i = 0;i < fullPath.length - 1; i++) {
+    grandparent = grandparent ? getValue(grandparent, fullPath[i]) : undefined;
+    if (grandparent === undefined)
+      break;
+  }
+  if (grandparent === undefined) {
+    evictDescendantsFromPathCache(root, pathKey);
+    return;
+  }
+  const actual = getValue(grandparent, lastKey);
+  if (actual === cached)
+    return cached;
+  evictDescendantsFromPathCache(root, pathKey);
+  return;
 }
 var actionHandlers = {
   set: function(parent, key, event) {
@@ -2746,6 +2770,9 @@ function updateState(root, event) {
       const parentPath = path.slice(0, -1);
       const parentPathKey = parentPath.join(".");
       let parent = pathCache.get(root)?.get(parentPathKey);
+      if (parent !== undefined) {
+        parent = validateCachedPath(root, parentPath, parentPathKey, parent);
+      }
       if (parent === undefined) {
         parent = parentPath.reduce((acc, key) => acc ? getValue(acc, key) : undefined, root);
         if (parent !== undefined)
@@ -2765,6 +2792,9 @@ function updateState(root, event) {
       const targetPath = path;
       const targetPathKey = targetPath.join(".");
       let targetCollection = pathCache.get(root)?.get(targetPathKey);
+      if (targetCollection !== undefined) {
+        targetCollection = validateCachedPath(root, targetPath, targetPathKey, targetCollection);
+      }
       if (targetCollection === undefined) {
         targetCollection = targetPath.reduce((acc, key) => acc ? getValue(acc, key) : undefined, root);
         if (targetCollection !== undefined)
