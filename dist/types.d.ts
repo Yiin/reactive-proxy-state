@@ -12,6 +12,10 @@ export interface StateEvent {
     oldValues?: any[];
 }
 export type EmitFunction = (event: StateEvent) => void;
+export interface ReactiveOptions {
+    /** When true, defers emit calls to the next microtask instead of firing synchronously */
+    async?: boolean;
+}
 import { Ref } from './ref';
 import { ComputedRef } from './computed';
 export type BaseWatchSource<T = any> = Ref<T> | ComputedRef<T> | (() => T);

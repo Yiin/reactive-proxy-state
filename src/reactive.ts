@@ -1,4 +1,4 @@
-import { EmitFunction, Path, StateEvent } from "./types";
+import { EmitFunction, Path, ReactiveOptions, StateEvent } from "./types";
 import {
   deepEqual,
   globalSeen,
@@ -33,12 +33,37 @@ export function toRaw<T>(observed: T): T {
 }
 
 /**
+ * Wraps an emit function to defer calls to the next microtask.
+ * Multiple events queued in the same synchronous tick are flushed
+ * in order on a single microtask.
+ */
+function createAsyncEmit(emit: EmitFunction): EmitFunction {
+  const queue: StateEvent[] = []
+  let flushScheduled = false
+
+  return (event: StateEvent) => {
+    queue.push(event)
+    if (!flushScheduled) {
+      flushScheduled = true
+      queueMicrotask(() => {
+        flushScheduled = false
+        const batch = queue.splice(0)
+        for (const queuedEvent of batch) {
+          emit(queuedEvent)
+        }
+      })
+    }
+  }
+}
+
+/**
  * Create a reactive proxy for an object
  */
 export function reactive<T extends object>(
   obj: T,
   emit?: EmitFunction,
-  path: Path = []
+  path: Path = [],
+  options?: ReactiveOptions
 ): T {
   // If the object is explicitly marked as raw, return it as-is without wrapping.
   if ((obj as any)[ReactiveFlags.SKIP]) {
@@ -47,6 +72,12 @@ export function reactive<T extends object>(
 
   // prevent infinite recursion with circular references
   if (globalSeen.has(obj)) return globalSeen.get(obj);
+
+  // At the root call, wrap emit with async batching if requested.
+  // The wrapped emit is passed to all nested wrappers so they inherit the behavior.
+  if (emit && path.length === 0 && options?.async) {
+    emit = createAsyncEmit(emit)
+  }
 
   // if this is the root call (path is empty) and an emit function is provided,
   // emit the initial state event.

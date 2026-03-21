@@ -3646,12 +3646,32 @@ function toRaw(observed) {
   const raw = observed && observed["__v_raw" /* RAW */];
   return raw ? toRaw(raw) : observed;
 }
-function reactive(obj, emit, path = []) {
+function createAsyncEmit(emit) {
+  const queue = [];
+  let flushScheduled = false;
+  return (event) => {
+    queue.push(event);
+    if (!flushScheduled) {
+      flushScheduled = true;
+      queueMicrotask(() => {
+        flushScheduled = false;
+        const batch = queue.splice(0);
+        for (const queuedEvent of batch) {
+          emit(queuedEvent);
+        }
+      });
+    }
+  };
+}
+function reactive(obj, emit, path = [], options) {
   if (obj["__v_skip" /* SKIP */]) {
     return obj;
   }
   if (globalSeen.has(obj))
     return globalSeen.get(obj);
+  if (emit && path.length === 0 && options?.async) {
+    emit = createAsyncEmit(emit);
+  }
   if (emit && path.length === 0) {
     try {
       const initialEvent = {

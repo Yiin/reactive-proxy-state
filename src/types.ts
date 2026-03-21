@@ -36,6 +36,12 @@ export interface StateEvent {
 // callback used to emit state change events
 export type EmitFunction = (event: StateEvent) => void;
 
+// options for configuring reactive proxy behavior
+export interface ReactiveOptions {
+  /** When true, defers emit calls to the next microtask instead of firing synchronously */
+  async?: boolean
+}
+
 // --- New code below ---
 
 import { Ref } from './ref';
