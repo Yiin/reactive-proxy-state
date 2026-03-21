@@ -117,7 +117,7 @@ export function reactive<T extends object>(
     if (val instanceof Date) return new Date(val.getTime()); // dates are not proxied, return copy
 
     // default to reactive for plain objects
-    return reactive(val, emit, subPath);
+    return reactive(val, emit, subPath, options);
   }
 
   const proxy = new Proxy(obj, {
@@ -158,13 +158,16 @@ export function reactive<T extends object>(
       // avoid unnecessary triggers if the value hasn't changed
       // fast path for primitives
       if (oldValue === value) return true;
-      // deep equality check for objects/arrays
+      // deep equality check for objects/arrays — skip when async emit is
+      // enabled because the cost of a redundant deferred emit is far less
+      // than a synchronous deep comparison on every property set
       if (
+        !options?.async &&
         isObject(oldValue) &&
         isObject(value) &&
         deepEqual(oldValue, value, new WeakMap())
       )
-        return true; // use new WeakMap for deepEqual seen
+        return true;
 
       const descriptor = Reflect.getOwnPropertyDescriptor(target, prop);
       const result = Reflect.set(target, prop, value, receiver);

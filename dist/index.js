@@ -3706,7 +3706,7 @@ function reactive(obj, emit, path = [], options) {
       return wrapSet(val, emit, subPath);
     if (val instanceof Date)
       return new Date(val.getTime());
-    return reactive(val, emit, subPath);
+    return reactive(val, emit, subPath, options);
   }
   const proxy = new Proxy(obj, {
     get(target, prop, receiver) {
@@ -3733,7 +3733,7 @@ function reactive(obj, emit, path = [], options) {
       const oldValue = target[prop];
       if (oldValue === value)
         return true;
-      if (isObject3(oldValue) && isObject3(value) && deepEqual(oldValue, value, new WeakMap))
+      if (!options?.async && isObject3(oldValue) && isObject3(value) && deepEqual(oldValue, value, new WeakMap))
         return true;
       const descriptor = Reflect.getOwnPropertyDescriptor(target, prop);
       const result = Reflect.set(target, prop, value, receiver);
