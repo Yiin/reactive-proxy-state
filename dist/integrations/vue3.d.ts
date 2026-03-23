@@ -1,6 +1,12 @@
 import type { StateEvent } from "../types";
+export type DiffErrorContext = {
+    key: string;
+    path: (string | number | symbol)[];
+    error: unknown;
+};
 export type TrackVueReactiveEventsOptions = {
     emitInitialReplace?: boolean;
+    onDiffError?: (ctx: DiffErrorContext) => void;
 };
 /**
  * Observe a Vue 3 reactive object and emit RPS-compatible StateEvents

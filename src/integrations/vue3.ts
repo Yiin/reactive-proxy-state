@@ -3,8 +3,15 @@ import type { Path, StateEvent } from "../types";
 import { watchEffect } from "vue";
 import { pauseTracking, resetTracking } from "@vue/reactivity";
 
+export type DiffErrorContext = {
+  key: string;
+  path: (string | number | symbol)[];
+  error: unknown;
+};
+
 export type TrackVueReactiveEventsOptions = {
   emitInitialReplace?: boolean;
+  onDiffError?: (ctx: DiffErrorContext) => void;
 };
 
 /**
@@ -22,7 +29,7 @@ export function trackVueReactiveEvents<T extends object>(
   emit: (event: StateEvent) => void,
   options: TrackVueReactiveEventsOptions = {}
 ): () => void {
-  const { emitInitialReplace = true } = options;
+  const { emitInitialReplace = true, onDiffError } = options;
 
   if (emitInitialReplace) {
     try {
@@ -54,8 +61,12 @@ export function trackVueReactiveEvents<T extends object>(
           prev[k] = result;
         }
       } catch (e) {
+        const errorPath = pathStack.slice();
         pathStack.length = 0;
         prev[k] = deepClone((vueState as any)[k]);
+        if (onDiffError) {
+          onDiffError({ key: k, path: errorPath, error: e });
+        }
         return;
       }
       pathStack.pop();

@@ -3970,7 +3970,7 @@ function markRaw(obj) {
 var import_reactivity = __toESM(require_reactivity_cjs(), 1);
 import { watchEffect as watchEffect2 } from "vue";
 function trackVueReactiveEvents(vueState, emit, options = {}) {
-  const { emitInitialReplace = true } = options;
+  const { emitInitialReplace = true, onDiffError } = options;
   if (emitInitialReplace) {
     try {
       emit({ action: "replace", path: [], newValue: deepClone(vueState) });
@@ -3994,8 +3994,12 @@ function trackVueReactiveEvents(vueState, emit, options = {}) {
           prev[k] = result;
         }
       } catch (e) {
+        const errorPath = pathStack.slice();
         pathStack.length = 0;
         prev[k] = deepClone(vueState[k]);
+        if (onDiffError) {
+          onDiffError({ key: k, path: errorPath, error: e });
+        }
         return;
       }
       pathStack.pop();
