@@ -64,7 +64,7 @@ describe('full pipeline: Vue client → WS → RPS server', () => {
     const clientState = vueReactive(clientRaw)
 
     const clientEvents: StateEvent[] = []
-    const stopTracking = trackVueReactiveEvents(clientState, (ev) => {
+    const { stop: stopTracking } = trackVueReactiveEvents(clientState, (ev) => {
       clientEvents.push(ev)
     })
     clientEvents.length = 0 // ignore initial replace
@@ -145,7 +145,7 @@ describe('full pipeline: Vue client → WS → RPS server', () => {
 
     const clientEvents: StateEvent[] = []
     let muteClient = 0
-    const stopTracking = trackVueReactiveEvents(clientState, (ev) => {
+    const { stop: stopTracking } = trackVueReactiveEvents(clientState, (ev) => {
       if (muteClient > 0) return
       clientEvents.push(ev)
     })
@@ -246,7 +246,7 @@ describe('full pipeline: Vue client → WS → RPS server', () => {
       const clientState = vueReactive(clientRaw)
 
       const clientEvents: StateEvent[] = []
-      const stopTracking = trackVueReactiveEvents(clientState, (ev) => {
+      const { stop: stopTracking } = trackVueReactiveEvents(clientState, (ev) => {
         clientEvents.push(ev)
       })
       clientEvents.length = 0

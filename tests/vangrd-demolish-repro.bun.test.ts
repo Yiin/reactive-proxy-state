@@ -19,7 +19,7 @@ import { reactive as vueReactive } from 'vue'
 
 function collectEvents(vueState: any) {
   const events: StateEvent[] = []
-  const stop = trackVueReactiveEvents(vueState, (e) => events.push(e), {
+  const { stop } = trackVueReactiveEvents(vueState, (e) => events.push(e), {
     emitInitialReplace: false
   })
   return { events, stop }
@@ -301,7 +301,7 @@ describe('vangrd app lifecycle (Object.assign load)', () => {
     // 2. Set up tracking (like module init, before startStateSync)
     let muted = 0
     const events: StateEvent[] = []
-    const stop = trackVueReactiveEvents(knowledge, (ev) => {
+    const { stop } = trackVueReactiveEvents(knowledge, (ev) => {
       if (muted > 0) return // muted, like the real app
       events.push(ev)
     }, { emitInitialReplace: false })
@@ -337,7 +337,7 @@ describe('vangrd app lifecycle (Object.assign load)', () => {
 
     let muted = 0
     const events: StateEvent[] = []
-    const stop = trackVueReactiveEvents(knowledge, (ev) => {
+    const { stop } = trackVueReactiveEvents(knowledge, (ev) => {
       if (muted > 0) return
       events.push(ev)
     }, { emitInitialReplace: false })
@@ -389,7 +389,7 @@ describe('vangrd app lifecycle (Object.assign load)', () => {
 
     let muted = 0
     const events: StateEvent[] = []
-    const stop = trackVueReactiveEvents(knowledge, (ev) => {
+    const { stop } = trackVueReactiveEvents(knowledge, (ev) => {
       if (muted > 0) return
       events.push(ev)
     }, { emitInitialReplace: false })
@@ -428,7 +428,7 @@ describe('vangrd app lifecycle (Object.assign load)', () => {
 
     let muted = 0
     const events: StateEvent[] = []
-    const stop = trackVueReactiveEvents(knowledge, (ev) => {
+    const { stop } = trackVueReactiveEvents(knowledge, (ev) => {
       if (muted > 0) return
       events.push(ev)
     }, { emitInitialReplace: false })
@@ -462,7 +462,7 @@ describe('vangrd app lifecycle (Object.assign load)', () => {
 
     let muted = 0
     const events: StateEvent[] = []
-    const stop = trackVueReactiveEvents(knowledge, (ev) => {
+    const { stop } = trackVueReactiveEvents(knowledge, (ev) => {
       if (muted > 0) return
       events.push(ev)
     }, { emitInitialReplace: false })

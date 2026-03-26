@@ -6,7 +6,7 @@ describe('Vue 3 adapter (trackVueReactiveEvents)', () => {
   test('emits initial replace and basic set/delete events', () => {
     const emit = mock((ev: StateEvent) => {});
     const vueState = vueReactive({ count: 0, nested: { n: 1 }, arr: [1] });
-    const stop = trackVueReactiveEvents(vueState, emit, { emitInitialReplace: true });
+    const { stop } = trackVueReactiveEvents(vueState, emit, { emitInitialReplace: true });
 
     // first call is replace
     expect(emit).toHaveBeenCalledTimes(1);
@@ -38,7 +38,7 @@ describe('Vue 3 adapter (trackVueReactiveEvents)', () => {
   test('arrays produce index/length sets sufficient for updateState', () => {
     const emitted: StateEvent[] = [];
     const vueState = vueReactive({ arr: [] as number[] });
-    const stop = trackVueReactiveEvents(vueState, (e) => emitted.push(e));
+    const { stop } = trackVueReactiveEvents(vueState, (e) => emitted.push(e));
     emitted.length = 0; // ignore initial replace
 
     vueState.arr.push(1, 2);
@@ -57,7 +57,7 @@ describe('Vue 3 adapter (trackVueReactiveEvents)', () => {
   test('Map/Set operations map to RPS events and sync via updateState', () => {
     const emitted: StateEvent[] = [];
     const vueState = vueReactive({ mp: new Map<string, any>(), st: new Set<number>() });
-    const stop = trackVueReactiveEvents(vueState, (e) => emitted.push(e));
+    const { stop } = trackVueReactiveEvents(vueState, (e) => emitted.push(e));
     emitted.length = 0;
 
     vueState.mp.set('a', 1);
@@ -78,7 +78,7 @@ describe('Vue 3 adapter (trackVueReactiveEvents)', () => {
   test('disable initial replace when requested', () => {
     const emit = mock((ev: StateEvent) => {});
     const vueState = vueReactive({ a: 1 });
-    const stop = trackVueReactiveEvents(vueState, emit, { emitInitialReplace: false });
+    const { stop } = trackVueReactiveEvents(vueState, emit, { emitInitialReplace: false });
     expect(emit).toHaveBeenCalledTimes(0);
     vueState.a = 2;
     expect(emit).toHaveBeenCalledTimes(1);
@@ -88,7 +88,7 @@ describe('Vue 3 adapter (trackVueReactiveEvents)', () => {
   test('object diffs: added, changed, removed props', () => {
     const emitted: StateEvent[] = [];
     const vueState = vueReactive({ obj: { a: 1, b: 2 } as any });
-    const stop = trackVueReactiveEvents(vueState, (e) => emitted.push(e));
+    const { stop } = trackVueReactiveEvents(vueState, (e) => emitted.push(e));
     emitted.length = 0;
 
     vueState.obj.a = 10;          // change
@@ -104,7 +104,7 @@ describe('Vue 3 adapter (trackVueReactiveEvents)', () => {
   test('arrays: unshift, shift, mid insert, sparse assignment', () => {
     const emitted: StateEvent[] = [];
     const vueState = vueReactive({ arr: [1, 3] as any[] });
-    const stop = trackVueReactiveEvents(vueState, (e) => emitted.push(e));
+    const { stop } = trackVueReactiveEvents(vueState, (e) => emitted.push(e));
     emitted.length = 0;
 
     vueState.arr.unshift(0, -1);        // front insert
@@ -121,7 +121,7 @@ describe('Vue 3 adapter (trackVueReactiveEvents)', () => {
   test('nested arrays of objects: item add and property change', () => {
     const emitted: StateEvent[] = [];
     const vueState = vueReactive({ todos: [{ id: 1, text: 'a' }] as any[] });
-    const stop = trackVueReactiveEvents(vueState, (e) => emitted.push(e));
+    const { stop } = trackVueReactiveEvents(vueState, (e) => emitted.push(e));
     emitted.length = 0;
 
     vueState.todos.push({ id: 2, text: 'b' });
@@ -136,7 +136,7 @@ describe('Vue 3 adapter (trackVueReactiveEvents)', () => {
   test('nested: add new array property then push (acc.jobs scenario)', () => {
     const emitted: StateEvent[] = [];
     const vueState = vueReactive({ knowledge: { accounts: [{ id: 1 } as any] } });
-    const stop = trackVueReactiveEvents(vueState, (e) => emitted.push(e));
+    const { stop } = trackVueReactiveEvents(vueState, (e) => emitted.push(e));
     emitted.length = 0;
 
     // find current account and add a new array property, then push to it
@@ -162,7 +162,7 @@ describe('Vue 3 adapter (trackVueReactiveEvents)', () => {
   test('Map with object values: inner mutation emits map-set replacement', () => {
     const emitted: StateEvent[] = [];
     const vueState = vueReactive({ mp: new Map([[ 'k', { x: 1 } ]]) });
-    const stop = trackVueReactiveEvents(vueState, (e) => emitted.push(e));
+    const { stop } = trackVueReactiveEvents(vueState, (e) => emitted.push(e));
     emitted.length = 0;
 
     // mutate inside the object stored in the Map
@@ -178,7 +178,7 @@ describe('Vue 3 adapter (trackVueReactiveEvents)', () => {
     const emitted: StateEvent[] = [];
     const o = { x: 1 };
     const vueState = vueReactive({ st: new Set([o]) });
-    const stop = trackVueReactiveEvents(vueState, (e) => emitted.push(e));
+    const { stop } = trackVueReactiveEvents(vueState, (e) => emitted.push(e));
     emitted.length = 0;
 
     // mutating object inside set should not emit membership events
@@ -200,7 +200,7 @@ describe('Vue 3 adapter (trackVueReactiveEvents)', () => {
   test('setting properties to undefined vs delete', () => {
     const emitted: StateEvent[] = [];
     const vueState = vueReactive({ obj: { a: 1, b: 2 } as any });
-    const stop = trackVueReactiveEvents(vueState, (e) => emitted.push(e));
+    const { stop } = trackVueReactiveEvents(vueState, (e) => emitted.push(e));
     emitted.length = 0;
 
     vueState.obj.a = undefined;
@@ -219,7 +219,7 @@ describe('Vue 3 adapter (trackVueReactiveEvents)', () => {
     const now = new Date('2022-01-01T00:00:00Z');
     const big = BigInt(123);
     const vueState = vueReactive({ now, big } as any);
-    const stop = trackVueReactiveEvents(vueState, (e) => emitted.push(e));
+    const { stop } = trackVueReactiveEvents(vueState, (e) => emitted.push(e));
     emitted.length = 0;
 
     // Mutate both

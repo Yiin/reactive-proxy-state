@@ -14,6 +14,15 @@ export type TrackVueReactiveEventsOptions = {
   onDiffError?: (ctx: DiffErrorContext) => void;
 };
 
+export type VueTrackingControl = {
+  /** Stop all effects permanently. */
+  stop: () => void;
+  /** Stop all effects temporarily. No diffing overhead while paused. */
+  pause: () => void;
+  /** Rebuild snapshots from current state and re-create effects. */
+  resume: () => void;
+};
+
 /**
  * Observe a Vue 3 reactive object and emit RPS-compatible StateEvents
  * for each mutation performed through Vue reactivity.
@@ -22,13 +31,14 @@ export type TrackVueReactiveEventsOptions = {
  * only the affected subtree is diffed on mutation. A root structural effect
  * tracks Object.keys() for key add/delete at the top level.
  *
- * Returns a stop() function to tear down all effects.
+ * Returns a control object with stop/pause/resume. Use pause/resume to
+ * suppress diffing while applying external mutations (e.g. server events).
  */
 export function trackVueReactiveEvents<T extends object>(
   vueState: T,
   emit: (event: StateEvent) => void,
   options: TrackVueReactiveEventsOptions = {}
-): () => void {
+): VueTrackingControl {
   const { emitInitialReplace = true, onDiffError } = options;
 
   if (emitInitialReplace) {
@@ -42,6 +52,7 @@ export function trackVueReactiveEvents<T extends object>(
   const prev: Record<string, any> = {};
   const pathStack: (string | number | symbol)[] = [];
   const keyStops = new Map<string, () => void>();
+  let rootStop: (() => void) | null = null;
 
   // Initialize prev snapshot (outside any effect — no accidental dep tracking)
   for (const k of Object.keys(vueState)) {
@@ -74,51 +85,75 @@ export function trackVueReactiveEvents<T extends object>(
     keyStops.set(k, stop);
   }
 
-  // Create per-key effects (each runs immediately, establishing deps without emitting)
-  for (const k of Object.keys(prev)) {
-    createKeyEffect(k);
+  function createRootEffect() {
+    rootStop = watchEffect(() => {
+      const currKeys = Object.keys(vueState as any);
+      const currKeySet = new Set(currKeys);
+      const prevKeySet = new Set(Object.keys(prev));
+
+      // Added keys
+      for (const k of currKeys) {
+        if (!prevKeySet.has(k)) {
+          pauseTracking();
+          const cloned = deepClone((vueState as any)[k]);
+          resetTracking();
+
+          pathStack.push(k);
+          emit({ action: 'set', path: pathStack.slice(), newValue: cloned });
+          pathStack.pop();
+
+          prev[k] = cloned;
+          createKeyEffect(k);
+        }
+      }
+
+      // Deleted keys
+      for (const k of prevKeySet) {
+        if (!currKeySet.has(k)) {
+          pathStack.push(k);
+          emit({ action: 'delete', path: pathStack.slice(), oldValue: prev[k] });
+          pathStack.pop();
+
+          delete prev[k];
+          keyStops.get(k)?.();
+          keyStops.delete(k);
+        }
+      }
+    }, { flush: 'sync' as any });
   }
 
-  // Root structural effect — only tracks Object.keys() iterate dep
-  const stopRoot = watchEffect(() => {
-    const currKeys = Object.keys(vueState as any);
-    const currKeySet = new Set(currKeys);
-    const prevKeySet = new Set(Object.keys(prev));
-
-    // Added keys
-    for (const k of currKeys) {
-      if (!prevKeySet.has(k)) {
-        pauseTracking();
-        const cloned = deepClone((vueState as any)[k]);
-        resetTracking();
-
-        pathStack.push(k);
-        emit({ action: 'set', path: pathStack.slice(), newValue: cloned });
-        pathStack.pop();
-
-        prev[k] = cloned;
-        createKeyEffect(k);
-      }
-    }
-
-    // Deleted keys
-    for (const k of prevKeySet) {
-      if (!currKeySet.has(k)) {
-        pathStack.push(k);
-        emit({ action: 'delete', path: pathStack.slice(), oldValue: prev[k] });
-        pathStack.pop();
-
-        delete prev[k];
-        keyStops.get(k)?.();
-        keyStops.delete(k);
-      }
-    }
-  }, { flush: 'sync' as any });
-
-  return () => {
-    stopRoot();
+  function stopAll() {
+    rootStop?.();
+    rootStop = null;
     for (const stop of keyStops.values()) stop();
     keyStops.clear();
+  }
+
+  function startAll() {
+    for (const k of Object.keys(prev)) {
+      createKeyEffect(k);
+    }
+    createRootEffect();
+  }
+
+  // Initial setup
+  startAll();
+
+  return {
+    stop: stopAll,
+    pause: stopAll,
+    resume() {
+      // Refresh snapshots from current state (outside effects — no dep tracking)
+      const currentKeys = new Set(Object.keys(vueState as any));
+      for (const k of Object.keys(prev)) {
+        if (!currentKeys.has(k)) delete prev[k];
+      }
+      for (const k of currentKeys) {
+        prev[k] = deepClone((vueState as any)[k]);
+      }
+      // Re-create effects (run immediately, establishing fresh deps)
+      startAll();
+    }
   };
 }
 

@@ -3979,6 +3979,7 @@ function trackVueReactiveEvents(vueState, emit, options = {}) {
   const prev = {};
   const pathStack = [];
   const keyStops = new Map;
+  let rootStop = null;
   for (const k of Object.keys(vueState)) {
     prev[k] = deepClone(vueState[k]);
   }
@@ -4006,41 +4007,63 @@ function trackVueReactiveEvents(vueState, emit, options = {}) {
     }, { flush: "sync" });
     keyStops.set(k, stop);
   }
-  for (const k of Object.keys(prev)) {
-    createKeyEffect(k);
+  function createRootEffect() {
+    rootStop = watchEffect2(() => {
+      const currKeys = Object.keys(vueState);
+      const currKeySet = new Set(currKeys);
+      const prevKeySet = new Set(Object.keys(prev));
+      for (const k of currKeys) {
+        if (!prevKeySet.has(k)) {
+          import_reactivity.pauseTracking();
+          const cloned = deepClone(vueState[k]);
+          import_reactivity.resetTracking();
+          pathStack.push(k);
+          emit({ action: "set", path: pathStack.slice(), newValue: cloned });
+          pathStack.pop();
+          prev[k] = cloned;
+          createKeyEffect(k);
+        }
+      }
+      for (const k of prevKeySet) {
+        if (!currKeySet.has(k)) {
+          pathStack.push(k);
+          emit({ action: "delete", path: pathStack.slice(), oldValue: prev[k] });
+          pathStack.pop();
+          delete prev[k];
+          keyStops.get(k)?.();
+          keyStops.delete(k);
+        }
+      }
+    }, { flush: "sync" });
   }
-  const stopRoot = watchEffect2(() => {
-    const currKeys = Object.keys(vueState);
-    const currKeySet = new Set(currKeys);
-    const prevKeySet = new Set(Object.keys(prev));
-    for (const k of currKeys) {
-      if (!prevKeySet.has(k)) {
-        import_reactivity.pauseTracking();
-        const cloned = deepClone(vueState[k]);
-        import_reactivity.resetTracking();
-        pathStack.push(k);
-        emit({ action: "set", path: pathStack.slice(), newValue: cloned });
-        pathStack.pop();
-        prev[k] = cloned;
-        createKeyEffect(k);
-      }
-    }
-    for (const k of prevKeySet) {
-      if (!currKeySet.has(k)) {
-        pathStack.push(k);
-        emit({ action: "delete", path: pathStack.slice(), oldValue: prev[k] });
-        pathStack.pop();
-        delete prev[k];
-        keyStops.get(k)?.();
-        keyStops.delete(k);
-      }
-    }
-  }, { flush: "sync" });
-  return () => {
-    stopRoot();
+  function stopAll() {
+    rootStop?.();
+    rootStop = null;
     for (const stop of keyStops.values())
       stop();
     keyStops.clear();
+  }
+  function startAll() {
+    for (const k of Object.keys(prev)) {
+      createKeyEffect(k);
+    }
+    createRootEffect();
+  }
+  startAll();
+  return {
+    stop: stopAll,
+    pause: stopAll,
+    resume() {
+      const currentKeys = new Set(Object.keys(vueState));
+      for (const k of Object.keys(prev)) {
+        if (!currentKeys.has(k))
+          delete prev[k];
+      }
+      for (const k of currentKeys) {
+        prev[k] = deepClone(vueState[k]);
+      }
+      startAll();
+    }
   };
 }
 function typeTag(v) {
