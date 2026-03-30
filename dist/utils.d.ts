@@ -22,6 +22,12 @@ export declare function getProxyStats(): {
     staleEvicted: number;
 };
 export declare function resetProxyStats(): void;
+/**
+ * Recursively evict an object and all its nested children from proxy caches.
+ * This allows GC to collect the entire old object tree when a property is
+ * replaced, not just the top-level value.
+ */
+export declare function evictDeep(value: any): void;
 export declare function deepEqual(a: any, b: any, seen?: WeakMap<any, any>): boolean;
 export declare function getFromPathCache(root: object, pathKey: string): any | undefined;
 export declare function setInPathCache(root: object, pathKey: string, value: any): void;

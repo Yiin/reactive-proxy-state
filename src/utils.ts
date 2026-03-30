@@ -42,6 +42,44 @@ export function resetProxyStats() {
   proxyStats.staleEvicted = 0
 }
 
+/**
+ * Recursively evict an object and all its nested children from proxy caches.
+ * This allows GC to collect the entire old object tree when a property is
+ * replaced, not just the top-level value.
+ */
+export function evictDeep(value: any): void {
+  if (value == null || typeof value !== 'object') return
+  if (!globalSeen.has(value)) return // not proxied, skip entire subtree
+
+  globalSeen.delete(value)
+  wrapperCache.delete(value)
+  proxyStats.staleEvicted++
+
+  if (Array.isArray(value)) {
+    for (let i = 0; i < value.length; i++) {
+      if (value[i] != null && typeof value[i] === 'object') {
+        evictDeep(value[i])
+      }
+    }
+  } else if (value instanceof Map) {
+    for (const v of value.values()) {
+      if (v != null && typeof v === 'object') evictDeep(v)
+    }
+  } else if (value instanceof Set) {
+    for (const v of value) {
+      if (v != null && typeof v === 'object') evictDeep(v)
+    }
+  } else {
+    const keys = Object.keys(value)
+    for (let i = 0; i < keys.length; i++) {
+      const child = value[keys[i]]
+      if (child != null && typeof child === 'object') {
+        evictDeep(child)
+      }
+    }
+  }
+}
+
 // simple lru-like cleanup for individual object path caches
 function cleanupPathCache(root: object) {
     const cache = pathCache.get(root);

@@ -2389,6 +2389,40 @@ function resetProxyStats() {
   proxyStats.objects = 0;
   proxyStats.staleEvicted = 0;
 }
+function evictDeep(value) {
+  if (value == null || typeof value !== "object")
+    return;
+  if (!globalSeen.has(value))
+    return;
+  globalSeen.delete(value);
+  wrapperCache.delete(value);
+  proxyStats.staleEvicted++;
+  if (Array.isArray(value)) {
+    for (let i = 0;i < value.length; i++) {
+      if (value[i] != null && typeof value[i] === "object") {
+        evictDeep(value[i]);
+      }
+    }
+  } else if (value instanceof Map) {
+    for (const v of value.values()) {
+      if (v != null && typeof v === "object")
+        evictDeep(v);
+    }
+  } else if (value instanceof Set) {
+    for (const v of value) {
+      if (v != null && typeof v === "object")
+        evictDeep(v);
+    }
+  } else {
+    const keys = Object.keys(value);
+    for (let i = 0;i < keys.length; i++) {
+      const child = value[keys[i]];
+      if (child != null && typeof child === "object") {
+        evictDeep(child);
+      }
+    }
+  }
+}
 function cleanupPathCache(root) {
   const cache = pathCache.get(root);
   if (cache && pathCacheSize.get(root) > MAX_CACHE_SIZE) {
@@ -3480,6 +3514,8 @@ function wrapArray(arr, emit, path = []) {
               oldValue
             };
             emit?.(event);
+            if (isObject2(oldValue))
+              evictDeep(oldValue);
             trigger(target, Symbol.iterator);
             if (oldLength !== newLength) {
               trigger(target, "length");
@@ -3503,6 +3539,8 @@ function wrapArray(arr, emit, path = []) {
               oldValue
             };
             emit?.(event);
+            if (isObject2(oldValue))
+              evictDeep(oldValue);
             trigger(target, Symbol.iterator);
             if (oldLength !== newLength) {
               trigger(target, "length");
@@ -3552,6 +3590,10 @@ function wrapArray(arr, emit, path = []) {
                 oldValues: deletedItems.length > 0 ? deletedItems : undefined
               };
               emit?.(event);
+              for (let i = 0;i < deletedItems.length; i++) {
+                if (isObject2(deletedItems[i]))
+                  evictDeep(deletedItems[i]);
+              }
               trigger(target, Symbol.iterator);
               if (oldLength !== newLength) {
                 trigger(target, "length");
@@ -3710,6 +3752,9 @@ function wrapArray(arr, emit, path = []) {
           newValue: value
         };
         emit?.(event);
+        if (isObject2(oldValue) && oldValue !== value) {
+          evictDeep(oldValue);
+        }
         trigger(target, prop);
       }
       return result;
@@ -3841,9 +3886,7 @@ function reactive(obj, emit, path = [], options) {
         emit?.(event);
         trigger(target, prop);
         if (isObject3(oldValue) && oldValue !== value) {
-          globalSeen.delete(oldValue);
-          wrapperCache.delete(oldValue);
-          proxyStats.staleEvicted++;
+          evictDeep(oldValue);
         }
       }
       return result;
@@ -3868,9 +3911,7 @@ function reactive(obj, emit, path = [], options) {
         emit?.(event);
         trigger(target, prop);
         if (isObject3(oldValue)) {
-          globalSeen.delete(oldValue);
-          wrapperCache.delete(oldValue);
-          proxyStats.staleEvicted++;
+          evictDeep(oldValue);
         }
       }
       return result;

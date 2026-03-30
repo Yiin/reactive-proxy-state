@@ -6,6 +6,7 @@ import {
   wrapperCache,
   globalSeen,
   proxyStats,
+  evictDeep,
 } from "./utils";
 import { reactive } from "./reactive";
 import { wrapMap } from "./wrap-map";
@@ -78,6 +79,7 @@ export function wrapArray<T extends any[]>(
               oldValue: oldValue,
             };
             emit?.(event);
+            if (isObject(oldValue)) evictDeep(oldValue);
             trigger(target, Symbol.iterator);
             if (oldLength !== newLength) {
               trigger(target, "length");
@@ -100,6 +102,7 @@ export function wrapArray<T extends any[]>(
               oldValue: oldValue,
             };
             emit?.(event);
+            if (isObject(oldValue)) evictDeep(oldValue);
             trigger(target, Symbol.iterator);
             if (oldLength !== newLength) {
               trigger(target, "length");
@@ -167,6 +170,9 @@ export function wrapArray<T extends any[]>(
                 oldValues: deletedItems.length > 0 ? deletedItems : undefined,
               };
               emit?.(event);
+              for (let i = 0; i < deletedItems.length; i++) {
+                if (isObject(deletedItems[i])) evictDeep(deletedItems[i]);
+              }
               trigger(target, Symbol.iterator);
               if (oldLength !== newLength) {
                 trigger(target, "length");
@@ -349,6 +355,9 @@ export function wrapArray<T extends any[]>(
           newValue: value,
         };
         emit?.(event);
+        if (isObject(oldValue) && oldValue !== value) {
+          evictDeep(oldValue);
+        }
         trigger(target, prop);
       }
       return result;
