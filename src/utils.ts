@@ -17,6 +17,31 @@ export const globalSeen = new WeakMap<any, any>();
 // global cache to reuse proxy wrappers for the same original object
 export const wrapperCache = new WeakMap<object, object>();
 
+// ── Instrumentation counters (near-zero overhead) ──
+
+export const proxyStats = {
+  created: 0,
+  arrays: 0,
+  maps: 0,
+  sets: 0,
+  objects: 0,
+  /** Number of old proxied values evicted when replaced via set trap */
+  staleEvicted: 0,
+}
+
+export function getProxyStats() {
+  return { ...proxyStats, pathConcatCacheSize: pathConcatCache.size }
+}
+
+export function resetProxyStats() {
+  proxyStats.created = 0
+  proxyStats.arrays = 0
+  proxyStats.maps = 0
+  proxyStats.sets = 0
+  proxyStats.objects = 0
+  proxyStats.staleEvicted = 0
+}
+
 // simple lru-like cleanup for individual object path caches
 function cleanupPathCache(root: object) {
     const cache = pathCache.get(root);

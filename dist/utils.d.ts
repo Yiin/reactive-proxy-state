@@ -2,6 +2,26 @@ export declare const pathCache: WeakMap<object, Map<string, any>>;
 export declare const pathConcatCache: Map<string, any[]>;
 export declare const globalSeen: WeakMap<any, any>;
 export declare const wrapperCache: WeakMap<object, object>;
+export declare const proxyStats: {
+    created: number;
+    arrays: number;
+    maps: number;
+    sets: number;
+    objects: number;
+    /** Number of old proxied values evicted when replaced via set trap */
+    staleEvicted: number;
+};
+export declare function getProxyStats(): {
+    pathConcatCacheSize: number;
+    created: number;
+    arrays: number;
+    maps: number;
+    sets: number;
+    objects: number;
+    /** Number of old proxied values evicted when replaced via set trap */
+    staleEvicted: number;
+};
+export declare function resetProxyStats(): void;
 export declare function deepEqual(a: any, b: any, seen?: WeakMap<any, any>): boolean;
 export declare function getFromPathCache(root: object, pathKey: string): any | undefined;
 export declare function setInPathCache(root: object, pathKey: string, value: any): void;

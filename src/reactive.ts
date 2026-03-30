@@ -2,8 +2,10 @@ import { EmitFunction, Path, ReactiveOptions, StateEvent } from "./types";
 import {
   deepEqual,
   globalSeen,
+  wrapperCache,
   getPathConcat,
   setPathConcat,
+  proxyStats,
 } from "./utils";
 import { wrapArray } from "./wrap-array";
 import { wrapMap } from "./wrap-map";
@@ -196,6 +198,14 @@ export function reactive<T extends object>(
 
         // notify effects watching this property
         trigger(target, prop);
+
+        // Evict stale proxy entries for the replaced value so GC can collect
+        // the old object and its proxy wrapper (methodCache closures, etc.)
+        if (isObject(oldValue) && oldValue !== value) {
+          globalSeen.delete(oldValue);
+          wrapperCache.delete(oldValue);
+          proxyStats.staleEvicted++;
+        }
       }
       return result;
     },
@@ -227,6 +237,13 @@ export function reactive<T extends object>(
 
         // notify effects watching this property
         trigger(target, prop);
+
+        // Evict stale proxy for deleted value
+        if (isObject(oldValue)) {
+          globalSeen.delete(oldValue);
+          wrapperCache.delete(oldValue);
+          proxyStats.staleEvicted++;
+        }
       }
 
       return result;
@@ -235,5 +252,7 @@ export function reactive<T extends object>(
 
   // cache the proxy to handle circular references and improve performance
   globalSeen.set(obj, proxy);
+  proxyStats.created++;
+  proxyStats.objects++;
   return proxy;
 }

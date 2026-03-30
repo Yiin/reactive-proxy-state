@@ -2340,6 +2340,7 @@ __export(exports_src, {
   toRaw: () => toRaw,
   setActiveEffect: () => setActiveEffect,
   runCleanupFunctions: () => runCleanupFunctions,
+  resetProxyStats: () => resetProxyStats,
   ref: () => ref,
   reactive: () => reactive,
   markRaw: () => markRaw,
@@ -2347,6 +2348,7 @@ __export(exports_src, {
   isRef: () => isRef,
   isReactive: () => isReactive,
   isComputed: () => isComputed,
+  getProxyStats: () => getProxyStats,
   deepToRaw: () => deepToRaw,
   deepEqual: () => deepEqual,
   deepClone: () => deepClone,
@@ -2368,6 +2370,25 @@ var pathConcatCache = new Map;
 var MAX_PATH_CACHE_SIZE = 1000;
 var globalSeen = new WeakMap;
 var wrapperCache = new WeakMap;
+var proxyStats = {
+  created: 0,
+  arrays: 0,
+  maps: 0,
+  sets: 0,
+  objects: 0,
+  staleEvicted: 0
+};
+function getProxyStats() {
+  return { ...proxyStats, pathConcatCacheSize: pathConcatCache.size };
+}
+function resetProxyStats() {
+  proxyStats.created = 0;
+  proxyStats.arrays = 0;
+  proxyStats.maps = 0;
+  proxyStats.sets = 0;
+  proxyStats.objects = 0;
+  proxyStats.staleEvicted = 0;
+}
 function cleanupPathCache(root) {
   const cache = pathCache.get(root);
   if (cache && pathCacheSize.get(root) > MAX_CACHE_SIZE) {
@@ -3154,6 +3175,8 @@ function wrapSet(set, emit, path = []) {
   });
   globalSeen.set(set, proxy);
   wrapperCache.set(set, proxy);
+  proxyStats.created++;
+  proxyStats.sets++;
   return proxy;
 }
 
@@ -3395,6 +3418,8 @@ function wrapMap(map, emit, path = []) {
   });
   globalSeen.set(map, proxy);
   wrapperCache.set(map, proxy);
+  proxyStats.created++;
+  proxyStats.maps++;
   return proxy;
 }
 
@@ -3692,6 +3717,8 @@ function wrapArray(arr, emit, path = []) {
   });
   globalSeen.set(arr, proxy);
   wrapperCache.set(arr, proxy);
+  proxyStats.created++;
+  proxyStats.arrays++;
   return proxy;
 }
 
@@ -3813,6 +3840,11 @@ function reactive(obj, emit, path = [], options) {
         };
         emit?.(event);
         trigger(target, prop);
+        if (isObject3(oldValue) && oldValue !== value) {
+          globalSeen.delete(oldValue);
+          wrapperCache.delete(oldValue);
+          proxyStats.staleEvicted++;
+        }
       }
       return result;
     },
@@ -3835,11 +3867,18 @@ function reactive(obj, emit, path = [], options) {
         };
         emit?.(event);
         trigger(target, prop);
+        if (isObject3(oldValue)) {
+          globalSeen.delete(oldValue);
+          wrapperCache.delete(oldValue);
+          proxyStats.staleEvicted++;
+        }
       }
       return result;
     }
   });
   globalSeen.set(obj, proxy);
+  proxyStats.created++;
+  proxyStats.objects++;
   return proxy;
 }
 // src/ref.ts

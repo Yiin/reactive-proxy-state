@@ -5,6 +5,7 @@ import {
   setPathConcat,
   wrapperCache,
   globalSeen,
+  proxyStats,
 } from "./utils";
 import { reactive } from "./reactive";
 import { wrapArray } from "./wrap-array";
@@ -305,5 +306,7 @@ export function wrapMap<K, V>(
 
   globalSeen.set(map, proxy);
   wrapperCache.set(map, proxy);
+  proxyStats.created++;
+  proxyStats.maps++;
   return proxy;
 }

@@ -4,6 +4,7 @@ import {
   setPathConcat,
   wrapperCache,
   globalSeen,
+  proxyStats,
 } from "./utils";
 import { reactive } from "./reactive";
 import { wrapArray } from "./wrap-array";
@@ -224,5 +225,7 @@ export function wrapSet<T>(
 
   globalSeen.set(set, proxy);
   wrapperCache.set(set, proxy);
+  proxyStats.created++;
+  proxyStats.sets++;
   return proxy;
 }

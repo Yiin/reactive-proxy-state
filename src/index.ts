@@ -1,5 +1,5 @@
 export * from './types';
-export { deepClone, deepEqual } from './utils';
+export { deepClone, deepEqual, getProxyStats, resetProxyStats } from './utils';
 export * from './state';
 export * from './reactive';
 export * from './watch';
