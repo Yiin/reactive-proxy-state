@@ -1,6 +1,7 @@
 import { EmitFunction, Path, StateEvent } from "./types";
 import {
   deepEqual,
+  unwrapForStore,
   getPathConcat,
   setPathConcat,
   wrapperCache,
@@ -11,6 +12,7 @@ import { reactive } from "./reactive";
 import { wrapArray } from "./wrap-array";
 import { wrapSet } from "./wrap-set";
 import { track, trigger } from "./watch-effect";
+import { ReactiveFlags } from "./constants";
 
 export function wrapMap<K, V>(
   map: Map<K, V>,
@@ -25,6 +27,9 @@ export function wrapMap<K, V>(
 
   const proxy = new Proxy(map, {
     get(target: Map<K, V>, prop: string | symbol, receiver: any): any {
+      if (prop === ReactiveFlags.RAW) return target;
+      if (prop === ReactiveFlags.IS_REACTIVE) return true;
+
       track(target, prop);
 
       if (
@@ -43,6 +48,7 @@ export function wrapMap<K, V>(
 
       if (prop === "set") {
         methodCache[prop] = function (key: K, value: V): Map<K, V> {
+          if (value != null && typeof value === 'object') value = unwrapForStore(value) as V;
           const existed = target.has(key);
           const oldValue = target.get(key);
           const oldSize = target.size;

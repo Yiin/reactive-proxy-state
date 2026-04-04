@@ -7,6 +7,7 @@ import {
   setPathConcat,
   proxyStats,
   evictDeep,
+  unwrapForStore,
 } from "./utils";
 import { wrapArray } from "./wrap-array";
 import { wrapMap } from "./wrap-map";
@@ -26,14 +27,6 @@ export function isReactive(value: any): boolean {
   return !!(value && value[ReactiveFlags.IS_REACTIVE]);
 }
 
-/**
- * Returns the raw, original object underlying a reactive proxy.
- * If the input is not a proxy, returns the input itself.
- */
-export function toRaw<T>(observed: T): T {
-  const raw = observed && (observed as any)[ReactiveFlags.RAW];
-  return raw ? toRaw(raw) : observed;
-}
 
 /**
  * Wraps an emit function to defer calls to the next microtask.
@@ -156,6 +149,10 @@ export function reactive<T extends object>(
       return wrapValue(value, newPath);
     },
     set(target: T, prop: string | symbol, value: any, receiver: any): boolean {
+      // Spreading a reactive proxy (`{ ...proxy }`) embeds proxy wrappers
+      // in the plain result — unwrap to prevent unbounded nesting.
+      if (isObject(value)) value = unwrapForStore(value);
+
       const oldValue = (target as any)[prop];
 
       // avoid unnecessary triggers if the value hasn't changed

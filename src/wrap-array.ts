@@ -1,6 +1,7 @@
 import { EmitFunction, Path, StateEvent } from "./types";
 import {
   deepEqual,
+  unwrapForStore,
   getPathConcat,
   setPathConcat,
   wrapperCache,
@@ -12,6 +13,7 @@ import { reactive } from "./reactive";
 import { wrapMap } from "./wrap-map";
 import { wrapSet } from "./wrap-set";
 import { track, trigger } from "./watch-effect";
+import { ReactiveFlags } from "./constants";
 
 // avoid repeated typeof checks
 function isObject(v: any): v is object {
@@ -33,6 +35,9 @@ export function wrapArray<T extends any[]>(
 
   const proxy = new Proxy(arr, {
     get(target: T, prop: string | symbol, receiver: any): any {
+      if (prop === ReactiveFlags.RAW) return target;
+      if (prop === ReactiveFlags.IS_REACTIVE) return true;
+
       track(target, prop);
 
       if (methodCache[prop]) {
@@ -317,6 +322,8 @@ export function wrapArray<T extends any[]>(
       return value;
     },
     set(target: T, prop: string | symbol, value: any, receiver: any): boolean {
+      if (isObject(value)) value = unwrapForStore(value);
+
       const oldValue = (target as any)[prop];
 
       // avoid unnecessary triggers if value hasn't changed

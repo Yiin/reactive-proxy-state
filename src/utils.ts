@@ -1,3 +1,46 @@
+import { ReactiveFlags } from "./constants";
+
+/**
+ * Returns the raw, original object underlying a reactive proxy.
+ * If the input is not a proxy, returns the input itself.
+ */
+export function toRaw<T>(observed: T): T {
+  let value = observed as any
+  while (value && value[ReactiveFlags.RAW]) {
+    value = value[ReactiveFlags.RAW]
+  }
+  return value
+}
+
+/**
+ * Strip proxy refs from spread results before storing in raw state.
+ * Prevents unbounded proxy nesting from `{ ...reactiveProxy }` patterns.
+ */
+export function unwrapForStore(value: any): any {
+  // If the value itself is reactive, unwrap it — the raw object's
+  // children are already raw (they only appear wrapped through proxy get traps)
+  if (value[ReactiveFlags.IS_REACTIVE]) return toRaw(value)
+  // For plain objects/arrays that may contain proxy refs from spreading,
+  // unwrap each direct child in-place
+  if (Array.isArray(value)) {
+    for (let i = 0; i < value.length; i++) {
+      const child = value[i]
+      if (child != null && typeof child === 'object' && child[ReactiveFlags.IS_REACTIVE]) {
+        value[i] = toRaw(child)
+      }
+    }
+  } else if (!(value instanceof Map) && !(value instanceof Set) && !(value instanceof Date)) {
+    for (const key in value) {
+      if (!Object.prototype.hasOwnProperty.call(value, key)) continue
+      const child = value[key]
+      if (child != null && typeof child === 'object' && child[ReactiveFlags.IS_REACTIVE]) {
+        value[key] = toRaw(child)
+      }
+    }
+  }
+  return value
+}
+
 // cache for memoized deepEqual results, using weakmap to avoid memory leaks
 const deepEqualCache = new WeakMap<object, WeakMap<object, boolean>>();
 const MAX_CACHE_SIZE = 1000;
@@ -49,6 +92,8 @@ export function resetProxyStats() {
  */
 export function evictDeep(value: any): void {
   if (value == null || typeof value !== 'object') return
+  // Unwrap so we evict the raw object, not the proxy wrapper
+  value = toRaw(value)
   if (!globalSeen.has(value)) return // not proxied, skip entire subtree
 
   globalSeen.delete(value)

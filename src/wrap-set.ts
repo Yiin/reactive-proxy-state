@@ -1,5 +1,6 @@
 import { EmitFunction, Path, StateEvent } from "./types";
 import {
+  unwrapForStore,
   getPathConcat,
   setPathConcat,
   wrapperCache,
@@ -10,6 +11,7 @@ import { reactive } from "./reactive";
 import { wrapArray } from "./wrap-array";
 import { wrapMap } from "./wrap-map";
 import { track, trigger } from "./watch-effect";
+import { ReactiveFlags } from "./constants";
 
 export function wrapSet<T>(
   set: Set<T>,
@@ -24,6 +26,9 @@ export function wrapSet<T>(
 
   const proxy = new Proxy(set, {
     get(target: Set<T>, prop: string | symbol, receiver: any): any {
+      if (prop === ReactiveFlags.RAW) return target;
+      if (prop === ReactiveFlags.IS_REACTIVE) return true;
+
       track(target, prop);
 
       if (
@@ -42,6 +47,7 @@ export function wrapSet<T>(
 
       if (prop === "add") {
         methodCache[prop] = function (value: T): Set<T> {
+          if (value != null && typeof value === 'object') value = unwrapForStore(value) as T;
           const existed = target.has(value);
           const oldSize = target.size;
 

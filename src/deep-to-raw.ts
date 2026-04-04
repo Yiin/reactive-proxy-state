@@ -1,5 +1,6 @@
 import { isRef } from "./ref";
-import { isReactive, toRaw } from "./reactive";
+import { isReactive } from "./reactive";
+import { toRaw } from "./utils";
 
 /**
  * Converts reactive proxies/refs into plain JavaScript data structures

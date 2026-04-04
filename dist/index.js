@@ -2300,6 +2300,35 @@ var require_reactivity_cjs = __commonJS((exports) => {
   exports.watch = watch2;
 });
 // src/utils.ts
+function toRaw(observed) {
+  let value = observed;
+  while (value && value["__v_raw" /* RAW */]) {
+    value = value["__v_raw" /* RAW */];
+  }
+  return value;
+}
+function unwrapForStore(value) {
+  if (value["__v_isReactive" /* IS_REACTIVE */])
+    return toRaw(value);
+  if (Array.isArray(value)) {
+    for (let i = 0;i < value.length; i++) {
+      const child = value[i];
+      if (child != null && typeof child === "object" && child["__v_isReactive" /* IS_REACTIVE */]) {
+        value[i] = toRaw(child);
+      }
+    }
+  } else if (!(value instanceof Map) && !(value instanceof Set) && !(value instanceof Date)) {
+    for (const key in value) {
+      if (!Object.prototype.hasOwnProperty.call(value, key))
+        continue;
+      const child = value[key];
+      if (child != null && typeof child === "object" && child["__v_isReactive" /* IS_REACTIVE */]) {
+        value[key] = toRaw(child);
+      }
+    }
+  }
+  return value;
+}
 var deepEqualCache = new WeakMap;
 var MAX_CACHE_SIZE = 1000;
 var pathCache = new WeakMap;
@@ -2330,6 +2359,7 @@ function resetProxyStats() {
 function evictDeep(value) {
   if (value == null || typeof value !== "object")
     return;
+  value = toRaw(value);
   if (!globalSeen.has(value))
     return;
   globalSeen.delete(value);
@@ -2985,6 +3015,10 @@ function wrapSet(set, emit, path = []) {
   const methodCache = {};
   const proxy = new Proxy(set, {
     get(target, prop, receiver) {
+      if (prop === "__v_raw" /* RAW */)
+        return target;
+      if (prop === "__v_isReactive" /* IS_REACTIVE */)
+        return true;
       track(target, prop);
       if (prop === Symbol.iterator || prop === "entries" || prop === "values" || prop === "keys" || prop === "forEach") {
         track(target, Symbol.iterator);
@@ -2994,6 +3028,8 @@ function wrapSet(set, emit, path = []) {
       }
       if (prop === "add") {
         methodCache[prop] = function(value2) {
+          if (value2 != null && typeof value2 === "object")
+            value2 = unwrapForStore(value2);
           const existed = target.has(value2);
           const oldSize = target.size;
           if (!existed) {
@@ -3162,6 +3198,10 @@ function wrapMap(map, emit, path = []) {
   const methodCache = {};
   const proxy = new Proxy(map, {
     get(target, prop, receiver) {
+      if (prop === "__v_raw" /* RAW */)
+        return target;
+      if (prop === "__v_isReactive" /* IS_REACTIVE */)
+        return true;
       track(target, prop);
       if (prop === Symbol.iterator || prop === "entries" || prop === "values" || prop === "keys" || prop === "forEach") {
         track(target, Symbol.iterator);
@@ -3171,6 +3211,8 @@ function wrapMap(map, emit, path = []) {
       }
       if (prop === "set") {
         methodCache[prop] = function(key, value2) {
+          if (value2 != null && typeof value2 === "object")
+            value2 = unwrapForStore(value2);
           const existed = target.has(key);
           const oldValue = target.get(key);
           const oldSize = target.size;
@@ -3408,6 +3450,10 @@ function wrapArray(arr, emit, path = []) {
   const methodCache = {};
   const proxy = new Proxy(arr, {
     get(target, prop, receiver) {
+      if (prop === "__v_raw" /* RAW */)
+        return target;
+      if (prop === "__v_isReactive" /* IS_REACTIVE */)
+        return true;
       track(target, prop);
       if (methodCache[prop]) {
         return methodCache[prop];
@@ -3667,6 +3713,8 @@ function wrapArray(arr, emit, path = []) {
       return value;
     },
     set(target, prop, value, receiver) {
+      if (isObject2(value))
+        value = unwrapForStore(value);
       const oldValue = target[prop];
       if (oldValue === value)
         return true;
@@ -3711,10 +3759,6 @@ function isObject3(v) {
 }
 function isReactive(value) {
   return !!(value && value["__v_isReactive" /* IS_REACTIVE */]);
-}
-function toRaw(observed) {
-  const raw = observed && observed["__v_raw" /* RAW */];
-  return raw ? toRaw(raw) : observed;
 }
 function createAsyncEmit(emit) {
   const queue = [];
@@ -3800,6 +3844,8 @@ function reactive(obj, emit, path = [], options) {
       return wrapValue(value, newPath);
     },
     set(target, prop, value, receiver) {
+      if (isObject3(value))
+        value = unwrapForStore(value);
       const oldValue = target[prop];
       if (oldValue === value)
         return true;

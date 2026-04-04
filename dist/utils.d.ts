@@ -1,3 +1,13 @@
+/**
+ * Returns the raw, original object underlying a reactive proxy.
+ * If the input is not a proxy, returns the input itself.
+ */
+export declare function toRaw<T>(observed: T): T;
+/**
+ * Strip proxy refs from spread results before storing in raw state.
+ * Prevents unbounded proxy nesting from `{ ...reactiveProxy }` patterns.
+ */
+export declare function unwrapForStore(value: any): any;
 export declare const pathCache: WeakMap<object, Map<string, any>>;
 export declare const pathConcatCache: Map<string, any[]>;
 export declare const globalSeen: WeakMap<any, any>;
