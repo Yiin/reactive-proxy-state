@@ -1,5 +1,6 @@
 import { EmitFunction, Path, ReactiveOptions, StateEvent } from "./types";
 import {
+  deepClone,
   deepEqual,
   globalSeen,
   wrapperCache,
@@ -189,7 +190,7 @@ export function reactive<T extends object>(
           action: "set",
           path: newPath,
           oldValue,
-          newValue: value,
+          newValue: isObject(value) ? deepClone(value) : value,
         };
 
         emit?.(event);

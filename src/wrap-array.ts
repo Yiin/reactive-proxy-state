@@ -1,5 +1,6 @@
 import { EmitFunction, Path, StateEvent } from "./types";
 import {
+  deepClone,
   deepEqual,
   unwrapForStore,
   getPathConcat,
@@ -359,7 +360,7 @@ export function wrapArray<T extends any[]>(
           action: "set",
           path: newPath,
           oldValue,
-          newValue: value,
+          newValue: isObject(value) ? deepClone(value) : value,
         };
         emit?.(event);
         if (isObject(oldValue) && oldValue !== value) {

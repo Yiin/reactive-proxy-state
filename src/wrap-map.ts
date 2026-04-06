@@ -1,5 +1,6 @@
 import { EmitFunction, Path, StateEvent } from "./types";
 import {
+  deepClone,
   deepEqual,
   unwrapForStore,
   getPathConcat,
@@ -78,7 +79,7 @@ export function wrapMap<K, V>(
             path: cachedPath,
             key,
             oldValue,
-            newValue: value,
+            newValue: value !== null && typeof value === 'object' ? deepClone(value) : value,
           };
           emit?.(event);
 

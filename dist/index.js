@@ -3233,7 +3233,7 @@ function wrapMap(map, emit, path = []) {
             path: cachedPath,
             key,
             oldValue,
-            newValue: value2
+            newValue: value2 !== null && typeof value2 === "object" ? deepClone(value2) : value2
           };
           emit?.(event);
           if (!existed) {
@@ -3735,7 +3735,7 @@ function wrapArray(arr, emit, path = []) {
           action: "set",
           path: newPath,
           oldValue,
-          newValue: value
+          newValue: isObject2(value) ? deepClone(value) : value
         };
         emit?.(event);
         if (isObject2(oldValue) && oldValue !== value) {
@@ -3865,7 +3865,7 @@ function reactive(obj, emit, path = [], options) {
           action: "set",
           path: newPath,
           oldValue,
-          newValue: value
+          newValue: isObject3(value) ? deepClone(value) : value
         };
         emit?.(event);
         trigger(target, prop);
