@@ -148,4 +148,42 @@ describe("Update State Tests", () => {
     expect(state.accounts[1].jobs[0].runHistory).toEqual([{ ts: 1001 }]);
     expect(state.accounts[1].jobs[0].id).toBe(10);
   });
+
+  test("updateState refuses a bare length grow on an array", () => {
+    const state = { arr: [1, 2] };
+    const event: StateEvent = { action: 'set', path: ['arr', 'length'], newValue: 3, oldValue: 2 };
+
+    updateState(state, event);
+
+    expect(state.arr).toEqual([1, 2]);
+    expect(state.arr.length).toBe(2);
+  });
+
+  test("updateState applies a length shrink on an array", () => {
+    const state = { arr: [1, 2, 3] };
+    const event: StateEvent = { action: 'set', path: ['arr', 'length'], newValue: 1, oldValue: 3 };
+
+    updateState(state, event);
+
+    expect(state.arr).toEqual([1]);
+  });
+
+  test("updateState still applies a length set on a plain object (guard scoped to arrays)", () => {
+    const state = { obj: { length: 2 } };
+    const event: StateEvent = { action: 'set', path: ['obj', 'length'], newValue: 5, oldValue: 2 };
+
+    updateState(state, event);
+
+    expect(state.obj.length).toBe(5);
+  });
+
+  test("updateState refuses a bare length grow even when newValue is a numeric string", () => {
+    const state = { arr: [1, 2] };
+    const event: StateEvent = { action: 'set', path: ['arr', 'length'], newValue: '64', oldValue: 2 };
+
+    updateState(state, event);
+
+    expect(state.arr).toEqual([1, 2]);
+    expect(state.arr.length).toBe(2);
+  });
 });

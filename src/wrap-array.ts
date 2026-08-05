@@ -327,8 +327,11 @@ export function wrapArray<T extends any[]>(
 
       const oldValue = (target as any)[prop];
 
-      // avoid unnecessary triggers if value hasn't changed
-      if (oldValue === value) return true;
+      // avoid unnecessary triggers if value hasn't changed. Reading past the end of an
+      // array also yields undefined, so also require the prop to already exist —
+      // otherwise growing into a brand-new hole with newValue: undefined would be
+      // mistaken for a no-op and silently dropped.
+      if (oldValue === value && Reflect.has(target, prop)) return true;
       if (
         isObject(oldValue) &&
         isObject(value) &&
@@ -346,23 +349,40 @@ export function wrapArray<T extends any[]>(
       // emit event and trigger effects only if the set was successful and wasn't intercepted by a setter
       // (unless it's a direct numeric index set, which doesn't have a descriptor.set)
       if (result && (!descriptor || !descriptor.set || isNumericIndex)) {
-        const propKey = String(prop);
-        const pathKey =
-          path.length > 0 ? `${path.join(".")}.${propKey}` : propKey;
-        let newPath = getPathConcat(pathKey);
+        const resolvePath = (key: string) => {
+          const pathKey = path.length > 0 ? `${path.join(".")}.${key}` : key;
+          let newPath = getPathConcat(pathKey);
 
-        if (newPath === undefined) {
-          newPath = path.concat(propKey);
-          setPathConcat(pathKey, newPath);
+          if (newPath === undefined) {
+            newPath = path.concat(key);
+            setPathConcat(pathKey, newPath);
+          }
+          return newPath;
+        };
+
+        if (
+          Array.isArray(target) &&
+          prop === "length" &&
+          Number(value) > Number(oldValue)
+        ) {
+          // direct length grow (e.g. arr.length = N) — emit ascending per-index sets
+          // instead of a bare length event so the remote fills every index and never
+          // ends up with a hole.
+          const oldLength = Number(oldValue);
+          const newLength = Number(value);
+          for (let i = oldLength; i < newLength; i++) {
+            emit?.({ action: "set", path: resolvePath(String(i)), newValue: undefined });
+          }
+        } else {
+          const event: StateEvent = {
+            action: "set",
+            path: resolvePath(String(prop)),
+            oldValue,
+            newValue: isObject(value) ? deepClone(value) : value,
+          };
+          emit?.(event);
         }
 
-        const event: StateEvent = {
-          action: "set",
-          path: newPath,
-          oldValue,
-          newValue: isObject(value) ? deepClone(value) : value,
-        };
-        emit?.(event);
         if (isObject(oldValue) && oldValue !== value) {
           evictDeep(oldValue);
         }

@@ -390,7 +390,9 @@ describe('full pipeline: Vue client → WS → RPS server', () => {
 
     const BP28 = ['accounts', '28', 'villages', 2, 'settings', 'buildPlan']
 
-    // Add item (events as they come from diffAndCloneArray)
+    // Add item (events as they came from pre-hole-proofing diffAndCloneArray). The
+    // applier refuses the grow-length event (warn expected); the index fill below
+    // rebuilds the array — kept as old-emitter/new-applier convergence coverage.
     applyOnServer({ action: 'set', path: [...BP28, 'length'], newValue: 1, oldValue: 0 })
     applyOnServer({
       action: 'set',
@@ -448,7 +450,12 @@ describe('full pipeline: Vue client → WS → RPS server', () => {
 
     const BP = ['accounts', '28', 'villages', 0, 'settings', 'buildPlan']
 
-    // Add item
+    // Add item. The apply-guard refuses a bare length-grow event, so grow the array
+    // through the live proxy directly first — this still fires the same trigger/tracking
+    // cycle as the original bare length-set event did. The updateState call below then
+    // becomes a no-op for the length (already matching) and just keeps resolving/caching
+    // the array as before.
+    ;(serverState as any).accounts['28'].villages[0].settings.buildPlan.length = 1
     updateState(serverState, { action: 'set', path: [...BP, 'length'], newValue: 1, oldValue: 0 })
     updateState(serverState, {
       action: 'set',
@@ -509,6 +516,8 @@ describe('full pipeline: Vue client → WS → RPS server', () => {
     // ALL string paths (matching what comes out of JSON.parse on WS events)
     const BP = ['accounts', '28', 'villages', '2', 'settings', 'buildPlan']
 
+    // Legacy grow-length event: refused by the applier (warn expected); the index fill
+    // below rebuilds the array — kept as old-emitter/new-applier convergence coverage.
     updateState(serverState, { action: 'set', path: [...BP, 'length'], newValue: 1, oldValue: 0 })
     updateState(serverState, {
       action: 'set',
@@ -580,6 +589,8 @@ describe('full pipeline: Vue client → WS → RPS server', () => {
 
     const BP = ['accounts', '28', 'villages', 2, 'settings', 'buildPlan']
 
+    // Legacy grow-length event: refused by the applier (warn expected); the index fill
+    // below rebuilds the array — kept as old-emitter/new-applier convergence coverage.
     applyOnServer({ action: 'set', path: [...BP, 'length'], newValue: 1, oldValue: 0 })
     applyOnServer({
       action: 'set',

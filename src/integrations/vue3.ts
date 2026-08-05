@@ -288,11 +288,8 @@ function diffAndCloneArray(
   }
 
   if (curr.length > old.length) {
-    // Array grew — emit length first, then new indices
+    // Array grew — emit only per-index sets; no length event (would leave a hole on the remote)
     if (!changed) { changed = true; result = old.slice(); }
-    pathStack.push('length');
-    emit({ action: 'set', path: pathStack.slice(), newValue: curr.length, oldValue: old.length });
-    pathStack.pop();
     result!.length = curr.length;
     for (let i = old.length; i < curr.length; i++) {
       pathStack.push(i);

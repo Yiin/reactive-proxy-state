@@ -164,6 +164,10 @@ describe('pathCache staleness after array element replacement', () => {
     expect(raw.accounts[21].jobs[0].kind).toBe('job.scanUpdated')
 
     // Step 2: Frontend mutation extends array length (creates sparse slot at index 2)
+    // The apply-guard refuses a bare length-grow event (Change 3), so create the sparse
+    // slot with a direct JS mutation first; the updateState call below then just resolves
+    // and caches the (already-sparse) array, matching the original scenario.
+    raw.accounts[21].jobs.length = 3
     updateState(state, {
       action: 'set',
       path: ['accounts', '21', 'jobs', 'length'],

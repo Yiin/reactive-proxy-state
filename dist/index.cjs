@@ -2704,6 +2704,10 @@ function validateCachedPath(root, fullPath, pathKey, cached) {
 }
 var actionHandlers = {
   set: function(parent, key, event) {
+    if (Array.isArray(parent) && key === "length" && Number(event.newValue) > parent.length) {
+      console.warn(`refusing to grow array length via bare set at path ${event.path.join(".")}`);
+      return;
+    }
     setValue(parent, key, event.newValue);
   },
   delete: function(parent, key) {
@@ -3778,7 +3782,7 @@ function wrapArray(arr, emit, path = []) {
       if (isObject2(value))
         value = unwrapForStore(value);
       const oldValue = target[prop];
-      if (oldValue === value)
+      if (oldValue === value && Reflect.has(target, prop))
         return true;
       if (isObject2(oldValue) && isObject2(value) && deepEqual(oldValue, value, new WeakMap))
         return true;
@@ -3786,20 +3790,30 @@ function wrapArray(arr, emit, path = []) {
       const result = Reflect.set(target, prop, value, receiver);
       const isNumericIndex = typeof prop === "number" || typeof prop === "string" && !isNaN(parseInt(String(prop)));
       if (result && (!descriptor || !descriptor.set || isNumericIndex)) {
-        const propKey = String(prop);
-        const pathKey = path.length > 0 ? `${path.join(".")}.${propKey}` : propKey;
-        let newPath = getPathConcat(pathKey);
-        if (newPath === undefined) {
-          newPath = path.concat(propKey);
-          setPathConcat(pathKey, newPath);
-        }
-        const event = {
-          action: "set",
-          path: newPath,
-          oldValue,
-          newValue: isObject2(value) ? deepClone(value) : value
+        const resolvePath = (key) => {
+          const pathKey = path.length > 0 ? `${path.join(".")}.${key}` : key;
+          let newPath = getPathConcat(pathKey);
+          if (newPath === undefined) {
+            newPath = path.concat(key);
+            setPathConcat(pathKey, newPath);
+          }
+          return newPath;
         };
-        emit?.(event);
+        if (Array.isArray(target) && prop === "length" && Number(value) > Number(oldValue)) {
+          const oldLength = Number(oldValue);
+          const newLength = Number(value);
+          for (let i = oldLength;i < newLength; i++) {
+            emit?.({ action: "set", path: resolvePath(String(i)), newValue: undefined });
+          }
+        } else {
+          const event = {
+            action: "set",
+            path: resolvePath(String(prop)),
+            oldValue,
+            newValue: isObject2(value) ? deepClone(value) : value
+          };
+          emit?.(event);
+        }
         if (isObject2(oldValue) && oldValue !== value) {
           evictDeep(oldValue);
         }
@@ -4359,9 +4373,6 @@ function diffAndCloneArray(curr, old, pathStack, emit) {
       changed = true;
       result = old.slice();
     }
-    pathStack.push("length");
-    emit({ action: "set", path: pathStack.slice(), newValue: curr.length, oldValue: old.length });
-    pathStack.pop();
     result.length = curr.length;
     for (let i = old.length;i < curr.length; i++) {
       pathStack.push(i);

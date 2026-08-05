@@ -233,4 +233,111 @@ describe('Vue 3 adapter (trackVueReactiveEvents)', () => {
     expect(remote.big).toBe(BigInt(456));
     stop();
   });
+
+  test('array grow (4 objects to 10 objects) emits no length event and stays dense on the remote', () => {
+    const emitted: StateEvent[] = [];
+    const initial = Array.from({ length: 4 }, (_, i) => ({ id: i }));
+    const vueState = vueReactive({ arr: initial as any[] });
+    const { stop } = trackVueReactiveEvents(vueState, (e) => emitted.push(e));
+    emitted.length = 0;
+
+    const additions = Array.from({ length: 6 }, (_, i) => ({ id: i + 4 }));
+    vueState.arr.push(...additions);
+
+    expect(emitted.some((e) => e.path[e.path.length - 1] === 'length')).toBe(false);
+
+    const remote = rpsReactive({ arr: Array.from({ length: 4 }, (_, i) => ({ id: i })) as any[] });
+    for (const ev of emitted) updateState(remote, ev);
+
+    expect(remote.arr).toEqual(vueState.arr);
+    expect(remote.arr.length).toBe(10);
+    for (let i = 0; i < 10; i++) {
+      expect(i in remote.arr).toBe(true);
+    }
+    stop();
+  });
+
+  test('partial delivery of a grow diff never produces holes on the remote (account-442 shape)', () => {
+    const emitted: StateEvent[] = [];
+    const vueState = vueReactive({
+      accounts: { 442: { villages: [{ id: 1 }, { id: 2 }] as any[] } },
+    });
+    const { stop } = trackVueReactiveEvents(vueState, (e) => emitted.push(e));
+    emitted.length = 0;
+
+    const additions = Array.from({ length: 7 }, (_, i) => ({ id: i + 3 }));
+    vueState.accounts[442].villages.push(...additions);
+
+    // A reintroduced grow-length emit would show up here — catch it before it can be
+    // masked by the applier guard below.
+    expect(emitted.some((e) => e.path[e.path.length - 1] === 'length')).toBe(false);
+
+    for (let prefixLen = 1; prefixLen <= emitted.length; prefixLen++) {
+      const remote = rpsReactive({
+        accounts: { 442: { villages: [{ id: 1 }, { id: 2 }] as any[] } },
+      });
+      for (const ev of emitted.slice(0, prefixLen)) updateState(remote, ev);
+
+      const villages = (remote as any).accounts[442].villages;
+      // No sparse holes: every index below length must be an own property, so length
+      // never exceeds the highest contiguously-filled index + 1.
+      for (let i = 0; i < villages.length; i++) {
+        expect(i in villages).toBe(true);
+      }
+    }
+
+    stop();
+  });
+
+  test('array shrink still emits a length event and syncs correctly', () => {
+    const emitted: StateEvent[] = [];
+    const vueState = vueReactive({ arr: [1, 2, 3, 4, 5] as any[] });
+    const { stop } = trackVueReactiveEvents(vueState, (e) => emitted.push(e));
+    emitted.length = 0;
+
+    vueState.arr.length = 2;
+
+    const lengthEvents = emitted.filter((e) => e.path[e.path.length - 1] === 'length');
+    expect(lengthEvents.length).toBe(1);
+    expect(lengthEvents[0].newValue).toBe(2);
+
+    const remote = rpsReactive({ arr: [1, 2, 3, 4, 5] as any[] });
+    for (const ev of emitted) updateState(remote, ev);
+    expect(remote.arr).toEqual(vueState.arr);
+    stop();
+  });
+
+  test('direct length grow on an RPS proxy array emits ascending index sets, not a bare length event', () => {
+    const emitted: StateEvent[] = [];
+    const source = rpsReactive({ arr: [1, 2, 3] as any[] }, (e) => emitted.push(e));
+    emitted.length = 0; // ignore initial replace
+
+    source.arr.length = 5;
+
+    expect(emitted.some((e) => e.action === 'set' && e.path[e.path.length - 1] === 'length')).toBe(false);
+    expect(emitted.map((e) => e.path)).toEqual([['arr', '3'], ['arr', '4']]);
+    expect(emitted.every((e) => e.action === 'set' && e.newValue === undefined)).toBe(true);
+
+    const remote = rpsReactive({ arr: [1, 2, 3] as any[] });
+    for (const ev of emitted) updateState(remote, ev);
+    expect(remote.arr.length).toBe(5);
+    expect(remote.arr).toEqual([1, 2, 3, undefined, undefined]);
+  });
+
+  test('direct length shrink on an RPS proxy array still emits a bare length event and syncs', () => {
+    const emitted: StateEvent[] = [];
+    const source = rpsReactive({ arr: [1, 2, 3] as any[] }, (e) => emitted.push(e));
+    emitted.length = 0; // ignore initial replace
+
+    source.arr.length = 1;
+
+    expect(emitted.length).toBe(1);
+    expect(emitted[0].action).toBe('set');
+    expect(emitted[0].path).toEqual(['arr', 'length']);
+    expect(emitted[0].newValue).toBe(1);
+
+    const remote = rpsReactive({ arr: [1, 2, 3] as any[] });
+    for (const ev of emitted) updateState(remote, ev);
+    expect(remote.arr).toEqual([1]);
+  });
 });

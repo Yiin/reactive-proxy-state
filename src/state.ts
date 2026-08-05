@@ -58,6 +58,10 @@ function validateCachedPath(root: any, fullPath: (string | number | symbol)[], p
 // this avoids a large switch statement and makes adding new actions easier
 const actionHandlers: { [key: string]: (target: any, key: any, event: StateEvent) => void } = {
     'set': function(parent: any, key: any, event: StateEvent) {
+        if (Array.isArray(parent) && key === 'length' && Number(event.newValue) > parent.length) {
+            console.warn(`refusing to grow array length via bare set at path ${event.path.join('.')}`);
+            return;
+        }
         setValue(parent, key, event.newValue);
     },
     'delete': function(parent: any, key: any) {
