@@ -21,10 +21,14 @@ When the user types "release", execute this pipeline:
 4. Commit with the generated message
 5. Run `npm version patch` to bump patch version
 6. Push commits and tags with `git push && git push --tags`
-7. Publish to NPM with `npm publish`
+7. The tag push triggers `.github/workflows/release.yml`, which tests,
+   builds, and publishes to npm via trusted publishing (OIDC). Do NOT run
+   `npm publish` locally — local tokens cannot publish this package.
+8. Verify the publish: `gh run watch` (or check the Release workflow on
+   GitHub), then `npm view @yiin/reactive-proxy-state version`.
 
 Before executing each step, briefly explain what you're about to do.
 If any step fails, stop the pipeline and report the error.
 
-Always confirm the final version number and ask if the user wants to proceed before publishing to NPM. 
+Always confirm the final version number and ask if the user wants to proceed before pushing the tag (the tag push is the publish trigger).
 
