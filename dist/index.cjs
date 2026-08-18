@@ -2621,12 +2621,13 @@ function deepClone(value, seen = new WeakMap) {
   if (value instanceof Date) {
     return new Date(value.getTime());
   }
-  if (seen.has(value)) {
-    return seen.get(value);
+  const identity = toRaw(value);
+  if (seen.has(identity)) {
+    return seen.get(identity);
   }
   if (Array.isArray(value)) {
     const newArray = [];
-    seen.set(value, newArray);
+    seen.set(identity, newArray);
     for (let i = 0;i < value.length; i++) {
       newArray[i] = deepClone(value[i], seen);
     }
@@ -2634,7 +2635,7 @@ function deepClone(value, seen = new WeakMap) {
   }
   if (value instanceof Map) {
     const newMap = new Map;
-    seen.set(value, newMap);
+    seen.set(identity, newMap);
     value.forEach((val, key) => {
       newMap.set(deepClone(key, seen), deepClone(val, seen));
     });
@@ -2642,14 +2643,14 @@ function deepClone(value, seen = new WeakMap) {
   }
   if (value instanceof Set) {
     const newSet = new Set;
-    seen.set(value, newSet);
+    seen.set(identity, newSet);
     value.forEach((val) => {
       newSet.add(deepClone(val, seen));
     });
     return newSet;
   }
   const newObject = Object.create(Object.getPrototypeOf(value));
-  seen.set(value, newObject);
+  seen.set(identity, newObject);
   for (const key in value) {
     if (Object.prototype.hasOwnProperty.call(value, key)) {
       newObject[key] = deepClone(value[key], seen);

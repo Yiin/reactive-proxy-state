@@ -340,13 +340,22 @@ export function deepClone<T>(value: T, seen = new WeakMap()): T {
     if (value instanceof Date) {
         return new Date(value.getTime()) as any;
     }
-    if (seen.has(value)) {
-        return seen.get(value);
+    // Identity must come from the raw target, not the proxy: proxy identities
+    // are not stable across traversals when a proxy is stored inside a raw
+    // tree it descends from (e.g. a child holds a proxy ref back to an
+    // ancestor) — each lap mints a "new" wrapper at the get trap, so a
+    // proxy-keyed `seen` guard never hits and the clone recurses forever
+    // (vangrd-fi56i). Reads still go through `value` on purpose: the vue3
+    // bridge establishes watchEffect dependencies by deep-reading state
+    // through deepClone, and raw reads would silently drop those deps.
+    const identity = toRaw(value) as object;
+    if (seen.has(identity)) {
+        return seen.get(identity);
     }
 
     if (Array.isArray(value)) {
         const newArray: any[] = [];
-        seen.set(value, newArray); // store ref before recursing
+        seen.set(identity, newArray); // store ref before recursing
         for (let i = 0; i < value.length; i++) {
             newArray[i] = deepClone(value[i], seen);
         }
@@ -355,7 +364,7 @@ export function deepClone<T>(value: T, seen = new WeakMap()): T {
 
     if (value instanceof Map) {
         const newMap = new Map();
-        seen.set(value, newMap); // store ref before recursing
+        seen.set(identity, newMap); // store ref before recursing
         value.forEach((val, key) => {
             newMap.set(deepClone(key, seen), deepClone(val, seen));
         });
@@ -364,7 +373,7 @@ export function deepClone<T>(value: T, seen = new WeakMap()): T {
 
     if (value instanceof Set) {
         const newSet = new Set();
-        seen.set(value, newSet); // store ref before recursing
+        seen.set(identity, newSet); // store ref before recursing
         value.forEach(val => {
             newSet.add(deepClone(val, seen));
         });
@@ -373,7 +382,7 @@ export function deepClone<T>(value: T, seen = new WeakMap()): T {
 
     // handle plain objects
     const newObject = Object.create(Object.getPrototypeOf(value));
-    seen.set(value, newObject); // store ref before recursing
+    seen.set(identity, newObject); // store ref before recursing
 
     for (const key in value) {
         if (Object.prototype.hasOwnProperty.call(value, key)) {
