@@ -143,6 +143,8 @@ beforeEach(() => {
 })
 
 describe('long-running degradation', () => {
+  // Explicit timeout: 100k cycles run ~6s on shared CI runners under
+  // coverage instrumentation, past bun's 5s default.
   test('100k mutation cycles with heap monitoring', () => {
     const state = { accounts: {} as Record<string, any> }
     for (let i = 1; i <= 8; i++) {
@@ -219,7 +221,7 @@ describe('long-running degradation', () => {
     console.log(`  Heap growth: ${heapGrowthMB} MB`)
 
     expect(timeRatio).toBeLessThan(5)
-  })
+  }, 60000)
 
   test('deepToRaw cost at scale after 50k mutations', () => {
     const state = { accounts: {} as Record<string, any> }

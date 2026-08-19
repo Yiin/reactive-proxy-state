@@ -107,8 +107,13 @@ describe('spread-assign on reactive proxy causes linear degradation', () => {
     }
 
     const stats = getProxyStats()
-    const firstMs = cycleTimes[0]
-    const lastMs = cycleTimes[CYCLES - 1]
+    // Median of the first/last 5 cycles, not single cycles: one GC pause or
+    // warmup outlier on a shared CI runner flips a single-cycle ratio past
+    // the bound, while real linear degradation (the ~14x bug this guards
+    // against) survives any median.
+    const median = (values: number[]) => [...values].sort((a, b) => a - b)[Math.floor(values.length / 2)]
+    const firstMs = median(cycleTimes.slice(0, 5))
+    const lastMs = median(cycleTimes.slice(-5))
     const ratio = lastMs / firstMs
 
     console.log('\n=== Spread-Assign Degradation ===')
