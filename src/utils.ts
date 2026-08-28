@@ -54,7 +54,11 @@ const pathCacheSize = new WeakMap<object, number>(); // track individual map siz
 export const pathConcatCache = new Map<string, any[]>();
 const MAX_PATH_CACHE_SIZE = 1000;
 
-// global weakmap for circular reference detection during deep operations like clone or equal
+// global weakmap for wrapper identity: raw object -> its reactive proxy.
+// Written only by the wrap-* modules and evictDeep; must NOT be reused as
+// cycle-detection scratch space (deepEqual/deepClone use per-call maps),
+// because WeakMap values are strong refs and scratch entries would pin
+// whole compared state trees and could poison wrapper lookups.
 export const globalSeen = new WeakMap<any, any>();
 
 // global cache to reuse proxy wrappers for the same original object
@@ -155,7 +159,13 @@ function cleanupPathConcatCache() {
     }
 }
 
-export function deepEqual(a: any, b: any, seen: WeakMap<any, any> = globalSeen): boolean {
+// `seen` defaults to a fresh WeakMap per call: it is cycle-detection scratch
+// space and must never fall back to the shared `globalSeen` identity map,
+// whose values strongly retain whatever they point at (leak + poisoning).
+// `seen` defaults to a fresh WeakMap per call: it is cycle-detection scratch
+// space and must never fall back to the shared `globalSeen` identity map,
+// whose values strongly retain whatever they point at (leak + poisoning).
+export function deepEqual(a: any, b: any, seen: WeakMap<any, any> = new WeakMap()): boolean {
     if (a === b) return true;
     if (a == null || b == null) return a === b;
     if (typeof a !== typeof b) return false;

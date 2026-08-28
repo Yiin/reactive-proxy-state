@@ -2417,7 +2417,7 @@ function cleanupPathConcatCache() {
     }
   }
 }
-function deepEqual(a, b, seen = globalSeen) {
+function deepEqual(a, b, seen = new WeakMap) {
   if (a === b)
     return true;
   if (a == null || b == null)
