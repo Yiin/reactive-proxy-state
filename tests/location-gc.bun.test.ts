@@ -18,6 +18,23 @@ async function collectGarbage() {
 const alive = (refs: WeakRef<object>[]) => refs.filter((ref) => ref.deref() !== undefined).length;
 
 /**
+ * How many of `refs` are alive once collection settles: collect, count, and
+ * collect again while more than a few are alive, at most four times. Bun
+ * can keep every object behind a WeakRef made in the test through several
+ * collections, and free all of them after the WeakRefs are read (seen: 200
+ * of 200 alive after 24 rounds without a read, none after one more batch
+ * that followed a read). A leak keeps them through every batch.
+ */
+async function aliveAfterCollection(refs: WeakRef<object>[]): Promise<number> {
+  let count = refs.length;
+  for (let batch = 0; batch < 4 && count > fewOf(refs.length); batch++) {
+    await collectGarbage();
+    count = alive(refs);
+  }
+  return count;
+}
+
+/**
  * Bun's collector scans the stack conservatively, and compiled code can hold
  * an object it saw: a few objects stay alive at random even with no
  * reference (seen: up to 8 of 200, none without the library's code running).
@@ -44,8 +61,7 @@ describe("location records and garbage collection", () => {
       return { state, refs };
     }
     const { state, refs } = setup();
-    await collectGarbage();
-    expect(alive(refs)).toBeLessThanOrEqual(fewOf(refs.length));
+    expect(await aliveAfterCollection(refs)).toBeLessThanOrEqual(fewOf(refs.length));
     expect(state.keep.n).toBe(0);
   });
 
@@ -63,8 +79,7 @@ describe("location records and garbage collection", () => {
       return { live, refs };
     }
     const { live, refs } = setup();
-    await collectGarbage();
-    expect(alive(refs)).toBeLessThanOrEqual(fewOf(refs.length));
+    expect(await aliveAfterCollection(refs)).toBeLessThanOrEqual(fewOf(refs.length));
     live.child.n = 1;
     expect(live.child.n).toBe(1);
   });
@@ -94,8 +109,7 @@ describe("location records and garbage collection", () => {
     state.jobs = state.jobs.filter((entry: any) => entry.id !== keptId);
     churn(200);
 
-    await collectGarbage();
-    expect(alive(replacedLists)).toBeLessThanOrEqual(fewOf(replacedLists.length));
+    expect(await aliveAfterCollection(replacedLists)).toBeLessThanOrEqual(fewOf(replacedLists.length));
     expect(kept.at).toBe(0);
   });
 
@@ -113,8 +127,7 @@ describe("location records and garbage collection", () => {
       state.list = state.list.filter((entry: any) => entry.id !== 1 && entry.id !== 2);
     }
     for (let round = 0; round < 50; round++) setup();
-    await collectGarbage();
-    expect(alive(refs)).toBeLessThanOrEqual(fewOf(refs.length));
+    expect(await aliveAfterCollection(refs)).toBeLessThanOrEqual(fewOf(refs.length));
     expect(kept.length).toBe(100);
   });
 
@@ -137,8 +150,7 @@ describe("location records and garbage collection", () => {
       }
     }
     churn(200);
-    await collectGarbage();
-    expect(alive(replacedLists)).toBeLessThanOrEqual(fewOf(replacedLists.length));
+    expect(await aliveAfterCollection(replacedLists)).toBeLessThanOrEqual(fewOf(replacedLists.length));
 
     const index = toRaw(state.jobs).indexOf(toRaw(heldJob));
     expect(index).toBeGreaterThan(0);
