@@ -70,7 +70,7 @@ export function wrapSet<T>(set: Set<T>, node: LocationNode): Set<T> {
             target.add(value);
             const newSize = target.size;
 
-            if (isObject(value) && copied !== Copied.Fresh) attachValue(value, node, undefined);
+            if (isObject(value)) attachValue(value, node, undefined, copied === Copied.Fresh);
             if (event !== undefined) dispatch(located!, event);
             trigger(target, Symbol.iterator);
             if (oldSize !== newSize) {

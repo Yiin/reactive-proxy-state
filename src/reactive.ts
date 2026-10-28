@@ -230,7 +230,7 @@ function wrapObject<T extends object>(obj: T, node: LocationNode, options?: Reac
       if (result && emits) {
         // move places before anything can write again (emit may throw)
         if (isObject(oldValue)) detachPlace(oldValue, node, prop);
-        if (isObject(value) && copied !== Copied.Fresh) attachValue(value, node, prop);
+        if (isObject(value)) attachValue(value, node, prop, copied === Copied.Fresh);
 
         if (event !== undefined) dispatch(located!, event);
 

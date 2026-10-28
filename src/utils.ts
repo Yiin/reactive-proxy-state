@@ -425,7 +425,7 @@ function copyTree(
     cloneFirst = undefined;
     cloneSeen = undefined;
     try {
-        const copy = cloneFresh ? cloneFreshInto(value, top, base) : cloneTreeInto(value, base);
+        const copy = cloneTreeInto(value, base);
         if (checkFresh) copiedFresh = cloneFresh;
         return copy;
     } finally {
@@ -664,7 +664,9 @@ const hasOwn = Object.prototype.hasOwnProperty;
 const isEnumerable = Object.prototype.propertyIsEnumerable;
 
 function cloneChild(value: any, base: number): any {
-    return value === null || typeof value !== 'object' ? value : cloneTreeInto(value, base);
+    if (value === null || typeof value !== 'object') return value;
+    if (cloneFresh) noteFresh(toRaw(value) as object);
+    return cloneTreeInto(value, base);
 }
 
 function cloneTreeInto(value: any, base: number): any {
@@ -721,63 +723,6 @@ function cloneTreeInto(value: any, base: number): any {
         for (let i = 0; i < symbolKeys.length; i++) {
             const symbolKey = symbolKeys[i];
             if (isEnumerable.call(value, symbolKey)) copy[symbolKey] = cloneChild(value[symbolKey], base);
-        }
-    }
-    cloneAncestors.pop();
-    cloneCopies.pop();
-    return copy;
-}
-
-/**
- * `cloneChild` while the copy is fresh (`cloneStored`): it notes each object
- * it meets, and hands the rest of the copy to `cloneTreeInto` once the copy
- * is not fresh. Kept apart so a plain copy pays nothing for the check.
- */
-function cloneFreshChild(value: any, base: number): any {
-    if (value === null || typeof value !== 'object') return value;
-    if (!cloneFresh) return cloneTreeInto(value, base);
-    const identity = toRaw(value) as object;
-    noteFresh(identity);
-    return cloneFresh ? cloneFreshInto(value, identity, base) : cloneTreeInto(value, base);
-}
-
-/**
- * `cloneTreeInto` for a fresh object (`identity` is `value`, raw): it is not
- * the container (which has a location node) and not an ancestor (it was not
- * met before). A map or a set ends the check: `cloneTreeInto` copies it.
- */
-function cloneFreshInto(value: any, identity: object, base: number): any {
-    let copy: any;
-    if (Array.isArray(value)) {
-        countCopy();
-        const length = value.length;
-        copy = new Array(length);
-        cloneAncestors.push(identity);
-        cloneCopies.push(copy);
-        for (let i = 0; i < length; i++) copy[i] = cloneFreshChild(value[i], base);
-    } else {
-        const prototype = Object.getPrototypeOf(value);
-        if (prototype !== Object.prototype) {
-            if (value instanceof Map || value instanceof Set) {
-                cloneFresh = false;
-                return cloneTreeInto(value, base);
-            }
-            if (value instanceof Date) {
-                countCopy();
-                return new Date(value.getTime());
-            }
-        }
-        countCopy();
-        copy = prototype === Object.prototype ? {} : Object.create(prototype);
-        cloneAncestors.push(identity);
-        cloneCopies.push(copy);
-        for (const key in value) {
-            if (hasOwn.call(value, key)) copy[key] = cloneFreshChild(value[key], base);
-        }
-        const symbolKeys = Object.getOwnPropertySymbols(value);
-        for (let i = 0; i < symbolKeys.length; i++) {
-            const symbolKey = symbolKeys[i];
-            if (isEnumerable.call(value, symbolKey)) copy[symbolKey] = cloneFreshChild(value[symbolKey], base);
         }
     }
     cloneAncestors.pop();

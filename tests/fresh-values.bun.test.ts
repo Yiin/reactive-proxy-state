@@ -78,6 +78,42 @@ describe("values that are not fresh still get their places", () => {
   });
 });
 
+describe("values stored fresh keep their places later", () => {
+  test("moved by a filter beside a known object", () => {
+    const sync = replicate({ list: [{ n: 0, inner: { m: 0 } }] as any[] });
+    void sync.state.list[0].inner.m;
+    sync.state.list.push({ n: 1, inner: { m: 1 } });
+    sync.state.list = sync.state.list.filter(() => true);
+    sync.clear();
+    sync.state.list[1].inner.m = 5;
+    sync.state.list[0].inner.m = 6;
+    expect(sync.paths()).toEqual(["set:list.1.inner.m", "set:list.0.inner.m"]);
+    expect(sync.inSync()).toBe(true);
+  });
+
+  test("stored again at a second place through its proxy: both places get each write", () => {
+    const sync = replicate({ list: [] as any[], other: null as any });
+    sync.state.list.push({ inner: { m: 0 } });
+    sync.state.other = sync.state.list[0];
+    sync.clear();
+    sync.state.other.inner.m = 3;
+    expect(sync.paths().sort()).toEqual(["set:list.0.inner.m", "set:other.inner.m"]);
+    expect(sync.inSync()).toBe(true);
+  });
+
+  test("a fresh value that later holds a known object places it", () => {
+    const sync = replicate({ list: [{ n: 0 }] as any[], box: null as any });
+    sync.state.box = { slot: null };
+    const known = sync.state.list[0];
+    sync.state.box.slot = known;
+    sync.state.box = sync.state.box;
+    sync.clear();
+    known.n = 9;
+    expect(sync.paths().sort()).toEqual(["set:box.slot.n", "set:list.0.n"]);
+    expect(sync.inSync()).toBe(true);
+  });
+});
+
 describe("fresh values and the copy limit", () => {
   // these copies are large: free them before the next file measures collection
   afterAll(() => Bun.gc(true));

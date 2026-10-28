@@ -251,7 +251,7 @@ export function wrapArray<T extends any[]>(arr: T, node: LocationNode): T {
             const result = target.push(...items);
             const newLength = target.length;
             if (items.length > 0) {
-              relinkArray(node, target, oldLength, undefined, copied === Copied.Fresh ? undefined : items);
+              relinkArray(node, target, oldLength, undefined, items, copied === Copied.Fresh);
               if (event !== undefined) dispatch(located!, event);
               trigger(target, Symbol.iterator);
               if (oldLength !== newLength) {
@@ -343,7 +343,7 @@ export function wrapArray<T extends any[]>(arr: T, node: LocationNode): T {
             const result = target.unshift(...items);
             const newLength = target.length;
             if (items.length > 0) {
-              relinkArray(node, target, 0, undefined, copied === Copied.Fresh ? undefined : items);
+              relinkArray(node, target, 0, undefined, items, copied === Copied.Fresh);
               if (event !== undefined) dispatch(located!, event);
               trigger(target, Symbol.iterator);
               if (oldLength !== newLength) {
@@ -390,7 +390,7 @@ export function wrapArray<T extends any[]>(arr: T, node: LocationNode): T {
             const newLength = target.length;
 
             if (changes) {
-              relinkArray(node, target, actualStart, deletedItems, copied === Copied.Fresh ? undefined : items);
+              relinkArray(node, target, actualStart, deletedItems, items, copied === Copied.Fresh);
               if (event !== undefined) dispatch(located!, event);
               evictRemoved(deletedItems);
               trigger(target, Symbol.iterator);
@@ -541,7 +541,7 @@ export function wrapArray<T extends any[]>(arr: T, node: LocationNode): T {
         } else if (prop !== "length") {
           const key = placeKey(prop);
           if (isObject(oldValue)) detachPlace(oldValue, node, key);
-          if (isObject(value) && copied !== Copied.Fresh) attachValue(value, node, key);
+          if (isObject(value)) attachValue(value, node, key, copied === Copied.Fresh);
         }
 
         if (grows) {
