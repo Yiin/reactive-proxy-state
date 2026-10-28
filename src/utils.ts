@@ -405,7 +405,7 @@ function copyTree(
     }
     const top = toRaw(value) as object;
     if (top === value && top !== container) {
-        const small = copySmall(value, checkFresh);
+        const small = copySmall(value, container, checkFresh);
         if (small !== undefined) return small;
     }
     // a copy made from a getter during another copy keeps the outer copy's state
@@ -459,10 +459,11 @@ let cloneSeen: Set<object> | undefined;
  * a tree copy: a leaf (a plain object of primitives), or an array of at
  * most 8 entries that are primitives or leaves. Such a value holds no
  * cycle, only the repeats checked here, and is far below the copy limit.
- * Undefined for any other value, which takes the full copy. With
- * `checkFresh` (see `cloneStored`), sets `copiedFresh`.
+ * Undefined for any other value, which takes the full copy, and for an
+ * array that holds `container` (the copy must read or refuse it, see
+ * `readsOf`). With `checkFresh` (see `cloneStored`), sets `copiedFresh`.
  */
-function copySmall(value: object, checkFresh: boolean): object | undefined {
+function copySmall(value: object, container: object | undefined, checkFresh: boolean): object | undefined {
     if (!Array.isArray(value)) {
         const copy = copyLeaf(value);
         if (copy !== undefined && checkFresh) copiedFresh = locationNodes.get(value) === undefined;
@@ -478,7 +479,7 @@ function copySmall(value: object, checkFresh: boolean): object | undefined {
             copy[i] = item;
             continue;
         }
-        if (toRaw(item) !== item) return undefined;
+        if (item === container || toRaw(item) !== item) return undefined;
         const leaf = copyLeaf(item);
         if (leaf === undefined) return undefined;
         copy[i] = leaf;
