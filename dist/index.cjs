@@ -2637,7 +2637,7 @@ function copyTree(value, container, contents, checkFresh) {
   }
   const top = toRaw(value);
   if (top === value && top !== container) {
-    const small = copySmall(value, checkFresh);
+    const small = copySmall(value, container, checkFresh);
     if (small !== undefined)
       return small;
   }
@@ -2680,7 +2680,7 @@ var cloneContents;
 var cloneFresh = false;
 var cloneFirst;
 var cloneSeen;
-function copySmall(value, checkFresh) {
+function copySmall(value, container, checkFresh) {
   if (!Array.isArray(value)) {
     const copy2 = copyLeaf(value);
     if (copy2 !== undefined && checkFresh)
@@ -2698,7 +2698,7 @@ function copySmall(value, checkFresh) {
       copy[i] = item;
       continue;
     }
-    if (toRaw(item) !== item)
+    if (item === container || toRaw(item) !== item)
       return;
     const leaf = copyLeaf(item);
     if (leaf === undefined)
@@ -3416,6 +3416,37 @@ function isAttached(node) {
     return single !== null;
   return findAll(node, undefined, true).length > 0;
 }
+function attachedBefore(node, former) {
+  let current = node;
+  for (let steps = 0;steps < FAST_CHAIN_LIMIT; steps++) {
+    if (current.root !== undefined || current === former)
+      return true;
+    const places = current.places;
+    if (places.length !== 1)
+      break;
+    const place = places[0];
+    const parent = place.parent;
+    if (!holdsIn(parent, place.key, current.raw))
+      return false;
+    current = parent;
+  }
+  const pending = [current];
+  const visited = new Set(pending);
+  while (pending.length > 0) {
+    const next = pending.pop();
+    if (next.root !== undefined || next === former)
+      return true;
+    const places = next.places;
+    for (let i = 0;i < places.length; i++) {
+      const parent = places[i].parent;
+      if (!holdsIn(parent, places[i].key, next.raw) || visited.has(parent))
+        continue;
+      visited.add(parent);
+      pending.push(parent);
+    }
+  }
+  return false;
+}
 function dispatch(target, event) {
   const { root, paths } = target;
   const emit = root.emit;
@@ -3631,7 +3662,7 @@ function detachPlace(value, parent, key) {
     }
   }
 }
-function newWalk(touched, first) {
+function newWalk(touched, former, held, first) {
   return {
     touched,
     seen: new Set,
@@ -3639,13 +3670,19 @@ function newWalk(touched, first) {
     aliases: first?.repeated,
     created: undefined,
     revisit: first?.created,
-    relinked: []
+    relinked: [],
+    former,
+    held
   };
 }
 function adopt(raw, walk) {
   let node = nodes.get(raw);
-  if (node !== undefined && !node.lostLink && walk.revisit?.has(raw) !== true)
-    return node;
+  if (node !== undefined && !node.lostLink && walk.revisit?.has(raw) !== true) {
+    if (attachedBefore(node, walk.former))
+      return node;
+    if (walk.aliases === undefined)
+      (walk.created ??= new Set).add(raw);
+  }
   const seen = walk.seen;
   const size = seen.size;
   seen.add(raw);
@@ -3663,14 +3700,13 @@ function adopt(raw, walk) {
     return;
   if (walk.aliases?.has(raw))
     node = ensureLocationNode(raw);
-  if (freshStored.has(raw))
+  if (walk.held?.has(raw))
     return node;
   node = adoptChildren(raw, node, walk);
   if (node !== undefined && walk.aliases === undefined)
     (walk.created ??= new Set).add(raw);
   return node;
 }
-var freshStored = new WeakSet;
 function adoptChildren(raw, node, walk) {
   if (Array.isArray(raw)) {
     for (let i = 0;i < raw.length; i++) {
@@ -3714,12 +3750,12 @@ function adoptChild(container, containerNode, key, child, walk) {
     walk.touched.push(childNode);
   return containerNode;
 }
-function adoptAll(touched, visit) {
-  let walk = newWalk(touched);
+function adoptAll(touched, former, held, visit) {
+  let walk = newWalk(touched, former, held);
   visit(walk);
   if (walk.repeated !== undefined) {
     const first = walk;
-    walk = newWalk(touched, first);
+    walk = newWalk(touched, former, held, first);
     visit(walk);
     for (let i = 0;i < first.relinked.length; i++)
       first.relinked[i].lostLink = false;
@@ -3764,7 +3800,7 @@ function insertedNeedWalk(inserted) {
       continue;
     const node = nodes.get(value);
     if (node !== undefined) {
-      if (node.lostLink)
+      if (node.lostLink || !attachedBefore(node, undefined))
         return true;
       continue;
     }
@@ -3780,21 +3816,40 @@ function insertedNeedWalk(inserted) {
   }
   return false;
 }
-function attachValue(value, parent, key, fresh) {
-  if (fresh) {
-    freshStored.add(value);
+function heldBefore(value, replaced) {
+  if (!Array.isArray(value) || !Array.isArray(replaced))
     return;
+  let before;
+  for (let i = 0;i < value.length; i++) {
+    const item = value[i];
+    if (!isObject2(item) || nodes.get(item) !== undefined)
+      continue;
+    if (before === undefined) {
+      before = new Set;
+      for (let j = 0;j < replaced.length; j++)
+        if (isObject2(replaced[j]))
+          before.add(replaced[j]);
+    }
+    if (!before.has(item))
+      return;
   }
+  return before;
+}
+function attachValue(value, parent, key, fresh, replaced) {
+  if (fresh)
+    return;
+  const former = isObject2(replaced) ? nodes.get(replaced) : undefined;
   const existing = nodes.get(value);
-  if (existing !== undefined && !existing.lostLink) {
+  if (existing !== undefined && !existing.lostLink && attachedBefore(existing, former)) {
     if (addPlace(existing, parent, key) && existing.places.length > 1)
       prunePlaces(existing);
     return;
   }
   if (existing === undefined && !hasObjectChild(value))
     return;
+  const held = former === undefined ? undefined : heldBefore(value, replaced);
   const touched = [];
-  adoptAll(touched, (walk) => {
+  adoptAll(touched, former, held, (walk) => {
     const node = adopt(value, walk);
     if (node !== undefined && addPlace(node, parent, key))
       touched.push(node);
@@ -3803,20 +3858,15 @@ function attachValue(value, parent, key, fresh) {
 }
 function adoptRoot(node) {
   const touched = [];
-  adoptAll(touched, (walk) => {
+  adoptAll(touched, undefined, undefined, (walk) => {
     walk.seen.add(node.raw);
     adoptChildren(node.raw, node, walk);
   });
   pruneTouched(touched);
 }
 function relinkArray(arrayNode, array, from, removed, inserted, insertedFresh = false) {
-  if (inserted !== undefined && insertedFresh) {
-    for (let i = 0;i < inserted.length; i++) {
-      if (isObject2(inserted[i]))
-        freshStored.add(inserted[i]);
-    }
+  if (insertedFresh)
     inserted = undefined;
-  }
   relink(arrayNode, array, from, removed, inserted, false);
 }
 function relinkReorder(arrayNode, array, removed, inserted) {
@@ -3825,7 +3875,7 @@ function relinkReorder(arrayNode, array, removed, inserted) {
 function relink(arrayNode, array, from, removed, inserted, findAliases) {
   const touched = [];
   if (inserted !== undefined && insertedNeedWalk(inserted)) {
-    adoptAll(touched, (walk) => {
+    adoptAll(touched, undefined, undefined, (walk) => {
       for (let i = 0;i < inserted.length; i++) {
         const value = inserted[i];
         if (isObject2(value))
@@ -4558,7 +4608,7 @@ function wrapArray(arr, node) {
           if (isObject3(oldValue))
             detachPlace(oldValue, node, key);
           if (isObject3(value))
-            attachValue(value, node, key, copied === 2 /* Fresh */);
+            attachValue(value, node, key, copied === 2 /* Fresh */, located && oldValue);
         }
         if (grows) {
           if (located !== undefined) {
@@ -4664,7 +4714,7 @@ function wrapMap(map, node) {
           if (isObject4(oldValue))
             detachPlace(oldValue, node, key);
           if (isObject4(value2))
-            attachValue(value2, node, key, copied === 2 /* Fresh */);
+            attachValue(value2, node, key, copied === 2 /* Fresh */, located && oldValue);
           if (event !== undefined)
             dispatch(located, event);
           if (!existed) {
@@ -5131,7 +5181,7 @@ function wrapObject(obj, node, options) {
         if (isObject6(oldValue))
           detachPlace(oldValue, node, prop);
         if (isObject6(value))
-          attachValue(value, node, prop, copied === 2 /* Fresh */);
+          attachValue(value, node, prop, copied === 2 /* Fresh */, located && oldValue);
         if (event !== undefined)
           dispatch(located, event);
         trigger(target, prop);

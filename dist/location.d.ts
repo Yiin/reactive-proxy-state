@@ -113,9 +113,10 @@ export declare const enum Copied {
     Done = 1,
     /**
      * Copied the payload, and the values it stores (`newValue`, `value`,
-     * `items`) are fresh (see `cloneStored`): the store's place walk would
-     * find nothing in them, so `attachValue` and `relinkArray` record them in
-     * `freshStored` instead of walking them.
+     * `items`) are fresh (see `cloneStored`): the place walk of this store
+     * would find nothing in them, so `attachValue` and `relinkArray` skip it.
+     * The finding holds for this store only; a later store of the same
+     * values walks them again.
      */
     Fresh = 2
 }
@@ -171,10 +172,12 @@ export declare function notePlace(node: LocationNode, parent: LocationNode, key:
 /** `parent[key]` no longer holds `value`. */
 export declare function detachPlace(value: object, parent: LocationNode, key: unknown): void;
 /**
- * `parent[key]` now holds `value` (a raw object). A `fresh` value (its copy
- * found it fresh, see `cloneStored`) has nothing to place.
+ * `parent[key]` now holds `value` (a raw object). A `fresh` value (the copy
+ * this store made found it fresh, see `cloneStored`) has nothing to place.
+ * `replaced` is the value the store wrote over, when `parent` was in the
+ * tree before the store (see `attachedBefore`).
  */
-export declare function attachValue(value: object, parent: LocationNode, key: unknown, fresh: boolean): void;
+export declare function attachValue(value: object, parent: LocationNode, key: unknown, fresh: boolean, replaced?: unknown): void;
 /**
  * A new root: give places to the objects in its initial value that need
  * them now, which are the aliases (an object at two places) and the
