@@ -85,6 +85,61 @@ describe("aliases without a read", () => {
   });
 });
 
+/**
+ * The first walk of a stored value gives a node to a container that holds
+ * a known object. The second walk (for aliases) must still go into that
+ * container, or an alias below it loses its place there.
+ */
+describe("aliases beside a known object", () => {
+  test("pushed items: the alias sits in an item that also holds a known object", () => {
+    const sync = replicate({ known: { k: 0 }, list: [] as any[] });
+    const shared = { n: 0 };
+    sync.state.list.push({ known: sync.state.known, x: shared }, { x: shared });
+    sync.clear();
+    sync.state.list[1].x.n = 1;
+    expect(sync.paths().sort()).toEqual(["set:list.0.x.n", "set:list.1.x.n"]);
+    expect(sync.inSync()).toBe(true);
+  });
+
+  test("assigned value: the alias is deep under a container made by the first walk", () => {
+    const sync = replicate({ known: { k: 0 }, box: null as any });
+    const shared = { n: 0 };
+    const known = toRaw(sync.state.known);
+    sync.state.box = { left: { inner: { known, deep: { x: shared } } }, right: { x: shared } };
+    sync.clear();
+    sync.state.box.right.x.n = 2;
+    expect(sync.paths().sort()).toEqual(["set:box.left.inner.deep.x.n", "set:box.right.x.n"]);
+    expect(sync.inSync()).toBe(true);
+  });
+
+  test("the alias comes before the known object in the container", () => {
+    const sync = replicate({ known: { k: 0 }, list: [] as any[] });
+    const shared = { n: 0 };
+    sync.state.list.push({ x: shared, known: sync.state.known }, [shared]);
+    sync.clear();
+    sync.state.list[1][0].n = 3;
+    expect(sync.paths().sort()).toEqual(["set:list.0.x.n", "set:list.1.0.n"]);
+    expect(sync.inSync()).toBe(true);
+  });
+
+  test("a write through the known object still reaches every place", () => {
+    const sync = replicate({ known: { k: 0 }, list: [] as any[] });
+    const shared = { n: 0 };
+    sync.state.list.push({ known: sync.state.known, x: shared }, { x: shared, known: sync.state.known });
+    sync.clear();
+    sync.state.known.k = 5;
+    sync.state.list[0].x.n = 4;
+    expect(sync.paths().sort()).toEqual([
+      "set:known.k",
+      "set:list.0.known.k",
+      "set:list.0.x.n",
+      "set:list.1.known.k",
+      "set:list.1.x.n",
+    ]);
+    expect(sync.inSync()).toBe(true);
+  });
+});
+
 describe("reattached containers get their children's places back", () => {
   test("a parent whose child link was pruned while it was detached", () => {
     const sync = replicate({ a: { n: 0 }, box: null as any, c: null as any });
@@ -254,5 +309,36 @@ describe("fuzz with aliasing operations", () => {
       if (failure !== null) failures.push(`${seed}: ${failure}`);
     }
     expect(failures).toEqual([]);
+  });
+});
+
+describe("bulk insertion", () => {
+  test("pushing many fresh leaves checks for repeats in linear work", () => {
+    const sync = replicate({ list: [] as any[] });
+    const leaves = Array.from({ length: 400 }, (_, index) => ({ n: index }));
+    const nativeIndexOf = Array.prototype.indexOf;
+    let scanned = 0;
+    Array.prototype.indexOf = function (this: unknown[], search: unknown, from?: number) {
+      scanned += this.length - (from ?? 0);
+      return nativeIndexOf.call(this, search, from);
+    };
+    try {
+      sync.state.list.push(...leaves);
+    } finally {
+      Array.prototype.indexOf = nativeIndexOf;
+    }
+    // a pairwise search reads 79,800 positions for 400 leaves
+    expect(scanned).toBeLessThanOrEqual(leaves.length);
+    expect(sync.inSync()).toBe(true);
+  });
+
+  test("a leaf pushed twice in one batch is still an alias", () => {
+    const sync = replicate({ list: [] as any[] });
+    const leaves = Array.from({ length: 50 }, (_, index) => ({ n: index }));
+    sync.state.list.push(...leaves, leaves[7]);
+    sync.clear();
+    sync.state.list[50].n = 99;
+    expect(sync.paths().sort()).toEqual(["set:list.50.n", "set:list.7.n"]);
+    expect(sync.inSync()).toBe(true);
   });
 });

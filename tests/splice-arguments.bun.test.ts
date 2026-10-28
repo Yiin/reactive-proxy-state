@@ -67,3 +67,32 @@ describe("splice argument normalization", () => {
     });
   }
 });
+
+describe("splice arguments that native splice refuses", () => {
+  const refused: Call[] = [
+    { name: "BigInt start", args: [1n, 1] },
+    { name: "BigInt count", args: [0, 1n] },
+    { name: "BigInt count with items", args: [0, 1n, { id: "X", n: 0 }] },
+    { name: "Symbol start", args: [Symbol("start"), 1] },
+    { name: "object start whose valueOf gives a BigInt", args: [{ valueOf: () => 1n }, 1] },
+  ];
+
+  for (const { name, args } of refused) {
+    test(name, () => {
+      const native = list();
+      let nativeError: unknown;
+      try {
+        (native.splice as Function)(...args);
+      } catch (error) {
+        nativeError = error;
+      }
+      expect(nativeError).toBeInstanceOf(TypeError);
+
+      const sync = replicate({ list: list() });
+      expect(() => (sync.state.list.splice as Function)(...args)).toThrow(TypeError);
+      expect(toRaw(sync.state.list).map((entry) => entry.id)).toEqual(native.map((entry) => entry.id));
+      expect(sync.events).toEqual([]);
+      expect(sync.inSync()).toBe(true);
+    });
+  }
+});

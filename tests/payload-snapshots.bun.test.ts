@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { reactive } from "../src/index";
+import { reactive, toRaw, updateState } from "../src/index";
+import { SNAPSHOT_SHARED_COPY_LIMIT, cloneTree } from "../src/utils";
 import type { StateEvent } from "../src/types";
 import { replicate } from "./replica";
 
@@ -189,5 +190,101 @@ describe("deferred delivery replays to the same state", () => {
     await Promise.resolve();
     expect(events[0].oldValue).toEqual([{ n: 0 }, { n: 1 }]);
     expect(events[0].newValue).toEqual([{ n: 1 }, { n: 0 }]);
+  });
+});
+
+/** A graph of `depth + 1` objects where each level holds the one below twice: 2^(depth+1) - 1 places. */
+function doubling(depth: number): any {
+  let value: any = { n: 0 };
+  for (let i = 0; i < depth; i++) value = { left: value, right: value };
+  return value;
+}
+
+function countObjects(value: any): number {
+  if (value === null || typeof value !== "object") return 0;
+  let count = 1;
+  for (const key of Object.keys(value)) count += countObjects(value[key]);
+  return count;
+}
+
+describe("objects shared inside one snapshot", () => {
+  test("a pushed value with one object at two places replays through a wire that keeps identity", () => {
+    // structuredClone keeps shared identity, so a payload that shared the
+    // object would make the replica push twice into one array
+    const sync = replicate({ list: [] as any[] });
+    const shared = { items: [] as number[] };
+    sync.state.list.push({ a: shared, b: shared });
+    sync.state.list[0].a.items.push(1);
+    expect(sync.paths()).toEqual(["array-push:list", "array-push:list.0.a.items", "array-push:list.0.b.items"]);
+    expect(sync.inSync()).toBe(true);
+  });
+
+  test("the initial snapshot of a shared graph under the limit is a tree", () => {
+    const events: StateEvent[] = [];
+    const state = reactive(doubling(10), (event) => events.push(structuredClone(event)));
+    const payload = events[0].newValue;
+    expect(payload.left).not.toBe(payload.right);
+    expect(countObjects(payload)).toBe(2 ** 11 - 1);
+    let leaf: any = state;
+    for (let i = 0; i < 10; i++) leaf = leaf.left;
+    leaf.n = 5;
+    expect(events.length).toBe(1 + 2 ** 10); // one event per place of the leaf
+    const remote = payload;
+    for (const event of events.slice(1)) updateState(remote, event);
+    expect(JSON.stringify(remote)).toBe(JSON.stringify(toRaw(state)));
+  });
+
+  test("a large tree with a cycle is not limited", () => {
+    const raw: any = { items: [] };
+    for (let i = 0; i < 30_000; i++) raw.items.push({ i, tags: [i] });
+    raw.self = raw;
+    raw.items[29_999].back = raw.items;
+    let payload: any;
+    reactive(raw, (event) => (payload = event.newValue));
+    expect(payload.items.length).toBe(30_000);
+    expect(payload.self).toBe(payload);
+    expect(payload.items[29_999].back).toBe(payload.items);
+    expect(payload).not.toBe(raw);
+  });
+
+  test("a root whose snapshot would copy too many shared objects is refused before a proxy exists", () => {
+    const raw = doubling(21); // 22 objects, 4,194,303 places
+    const events: StateEvent[] = [];
+    const started = performance.now();
+    expect(() => reactive(raw, (event) => events.push(event))).toThrow(RangeError);
+    expect(performance.now() - started).toBeLessThan(1000);
+    expect(events).toEqual([]);
+    // no proxy was cached for the refused root
+    const plain = reactive(raw);
+    expect(toRaw(plain)).toBe(raw);
+    expect(plain).not.toBe(raw);
+  });
+
+  test("a shared graph with cycles over the limit is refused too", () => {
+    const raw = doubling(21);
+    let level = raw;
+    while (level.left !== undefined) {
+      level.top = raw;
+      level = level.left;
+    }
+    expect(() => reactive(raw, () => {})).toThrow(RangeError);
+  });
+
+  test("a write whose payload would copy too many shared objects throws and sends nothing", () => {
+    const { state, events } = recorder({ box: null as any });
+    expect(() => {
+      state.box = doubling(21);
+    }).toThrow(RangeError);
+    expect(events).toEqual([]);
+  });
+
+  test("the limit counts copies beyond the first copy of each object", () => {
+    const exact = { list: new Array(SNAPSHOT_SHARED_COPY_LIMIT + 1).fill({ n: 0 }) };
+    const copy = cloneTree(exact);
+    expect(copy.list.length).toBe(SNAPSHOT_SHARED_COPY_LIMIT + 1);
+    expect(copy.list[0]).not.toBe(copy.list[1]);
+
+    const over = { list: new Array(SNAPSHOT_SHARED_COPY_LIMIT + 2).fill({ n: 0 }) };
+    expect(() => cloneTree(over)).toThrow(RangeError);
   });
 });
