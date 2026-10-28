@@ -112,12 +112,6 @@ export declare function cloneStored<T>(value: T, container: object | undefined):
 /** Whether the value the last `cloneStored` call copied is fresh; set when it returns. */
 export declare let copiedFresh: boolean;
 /**
- * Is `value` (raw) fresh, as `cloneStored` finds it, without copying it?
- * The walk visits what a copy visits and stops at the first object that is
- * not fresh: one with a location node (a proxy has one), or one met twice.
- */
-export declare function isFresh(value: object): boolean;
-/**
  * The copy `cloneTree(value)` makes once `container` holds what `contents`
  * holds: wherever the copy (and its measure) meets `container`, it reads
  * `contents` instead, a shallow copy of `container` of the same kind. So a

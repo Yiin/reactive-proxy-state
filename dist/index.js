@@ -2547,58 +2547,6 @@ function cloneStored(value, container) {
   return copyUnless(value, container, true);
 }
 var copiedFresh = false;
-function isFresh(value) {
-  if (toRaw(value) !== value || locationNodes.get(value) !== undefined)
-    return false;
-  const seen = new Set;
-  seen.add(value);
-  return freshChildren(value, seen);
-}
-function freshEntry(entry, seen) {
-  if (entry === null || typeof entry !== "object")
-    return true;
-  if (toRaw(entry) !== entry || locationNodes.get(entry) !== undefined)
-    return false;
-  const size = seen.size;
-  seen.add(entry);
-  if (seen.size === size)
-    return false;
-  return freshChildren(entry, seen);
-}
-function freshChildren(value, seen) {
-  if (Array.isArray(value)) {
-    for (let i = 0;i < value.length; i++)
-      if (!freshEntry(value[i], seen))
-        return false;
-    return true;
-  }
-  if (Object.getPrototypeOf(value) !== Object.prototype) {
-    if (value instanceof Date)
-      return true;
-    if (value instanceof Map) {
-      for (const [key, entry] of value)
-        if (!freshEntry(key, seen) || !freshEntry(entry, seen))
-          return false;
-      return true;
-    }
-    if (value instanceof Set) {
-      for (const entry of value)
-        if (!freshEntry(entry, seen))
-          return false;
-      return true;
-    }
-  }
-  for (const key in value) {
-    if (hasOwn.call(value, key) && !freshEntry(value[key], seen))
-      return false;
-  }
-  const symbolKeys = Object.getOwnPropertySymbols(value);
-  for (let i = 0;i < symbolKeys.length; i++) {
-    if (isEnumerable.call(value, symbolKeys[i]) && !freshEntry(value[symbolKeys[i]], seen))
-      return false;
-  }
-  return true;
-}
 function copyUnless(value, container, checkFresh) {
   try {
     return copyTree(value, container, undefined, checkFresh);
@@ -5202,13 +5150,8 @@ function reactive(obj, emit, path = [], options) {
   let fresh = false;
   if (emit && path.length === 0) {
     try {
-      let newValue = obj;
-      if (!options?.async && isFresh(obj)) {
-        fresh = true;
-      } else {
-        newValue = cloneStored(obj, undefined);
-        fresh = copiedFresh;
-      }
+      const newValue = cloneStored(obj, undefined);
+      fresh = copiedFresh;
       emit({ action: "replace", path: [], newValue });
     } catch (error) {
       if (error instanceof SnapshotLimitError)
