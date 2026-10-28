@@ -86,10 +86,18 @@ export declare function cloneTree<T>(value: T): T;
 export declare const REACHES: unique symbol;
 /**
  * `cloneTree(value)`, or `REACHES` as soon as the copy (or its measure)
- * meets `guard`. A `SnapshotLimitError` thrown first is measured on objects
- * other than `guard`.
+ * meets `container`. A `SnapshotLimitError` thrown first is measured on
+ * objects other than `container`.
  */
-export declare function cloneTreeUnless<T>(value: T, guard: object): T | typeof REACHES;
+export declare function cloneTreeUnless<T>(value: T, container: object): T | typeof REACHES;
+/**
+ * The copy `cloneTree(value)` makes once `container` holds what `contents`
+ * holds: wherever the copy (and its measure) meets `container`, it reads
+ * `contents` instead, a shallow copy of `container` of the same kind. So a
+ * payload is copied, or refused, as it will be after a write to `container`,
+ * before that write is made.
+ */
+export declare function cloneTreeAfter<T>(value: T, container: object, contents: object): T;
 /**
  * creates a deep clone of a value.
  * includes cycle detection using a weakmap.
