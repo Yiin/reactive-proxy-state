@@ -332,9 +332,6 @@ describe("a refusal needs no rollback", () => {
     });
   }
 
-  /** A value that points back into `container` and is too large to copy. */
-  const reaching = (container: object) => ({ back: container, data: dag(17) });
-
   type WritePath = {
     name: string;
     make: () => any;
@@ -342,7 +339,8 @@ describe("a refusal needs no rollback", () => {
     setup?: (raw: any) => unknown;
     write: (state: any, raw: any) => unknown;
   };
-  const writePaths: WritePath[] = [
+  /** Every write path, storing or removing `reaching(container)`, a value that points back into its container. */
+  const writePaths = (reaching: (container: object) => object): WritePath[] => [
     { name: "object set", make: () => ({ a: 1 }), write: (state, raw) => (state.b = reaching(raw)) },
     {
       name: "object set over an old value that reaches back",
@@ -395,7 +393,10 @@ describe("a refusal needs no rollback", () => {
     },
   ];
 
-  for (const { name, make, setup, write } of writePaths) {
+  /** A value that points back into `container` and is too large to copy. */
+  const tooLarge = (container: object) => ({ back: container, data: dag(17) });
+
+  for (const { name, make, setup, write } of writePaths(tooLarge)) {
     test(`${name}: a refused payload that reaches back into its container writes nothing`, () => {
       const child = { n: 1 };
       const raw = make();
@@ -426,6 +427,79 @@ describe("a refusal needs no rollback", () => {
       if (iterator !== undefined) expect([...iterator].length).toBe(raw.size - 1);
       held.n = 2;
       expect(events.map((event) => event.path)).toEqual([["child", "n"]]);
+    });
+  }
+
+  /**
+   * A text form of a graph that keeps cycles (`^n` names the ancestor n steps
+   * up) and every object at each of its places, like a payload copy.
+   */
+  function shape(value: unknown, ancestors: object[] = []): string {
+    if (value === null || typeof value !== "object") return JSON.stringify(value) ?? String(value);
+    const index = ancestors.lastIndexOf(value);
+    if (index >= 0) return `^${ancestors.length - index}`;
+    ancestors.push(value);
+    let text: string;
+    if (Array.isArray(value)) text = `[${Array.from(value, (item) => shape(item, ancestors)).join(",")}]`;
+    else if (value instanceof Map)
+      text = `Map{${[...value].map(([key, item]) => `${shape(key, ancestors)}=>${shape(item, ancestors)}`).join(",")}}`;
+    else if (value instanceof Set) text = `Set{${[...value].map((item) => shape(item, ancestors)).join(",")}}`;
+    else text = `{${Object.keys(value).map((key) => `${key}:${shape((value as any)[key], ancestors)}`).join(",")}}`;
+    ancestors.pop();
+    return text;
+  }
+
+  // the value the current write path stores or removes
+  let stored: any;
+  const small = (container: object) => (stored = { back: container, list: [1, { n: 2 }] });
+
+  for (const { name, make, setup, write } of writePaths(small)) {
+    test(`${name}: a payload that reaches back into its container is the copy the write leaves`, () => {
+      const raw = make();
+      const fields = ["newValue", "oldValue", "value", "items", "oldValues"];
+      const events: any[] = [];
+      const expected: string[] = [];
+      const state: any = reactive({ box: raw }, (event: any) => {
+        events.push(event);
+        // made synchronously right after the write: what a copy after the write holds
+        for (const field of fields) {
+          const payload = event[field];
+          if (payload === null || typeof payload !== "object") continue;
+          const live = field === "items" || field === "oldValues" ? [stored] : stored;
+          expected.push(`${field}:${shape(cloneTree(live))}`);
+        }
+      });
+      setup?.(raw);
+      events.length = 0;
+      expected.length = 0;
+      write(state.box, raw);
+      expect(events.length).toBe(1);
+      const actual = fields
+        .filter((field) => events[0][field] !== null && typeof events[0][field] === "object")
+        .map((field) => `${field}:${shape(events[0][field])}`);
+      expect(actual.length).toBeGreaterThan(0);
+      expect(actual).toEqual(expected);
+    });
+  }
+
+  for (const method of ["reverse", "sort", "fill", "copyWithin"] as const) {
+    test(`${method}: the payload is the copy the reorder leaves`, () => {
+      const raw: any[] = [];
+      raw.push({ n: 0, back: raw }, { n: 1, list: [raw] }, { n: 2 }, [raw]);
+      const before = raw.slice();
+      let expected: string[] = [];
+      const events: any[] = [];
+      const state: any = reactive(raw, (event: any) => {
+        events.push(event);
+        expected = [shape(cloneTree(raw)), shape(cloneTree(before))];
+      });
+      events.length = 0;
+      if (method === "sort") state.sort((left: any, right: any) => (right.n ?? 9) - (left.n ?? 9));
+      else if (method === "fill") state.fill(raw[1], 0, 1);
+      else if (method === "copyWithin") state.copyWithin(0, 1, 3);
+      else state.reverse();
+      expect(events.length).toBe(1);
+      expect([shape(events[0].newValue), shape(events[0].oldValue)]).toEqual(expected);
     });
   }
 });

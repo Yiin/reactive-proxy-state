@@ -316,7 +316,7 @@ const SNAPSHOT_CHECK_AFTER = SNAPSHOT_SHARED_COPY_LIMIT + 1;
  * `SNAPSHOT_SHARED_COPY_LIMIT` extra copies of shared objects.
  */
 export function cloneTree<T>(value: T): T {
-    return copyTree(value, undefined) as T;
+    return copyTree(value, undefined, undefined) as T;
 }
 
 /** What `cloneTreeUnless` returns for a value that reaches the object it names. */
@@ -324,29 +324,42 @@ export const REACHES = Symbol('reaches');
 
 /**
  * `cloneTree(value)`, or `REACHES` as soon as the copy (or its measure)
- * meets `guard`. A `SnapshotLimitError` thrown first is measured on objects
- * other than `guard`.
+ * meets `container`. A `SnapshotLimitError` thrown first is measured on
+ * objects other than `container`.
  */
-export function cloneTreeUnless<T>(value: T, guard: object): T | typeof REACHES {
+export function cloneTreeUnless<T>(value: T, container: object): T | typeof REACHES {
     try {
-        return copyTree(value, guard) as T;
+        return copyTree(value, container, undefined) as T;
     } catch (error) {
-        if (error === reachedGuard) return REACHES;
+        if (error === reachedContainer) return REACHES;
         throw error;
     }
 }
 
-const reachedGuard = new Error('reactive-proxy-state: internal, a copy reached its guard');
+/**
+ * The copy `cloneTree(value)` makes once `container` holds what `contents`
+ * holds: wherever the copy (and its measure) meets `container`, it reads
+ * `contents` instead, a shallow copy of `container` of the same kind. So a
+ * payload is copied, or refused, as it will be after a write to `container`,
+ * before that write is made.
+ */
+export function cloneTreeAfter<T>(value: T, container: object, contents: object): T {
+    return copyTree(value, container, contents) as T;
+}
 
-function copyTree(value: unknown, guard: object | undefined): unknown {
+const reachedContainer = new Error('reactive-proxy-state: internal, a copy reached its container');
+
+function copyTree(value: unknown, container: object | undefined, contents: object | undefined): unknown {
     if (value === null || typeof value !== 'object') return value;
     const base = cloneAncestors.length;
     const outerTop = cloneTop;
     const outerCountdown = cloneCountdown;
-    const outerGuard = cloneGuard;
+    const outerContainer = cloneContainer;
+    const outerContents = cloneContents;
     cloneTop = value;
     cloneCountdown = SNAPSHOT_CHECK_AFTER;
-    cloneGuard = guard;
+    cloneContainer = container;
+    cloneContents = contents;
     try {
         return cloneTreeInto(value, base);
     } finally {
@@ -354,16 +367,26 @@ function copyTree(value: unknown, guard: object | undefined): unknown {
         cloneCopies.length = base;
         cloneTop = outerTop;
         cloneCountdown = outerCountdown;
-        cloneGuard = outerGuard;
+        cloneContainer = outerContainer;
+        cloneContents = outerContents;
     }
 }
 
 // The value the current `cloneTree` call copies, how many copies it may
-// still make before it measures that value (see `checkSharedCopies`), and
-// the object it stops at (see `cloneTreeUnless`).
+// still make before it measures that value (see `checkSharedCopies`), the
+// container it stops at (see `cloneTreeUnless`) or reads `cloneContents`
+// for (see `cloneTreeAfter`).
 let cloneTop: object | undefined;
 let cloneCountdown = 0;
-let cloneGuard: object | undefined;
+let cloneContainer: object | undefined;
+let cloneContents: object | undefined;
+
+/** What the copy reads for `identity` (a raw object): `cloneContents` in place of `cloneContainer`. */
+function readsOf(identity: object): object {
+    if (identity !== cloneContainer) return identity;
+    if (cloneContents === undefined) throw reachedContainer;
+    return cloneContents;
+}
 
 /** Count one copy; at `SNAPSHOT_CHECK_AFTER` copies, measure the whole value once. */
 function countCopy(): void {
@@ -410,7 +433,7 @@ function walkEntry(entry: unknown, depth: number, walk: CopyWalk): number {
 /** The copies a tree copy of `value` makes; sets `walk.low`. */
 function walkCopies(value: object, depth: number, walk: CopyWalk): number {
     const identity = toRaw(value) as object;
-    if (identity === cloneGuard) throw reachedGuard;
+    const source: any = identity === cloneContainer ? readsOf(identity) : identity;
     const marks = walk.marks;
     const mark = marks.get(identity);
     if (mark !== undefined) {
@@ -426,7 +449,7 @@ function walkCopies(value: object, depth: number, walk: CopyWalk): number {
         }
         walk.extra++; // met before, counted again here
     }
-    if (walk.extra > SNAPSHOT_SHARED_COPY_LIMIT || identity instanceof Date) {
+    if (walk.extra > SNAPSHOT_SHARED_COPY_LIMIT || source instanceof Date) {
         if (mark === undefined) marks.set(identity, 1);
         walk.low = Infinity;
         return 1;
@@ -436,36 +459,36 @@ function walkCopies(value: object, depth: number, walk: CopyWalk): number {
     const below = depth + 1;
     let size = 1;
     let low = Infinity;
-    if (Array.isArray(identity)) {
-        for (let i = 0; i < identity.length && walk.extra <= SNAPSHOT_SHARED_COPY_LIMIT; i++) {
-            size += walkEntry(identity[i], below, walk);
+    if (Array.isArray(source)) {
+        for (let i = 0; i < source.length && walk.extra <= SNAPSHOT_SHARED_COPY_LIMIT; i++) {
+            size += walkEntry(source[i], below, walk);
             if (walk.low < low) low = walk.low;
         }
-    } else if (identity instanceof Map) {
-        for (const [key, entry] of identity) {
+    } else if (source instanceof Map) {
+        for (const [key, entry] of source) {
             size += walkEntry(key, below, walk);
             if (walk.low < low) low = walk.low;
             size += walkEntry(entry, below, walk);
             if (walk.low < low) low = walk.low;
             if (walk.extra > SNAPSHOT_SHARED_COPY_LIMIT) break;
         }
-    } else if (identity instanceof Set) {
-        for (const entry of identity) {
+    } else if (source instanceof Set) {
+        for (const entry of source) {
             size += walkEntry(entry, below, walk);
             if (walk.low < low) low = walk.low;
             if (walk.extra > SNAPSHOT_SHARED_COPY_LIMIT) break;
         }
     } else {
-        for (const key in identity) {
-            if (!hasOwn.call(identity, key)) continue;
-            size += walkEntry((identity as any)[key], below, walk);
+        for (const key in source) {
+            if (!hasOwn.call(source, key)) continue;
+            size += walkEntry(source[key], below, walk);
             if (walk.low < low) low = walk.low;
             if (walk.extra > SNAPSHOT_SHARED_COPY_LIMIT) break;
         }
-        const symbolKeys = Object.getOwnPropertySymbols(identity);
+        const symbolKeys = Object.getOwnPropertySymbols(source);
         for (let i = 0; i < symbolKeys.length; i++) {
-            if (!isEnumerable.call(identity, symbolKeys[i])) continue;
-            size += walkEntry((identity as any)[symbolKeys[i]], below, walk);
+            if (!isEnumerable.call(source, symbolKeys[i])) continue;
+            size += walkEntry(source[symbolKeys[i]], below, walk);
             if (walk.low < low) low = walk.low;
         }
     }
@@ -494,7 +517,7 @@ function cloneChild(value: any, base: number): any {
 function cloneTreeInto(value: any, base: number): any {
     // identity from the raw target, reads through `value` (see deepClone)
     const identity = toRaw(value) as object;
-    if (identity === cloneGuard) throw reachedGuard;
+    if (identity === cloneContainer) value = readsOf(identity);
     for (let i = cloneAncestors.length - 1; i >= base; i--) {
         if (cloneAncestors[i] === identity) return cloneCopies[i];
     }

@@ -13,8 +13,9 @@ import {
   locate,
   notePlace,
   restoreEvicted,
-  contentsRestorer,
-  copyAfterWrite,
+  copyPayloadAfter,
+  setData,
+  shallowCopy,
 } from "./location";
 import { wrapArray } from "./wrap-array";
 import { wrapMap } from "./wrap-map";
@@ -214,9 +215,14 @@ function wrapObject<T extends object>(obj: T, node: LocationNode, options?: Reac
         newValue: value,
       };
       // copies the payload, or throws, before the write
-      const restore = copyPayload(event, target) ? undefined : contentsRestorer(target);
+      if (!copyPayload(event, target)) {
+        // the payload reaches `target`: copy it with the write made on a copy of `target`
+        const after = shallowCopy(target);
+        // a non-enumerable property stays out of copies, written or not
+        if (descriptor === undefined || descriptor.enumerable) setData(after, prop, value);
+        copyPayloadAfter(event!, target, after);
+      }
       const result = Reflect.set(target, prop, value, receiver);
-      if (restore !== undefined) copyAfterWrite(event!, restore);
 
       // only emit and trigger if the set was successful and wasn't intercepted by a setter
       if (result && emits) {
@@ -247,9 +253,12 @@ function wrapObject<T extends object>(obj: T, node: LocationNode, options?: Reac
         path: located.paths[0],
         oldValue,
       };
-      const restore = copyPayload(event, target) ? undefined : contentsRestorer(target);
+      if (!copyPayload(event, target)) {
+        const after = shallowCopy(target);
+        delete after[prop];
+        copyPayloadAfter(event!, target, after);
+      }
       const result = Reflect.deleteProperty(target, prop);
-      if (restore !== undefined) copyAfterWrite(event!, restore);
 
       // only emit and trigger if the property existed and deletion was successful
       if (hadProperty && result) {

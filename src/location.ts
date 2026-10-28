@@ -1,6 +1,6 @@
 import { ReactiveFlags } from "./constants";
 import type { EmitFunction, Path, StateEvent } from "./types";
-import { REACHES, cloneTree, cloneTreeUnless, globalSeen, wrapperCache, proxyStats, toRaw } from "./utils";
+import { REACHES, cloneTree, cloneTreeAfter, cloneTreeUnless, globalSeen, wrapperCache, proxyStats, toRaw } from "./utils";
 
 /**
  * Where each wrapped object sits in its state tree.
@@ -295,10 +295,10 @@ export function isAttached(node: LocationNode): boolean {
 
 /**
  * Send `event` to every path of `target`. Its payload holds copies already
- * (`copyPayload`, made before the write). Every further path gets copies
- * of those copies, all made before the first emit, so a listener that
- * changes a payload cannot change another, and two remote places never
- * share one object. The first path gets `event` itself.
+ * (`copyPayload` or `copyPayloadAfter`, made before the write). Every
+ * further path gets copies of those copies, all made before the first emit,
+ * so a listener that changes a payload cannot change another, and two
+ * remote places never share one object. The first path gets `event` itself.
  */
 export function dispatch(target: Target, event: StateEvent): void {
   const { root, paths } = target;
@@ -322,28 +322,31 @@ export function dispatch(target: Target, event: StateEvent): void {
 }
 
 /**
- * Replace the payload fields of `event` (live values) with deep copies.
- * `items` and `oldValues` are arrays the wrapper made for this event and
- * only reads; each is one payload, copied whole, with one copy limit, and
- * kept as it is when it holds no object. A payload too large to copy throws
- * a `SnapshotLimitError` and leaves `event` as it was.
+ * Replace the payload fields of `event` (live values) with deep copies, made
+ * before the write that changes `container` (raw). `items` and `oldValues`
+ * are arrays the wrapper made for this event and only reads; each is one
+ * payload, copied whole, with one copy limit, and kept as it is when it
+ * holds no object. A payload too large to copy throws a `SnapshotLimitError`
+ * and leaves `event` as it was, so the write is never made.
  *
- * With `guard`, the copies are made before the write that changes `guard`:
- * a payload that reaches `guard` would be copied as it is before that write,
- * so then nothing is copied and the result is false (see `copyAfterWrite`).
+ * A payload that reaches `container` would be copied as `container` is
+ * before the write. Then nothing is copied and the result is false: the
+ * caller makes the write on `shallowCopy(container)` and copies with
+ * `copyPayloadAfter`, still before the write.
  */
-export function copyPayload(event: StateEvent | undefined, guard?: object): boolean {
+export function copyPayload(event: StateEvent | undefined, container: object): boolean {
   if (event === undefined) return true;
   const { newValue, oldValue, value, items, oldValues } = event;
-  const newCopy = isObject(newValue) ? copyOf(newValue, guard) : newValue;
+  const newCopy = isObject(newValue) ? cloneTreeUnless(newValue, container) : newValue;
   if (newCopy === REACHES) return false;
-  const oldCopy = isObject(oldValue) ? copyOf(oldValue, guard) : oldValue;
+  const oldCopy = isObject(oldValue) ? cloneTreeUnless(oldValue, container) : oldValue;
   if (oldCopy === REACHES) return false;
-  const valueCopy = isObject(value) ? copyOf(value, guard) : value;
+  const valueCopy = isObject(value) ? cloneTreeUnless(value, container) : value;
   if (valueCopy === REACHES) return false;
-  const itemsCopy = items !== undefined && holdsObject(items) ? copyOf(items, guard) : items;
+  const itemsCopy = items !== undefined && holdsObject(items) ? cloneTreeUnless(items, container) : items;
   if (itemsCopy === REACHES) return false;
-  const oldValuesCopy = oldValues !== undefined && holdsObject(oldValues) ? copyOf(oldValues, guard) : oldValues;
+  const oldValuesCopy =
+    oldValues !== undefined && holdsObject(oldValues) ? cloneTreeUnless(oldValues, container) : oldValues;
   if (oldValuesCopy === REACHES) return false;
   if (isObject(newValue)) event.newValue = newCopy;
   if (isObject(oldValue)) event.oldValue = oldCopy;
@@ -353,59 +356,63 @@ export function copyPayload(event: StateEvent | undefined, guard?: object): bool
   return true;
 }
 
+/**
+ * Like `copyPayload`, for a payload that reaches `container`: `after` (a
+ * `shallowCopy` of `container` with the write made on it) stands in for
+ * `container`, so the payload is copied as it will be after the write,
+ * before the write. Throws a `SnapshotLimitError` when it is too large to
+ * copy; the write is then never made, and nothing needs to be put back.
+ */
+export function copyPayloadAfter(event: StateEvent, container: object, after: object): void {
+  const { newValue, oldValue, value, items, oldValues } = event;
+  const newCopy = isObject(newValue) ? cloneTreeAfter(newValue, container, after) : newValue;
+  const oldCopy = isObject(oldValue) ? cloneTreeAfter(oldValue, container, after) : oldValue;
+  const valueCopy = isObject(value) ? cloneTreeAfter(value, container, after) : value;
+  const itemsCopy = items !== undefined && holdsObject(items) ? cloneTreeAfter(items, container, after) : items;
+  const oldValuesCopy =
+    oldValues !== undefined && holdsObject(oldValues) ? cloneTreeAfter(oldValues, container, after) : oldValues;
+  if (isObject(newValue)) event.newValue = newCopy;
+  if (isObject(oldValue)) event.oldValue = oldCopy;
+  if (isObject(value)) event.value = valueCopy;
+  if (items !== undefined) event.items = itemsCopy;
+  if (oldValues !== undefined) event.oldValues = oldValuesCopy;
+}
+
 function holdsObject(values: readonly unknown[]): boolean {
   for (let i = 0; i < values.length; i++) if (isObject(values[i])) return true;
   return false;
 }
 
-function copyOf(value: object, guard: object | undefined): unknown {
-  return guard === undefined ? cloneTree(value) : cloneTreeUnless(value, guard);
+/**
+ * A copy of `container` (raw) that holds the same entries, of the same kind
+ * and prototype: an array holds the same items, a map the same entries, a
+ * set the same members, an object the same own enumerable properties (as
+ * data). A write is made on it to copy a payload as it will be after that
+ * write (see `copyPayloadAfter`).
+ */
+export function shallowCopy(container: object): any {
+  if (Array.isArray(container)) return container.slice();
+  if (container instanceof Map) return new Map(container);
+  if (container instanceof Set) return new Set(container);
+  const copy = Object.create(Object.getPrototypeOf(container));
+  for (const key in container) {
+    if (Object.prototype.hasOwnProperty.call(container, key)) setData(copy, key, (container as any)[key]);
+  }
+  const symbolKeys = Object.getOwnPropertySymbols(container);
+  for (let i = 0; i < symbolKeys.length; i++) {
+    if (Object.prototype.propertyIsEnumerable.call(container, symbolKeys[i])) {
+      setData(copy, symbolKeys[i], (container as any)[symbolKeys[i]]);
+    }
+  }
+  return copy;
 }
 
 /**
- * Copy the payload of `event` right after a write that `copyPayload` could
- * not copy for before it: a payload that reaches the written container (a
- * cycle through it, or the container itself, as a reorder sends). `restore`
- * (from `contentsRestorer`, taken before the write) puts the container's
- * contents back when the payload is too large to copy, so the write changes
- * nothing, and the error is thrown.
- *
- * Call sites take `restore` and write inline, without a closure: a closure
- * over a trap's arguments costs every call of the trap.
+ * `copy[key] = value` on an object `shallowCopy` made, as an own enumerable
+ * data property: no setter of the copy's prototype runs.
  */
-export function copyAfterWrite(event: StateEvent, restore: () => void): void {
-  try {
-    copyPayload(event);
-  } catch (error) {
-    restore();
-    throw error;
-  }
-}
-
-/** A function that puts back what `container` (raw) holds now: its own properties, or its entries. */
-export function contentsRestorer(container: object): () => void {
-  if (container instanceof Map) {
-    const entries = [...container];
-    return () => {
-      container.clear();
-      for (const [key, entry] of entries) container.set(key, entry);
-    };
-  }
-  if (container instanceof Set) {
-    const members = [...container];
-    return () => {
-      container.clear();
-      for (const member of members) container.add(member);
-    };
-  }
-  const keys = Reflect.ownKeys(container);
-  const descriptors = keys.map((key) => Reflect.getOwnPropertyDescriptor(container, key)!);
-  return () => {
-    if (Array.isArray(container)) container.length = 0;
-    const current = Reflect.ownKeys(container);
-    for (let i = 0; i < current.length; i++) Reflect.deleteProperty(container, current[i]);
-    for (let i = 0; i < keys.length; i++) Reflect.defineProperty(container, keys[i], descriptors[i]);
-  };
+export function setData(copy: object, key: PropertyKey, value: unknown): void {
+  Object.defineProperty(copy, key, { value, writable: true, enumerable: true, configurable: true });
 }
 
 /** Add a place unless it is already known. Returns true when it was new. */
