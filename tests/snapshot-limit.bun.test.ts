@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { SnapshotLimitError, getProxyStats, reactive, toRaw, watchEffect } from "../src/index";
+import { SnapshotLimitError, getProxyStats, reactive, toRaw, updateState, watchEffect } from "../src/index";
 import { cloneTree } from "../src/utils";
 import { replicate, treeText } from "./replica";
 
@@ -522,3 +522,37 @@ describe("a refusal needs no rollback", () => {
   });
 });
 
+describe("a cyclic graph too large to remove in parts", () => {
+  test("every removal is refused; a new root from new objects resets the replica", () => {
+    const sync = replicate({ keep: { n: 1 }, graph: null as any });
+    // ten objects, each holding the nine others, stored raw: every part reaches the whole graph
+    const nodes = Array.from({ length: 10 }, (_, i) => ({ i }) as any);
+    for (const node of nodes) for (const other of nodes) if (other !== node) node["to" + other.i] = other;
+    (toRaw(sync.state) as any).graph = nodes[0];
+    let error: unknown;
+    try {
+      sync.state.graph = null;
+    } catch (caught) {
+      error = caught;
+    }
+    expect(error).toBeInstanceOf(SnapshotLimitError);
+    expect(String((error as Error).message)).toContain('"Synchronization Limits" in the README');
+    expect(() => delete (sync.state as any).graph).toThrow(SnapshotLimitError);
+    expect(() => delete sync.state.graph.to1).toThrow(SnapshotLimitError);
+    expect(sync.events.length).toBe(0);
+
+    // the way out: the state again from new objects, without the graph, under a new root
+    (toRaw(sync.state) as any).added = { raw: true }; // another raw write the replica missed
+    const next = structuredClone({ ...toRaw(sync.state), graph: null });
+    expect(treeText(sync.remote)).not.toBe(treeText(next));
+    const events: string[] = [];
+    const state = reactive(next, (event) => {
+      events.push(`${event.action}:${event.path.join(".")}`);
+      updateState(sync.remote, structuredClone(event));
+    });
+    state.keep.n = 2;
+    expect(events).toEqual(["replace:", "set:keep.n"]);
+    expect(treeText(sync.remote)).toBe(treeText(next));
+    expect((sync.remote as any).keep.n).toBe(2);
+  });
+});

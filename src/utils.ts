@@ -290,7 +290,8 @@ export class SnapshotLimitError extends RangeError {
         super(
             `reactive-proxy-state: a snapshot would copy shared objects more than ` +
             `${SNAPSHOT_SHARED_COPY_LIMIT} extra times (counted ${extraCopies} before stopping; ` +
-            `an object is copied once per place it holds)`
+            `an object is copied once per place it holds). Nothing was changed. To remove such a ` +
+            `graph, see "Shared graphs have a copy limit" under "Synchronization Limits" in the README`
         );
         this.name = 'SnapshotLimitError';
     }
