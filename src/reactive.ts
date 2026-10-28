@@ -17,6 +17,7 @@ import {
   copyPayloadReaching,
   setData,
   shallowCopy,
+  writesThroughSetter,
 } from "./location";
 import { wrapArray } from "./wrap-array";
 import { wrapMap } from "./wrap-map";
@@ -204,8 +205,7 @@ function wrapObject<T extends object>(obj: T, node: LocationNode, options?: Reac
         return true;
 
       // an own setter makes its own writes; the set itself emits nothing
-      const descriptor = Reflect.getOwnPropertyDescriptor(target, prop);
-      const emits = !descriptor || !descriptor.set;
+      const emits = !writesThroughSetter(target, prop, node);
       // the write does not move `target`, so its paths are known before it
       const located = emits ? locate(node, prop) : undefined;
       const event: StateEvent | undefined = located && {
@@ -220,6 +220,7 @@ function wrapObject<T extends object>(obj: T, node: LocationNode, options?: Reac
         // the payload reaches `target`: copy it with the write made on a copy of `target`
         const after = shallowCopy(target);
         // a non-enumerable property stays out of copies, written or not
+        const descriptor = Reflect.getOwnPropertyDescriptor(target, prop);
         if (descriptor === undefined || descriptor.enumerable) setData(after, prop, value);
         copyPayloadReaching(event!, target, after);
       }

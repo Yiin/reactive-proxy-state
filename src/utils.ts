@@ -424,6 +424,10 @@ function copyTree(
         return value;
     }
     const top = toRaw(value) as object;
+    if (top === value && top !== container) {
+        const small = copySmall(value, checkFresh);
+        if (small !== undefined) return small;
+    }
     const base = cloneAncestors.length;
     // the idle run is reused; a copy made during another (from a getter) makes its own
     let run = idleRun;
@@ -448,6 +452,54 @@ function copyTree(
         run.top = run.container = run.contents = run.first = run.seen = undefined as any;
         idleRun = run;
     }
+}
+
+/**
+ * The copy of a small raw value, made without the stack, the counter and the
+ * run of a tree copy: a leaf (a plain object of primitives), or an array of
+ * at most 8 entries that are primitives or leaves. Such a value holds no
+ * cycle, only the repeats checked here, and is far below the copy limit.
+ * Undefined for any other value, which takes the full copy. With
+ * `checkFresh` (see `cloneStored`), sets `copiedFresh`.
+ */
+function copySmall(value: object, checkFresh: boolean): object | undefined {
+    if (!Array.isArray(value)) {
+        const copy = copyLeaf(value);
+        if (copy !== undefined && checkFresh) copiedFresh = locationNodes.get(value) === undefined;
+        return copy;
+    }
+    const length = value.length;
+    if (length > 8) return undefined;
+    const copy = new Array(length);
+    let fresh = checkFresh && locationNodes.get(value) === undefined;
+    for (let i = 0; i < length; i++) {
+        const item = value[i];
+        if (item === null || typeof item !== 'object') {
+            copy[i] = item;
+            continue;
+        }
+        if (toRaw(item) !== item) return undefined;
+        const leaf = copyLeaf(item);
+        if (leaf === undefined) return undefined;
+        copy[i] = leaf;
+        if (fresh) fresh = locationNodes.get(item) === undefined && value.indexOf(item) === i;
+    }
+    if (checkFresh) copiedFresh = fresh;
+    return copy;
+}
+
+/** The copy of `value` when it is a plain object whose own entries are all primitives; else undefined. */
+function copyLeaf(value: object): object | undefined {
+    if (Object.getPrototypeOf(value) !== Object.prototype) return undefined;
+    const copy: any = {};
+    for (const key in value) {
+        if (!hasOwn.call(value, key)) continue;
+        const entry = (value as any)[key];
+        if (entry !== null && typeof entry === 'object') return undefined;
+        copy[key] = entry;
+    }
+    if (Object.getOwnPropertySymbols(value).length !== 0) return undefined;
+    return copy;
 }
 
 /** A `CopyRun` no copy uses now, kept to save an allocation per copy. */

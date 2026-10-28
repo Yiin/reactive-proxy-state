@@ -88,6 +88,11 @@ export interface LocationNode {
    * children to give those places back.
    */
   lostLink: boolean;
+  /**
+   * The object had no own accessor property when its proxy first wrote to
+   * it (see `writesThroughSetter`); undefined before that write.
+   */
+  dataOnly: boolean | undefined;
 }
 
 const nodes = locationNodes;
@@ -123,10 +128,38 @@ export function ensureLocationNode(raw: object): LocationNode {
       evicted: undefined,
       relinked: 0,
       lostLink: false,
+      dataOnly: undefined,
     };
     nodes.set(raw, node);
   }
   return node;
+}
+
+/**
+ * Does a write to `prop` of `target` (raw; its node is `node`) call an own
+ * setter? Read from the property's descriptor, unless the object had no own
+ * accessor when its proxy first wrote to it: a write through a proxy adds
+ * only data properties, so then there is none to find, and no descriptor
+ * is made per write. An accessor added later (`Object.defineProperty`) is
+ * outside the supported input. An object with more than 64 own keys is not
+ * scanned and reads the descriptor at every write.
+ */
+export function writesThroughSetter(target: object, prop: PropertyKey, node: LocationNode): boolean {
+  let dataOnly = node.dataOnly;
+  if (dataOnly === undefined) dataOnly = node.dataOnly = hasNoOwnAccessor(target);
+  if (dataOnly) return false;
+  const descriptor = Reflect.getOwnPropertyDescriptor(target, prop);
+  return descriptor !== undefined && descriptor.set !== undefined;
+}
+
+function hasNoOwnAccessor(target: object): boolean {
+  const keys = Reflect.ownKeys(target);
+  if (keys.length > 64) return false;
+  for (let i = 0; i < keys.length; i++) {
+    const descriptor = Reflect.getOwnPropertyDescriptor(target, keys[i])!;
+    if (descriptor.get !== undefined || descriptor.set !== undefined) return false;
+  }
+  return true;
 }
 
 /**

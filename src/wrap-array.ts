@@ -18,6 +18,7 @@ import {
   locate,
   relinkArray,
   relinkReorder,
+  writesThroughSetter,
   copyPayloadAfter,
   copyPayloadReaching,
 } from "./location";
@@ -506,13 +507,13 @@ export function wrapArray<T extends any[]>(arr: T, node: LocationNode): T {
           ? target.slice(Number(value))
           : undefined;
 
-      const descriptor = Reflect.getOwnPropertyDescriptor(target, prop);
       const isNumericIndex =
         typeof prop === "number" ||
-        (typeof prop === "string" && !isNaN(parseInt(String(prop))));
+        arrayIndex(prop) >= 0 ||
+        (typeof prop === "string" && !isNaN(parseInt(prop)));
       // emit event and trigger effects only if the set was successful and wasn't intercepted by a setter
-      // (unless it's a direct numeric index set, which doesn't have a descriptor.set)
-      const emits = !descriptor || !descriptor.set || isNumericIndex;
+      // (unless it's a direct numeric index set, which doesn't have a descriptor.set; `length` never has one)
+      const emits = isNumericIndex || prop === "length" || !writesThroughSetter(target, prop, node);
       // direct length grow (e.g. arr.length = N) — emit ascending per-index sets
       // instead of a bare length event so the remote fills every index and never
       // ends up with a hole.

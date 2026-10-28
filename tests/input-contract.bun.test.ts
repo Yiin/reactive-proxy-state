@@ -334,6 +334,28 @@ describe("supported inputs keep the replica equal", () => {
     });
   });
 
+  test("an own setter makes its own writes at every write; a data object emits each write", async () => {
+    const raw: any = {
+      n: 0,
+      plain: { m: 0 },
+      set value(next: number) {
+        this.n = next;
+      },
+    };
+    const f = await fixture(raw, false);
+    f.state.value = 1;
+    f.state.value = 2;
+    f.state.plain.m = 1;
+    f.state.plain.m = 2;
+    expect(f.events.map((event) => `${event.path.join(".")}=${event.newValue}`)).toEqual([
+      "n=1",
+      "n=2",
+      "plain.m=1",
+      "plain.m=2",
+    ]);
+    expect(f.remote()).toEqual({ n: 2, plain: { m: 2 }, value: undefined });
+  });
+
   test("a frozen object refuses a write and keeps its replica", async () => {
     const raw = Object.freeze({ n: 1 });
     const f = await fixture(raw, false);
