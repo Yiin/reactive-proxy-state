@@ -4,6 +4,7 @@ import {
   LocationNode,
   adoptRoot,
   attachValue,
+  copyPayload,
   detachPlace,
   dispatch,
   ensureLocationNode,
@@ -12,6 +13,7 @@ import {
   locate,
   notePlace,
   restoreEvicted,
+  writeThenCopy,
 } from "./location";
 import { wrapArray } from "./wrap-array";
 import { wrapMap } from "./wrap-map";
@@ -199,24 +201,29 @@ function wrapObject<T extends object>(obj: T, node: LocationNode, options?: Reac
       )
         return true;
 
+      // an own setter makes its own writes; the set itself emits nothing
       const descriptor = Reflect.getOwnPropertyDescriptor(target, prop);
-      const result = Reflect.set(target, prop, value, receiver);
+      const emits = !descriptor || !descriptor.set;
+      // the write does not move `target`, so its paths are known before it
+      const located = emits ? locate(node, prop) : undefined;
+      const event: StateEvent | undefined = located && {
+        action: "set",
+        path: located.paths[0],
+        oldValue,
+        newValue: value,
+      };
+      // copies the payload, or throws, before the write
+      const result = copyPayload(event, target)
+        ? Reflect.set(target, prop, value, receiver)
+        : writeThenCopy(target, event!, () => Reflect.set(target, prop, value, receiver));
 
       // only emit and trigger if the set was successful and wasn't intercepted by a setter
-      if (result && (!descriptor || !descriptor.set)) {
+      if (result && emits) {
         // move places before anything can write again (emit may throw)
         if (isObject(oldValue)) detachPlace(oldValue, node, prop);
         if (isObject(value)) attachValue(value, node, prop);
 
-        const located = locate(node, prop);
-        if (located !== undefined) {
-          dispatch(located, {
-            action: "set",
-            path: located.paths[0],
-            oldValue,
-            newValue: value,
-          });
-        }
+        if (event !== undefined) dispatch(located!, event);
 
         // notify effects watching this property
         trigger(target, prop);
@@ -233,20 +240,21 @@ function wrapObject<T extends object>(obj: T, node: LocationNode, options?: Reac
     deleteProperty(target: T, prop: string | symbol): boolean {
       const oldValue = (target as any)[prop];
       const hadProperty = Object.prototype.hasOwnProperty.call(target, prop);
-      const result = Reflect.deleteProperty(target, prop);
+      const located = hadProperty ? locate(node, prop) : undefined;
+      const event: StateEvent | undefined = located && {
+        action: "delete",
+        path: located.paths[0],
+        oldValue,
+      };
+      const result = copyPayload(event, target)
+        ? Reflect.deleteProperty(target, prop)
+        : writeThenCopy(target, event!, () => Reflect.deleteProperty(target, prop));
 
       // only emit and trigger if the property existed and deletion was successful
       if (hadProperty && result) {
         if (isObject(oldValue)) detachPlace(oldValue, node, prop);
 
-        const located = locate(node, prop);
-        if (located !== undefined) {
-          dispatch(located, {
-            action: "delete",
-            path: located.paths[0],
-            oldValue,
-          });
-        }
+        if (event !== undefined) dispatch(located!, event);
 
         // notify effects watching this property
         trigger(target, prop);

@@ -3,11 +3,14 @@ import { wrapChild } from "./reactive";
 import {
   LocationNode,
   attachValue,
+  copyPayload,
   detachPlace,
   dispatch,
   evictDeep,
   locate,
+  writeThenCopy,
 } from "./location";
+import type { StateEvent } from "./types";
 import { track, trigger } from "./watch-effect";
 import { ReactiveFlags } from "./constants";
 
@@ -50,18 +53,20 @@ export function wrapSet<T>(set: Set<T>, node: LocationNode): Set<T> {
           const oldSize = target.size;
 
           if (!existed) {
-            target.add(value);
+            // the write does not move `target`, so its paths are known before it
+            const located = locate(node);
+            const event: StateEvent | undefined = located && {
+              action: "set-add",
+              path: located.paths[0],
+              value: value,
+            };
+            // copies the payload, or throws, before the write
+            if (copyPayload(event, target)) target.add(value);
+            else writeThenCopy(target, event!, () => target.add(value));
             const newSize = target.size;
 
             if (isObject(value)) attachValue(value, node, undefined);
-            const located = locate(node);
-            if (located !== undefined) {
-              dispatch(located, {
-                action: "set-add",
-                path: located.paths[0],
-                value: value,
-              });
-            }
+            if (event !== undefined) dispatch(located!, event);
             trigger(target, Symbol.iterator);
             if (oldSize !== newSize) {
               trigger(target, "size");
@@ -78,20 +83,21 @@ export function wrapSet<T>(set: Set<T>, node: LocationNode): Set<T> {
 
           if (existed) {
             const oldValue = value;
-            const result = target.delete(value);
+            const located = locate(node);
+            const event: StateEvent | undefined = located && {
+              action: "set-delete",
+              path: located.paths[0],
+              value: value,
+              oldValue: oldValue,
+            };
+            const result = copyPayload(event, target)
+              ? target.delete(value)
+              : writeThenCopy(target, event!, () => target.delete(value));
             const newSize = target.size;
 
             if (result) {
               if (isObject(value)) detachPlace(value, node, undefined);
-              const located = locate(node);
-              if (located !== undefined) {
-                dispatch(located, {
-                  action: "set-delete",
-                  path: located.paths[0],
-                  value: value,
-                  oldValue: oldValue,
-                });
-              }
+              if (event !== undefined) dispatch(located!, event);
               trigger(target, Symbol.iterator);
               if (oldSize !== newSize) {
                 trigger(target, "size");

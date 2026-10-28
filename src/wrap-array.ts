@@ -10,12 +10,14 @@ import { wrapChild } from "./reactive";
 import {
   LocationNode,
   attachValue,
+  copyPayload,
   detachPlace,
   dispatch,
   evictDeep,
   locate,
   relinkArray,
   relinkReorder,
+  writeThenCopy,
 } from "./location";
 import { track, trigger } from "./watch-effect";
 import { ReactiveFlags } from "./constants";
@@ -67,6 +69,14 @@ function unwrapItems(items: any[]): void {
   }
 }
 
+/** Put back the items a reorder (`sort`, `reverse`, `fill`, `copyWithin`) moved; it kept the length. */
+function restoreOrder(target: unknown[], before: readonly unknown[]): void {
+  for (let i = 0; i < before.length; i++) {
+    if (i in before) target[i] = before[i];
+    else delete target[i];
+  }
+}
+
 function evictRemoved(removed: readonly unknown[]): void {
   for (let i = 0; i < removed.length; i++) {
     if (isObject(removed[i])) evictDeep(removed[i]);
@@ -113,16 +123,23 @@ export function wrapArray<T extends any[]>(arr: T, node: LocationNode): T {
               }
             }
             if (changed) {
-              relinkReorder(node, target, before, prop === "fill" ? [args[0]] : undefined);
+              // the payload is the array itself, so it is copied after the
+              // change; a copy too large to make puts the order back
               const located = locate(node);
-              if (located !== undefined) {
-                dispatch(located, {
-                  action: "replace",
-                  path: located.paths[0],
-                  oldValue: before,
-                  newValue: target,
-                });
+              const event: StateEvent | undefined = located && {
+                action: "replace",
+                path: located.paths[0],
+                oldValue: before,
+                newValue: target,
+              };
+              try {
+                copyPayload(event);
+              } catch (error) {
+                restoreOrder(target, before);
+                throw error;
               }
+              relinkReorder(node, target, before, prop === "fill" ? [args[0]] : undefined);
+              if (event !== undefined) dispatch(located!, event);
               trigger(target, Symbol.iterator);
               evictRemoved(before);
             }
@@ -135,19 +152,20 @@ export function wrapArray<T extends any[]>(arr: T, node: LocationNode): T {
           methodCache[prop] = function (...items: any[]): number {
             unwrapItems(items);
             const oldLength = target.length;
-            const result = target.push(...items);
+            const located = items.length > 0 ? locate(node) : undefined;
+            const event: StateEvent | undefined = located && {
+              action: "array-push",
+              path: located.paths[0],
+              key: oldLength, // start index was the old length
+              items: items,
+            };
+            const result = copyPayload(event, target)
+              ? target.push(...items)
+              : writeThenCopy(target, event!, () => target.push(...items));
             const newLength = target.length;
             if (items.length > 0) {
               relinkArray(node, target, oldLength, undefined, items);
-              const located = locate(node);
-              if (located !== undefined) {
-                dispatch(located, {
-                  action: "array-push",
-                  path: located.paths[0],
-                  key: oldLength, // start index was the old length
-                  items: items,
-                });
-              }
+              if (event !== undefined) dispatch(located!, event);
               trigger(target, Symbol.iterator);
               if (oldLength !== newLength) {
                 trigger(target, "length");
@@ -163,18 +181,19 @@ export function wrapArray<T extends any[]>(arr: T, node: LocationNode): T {
             const oldLength = target.length;
             const poppedIndex = oldLength - 1;
             const oldValue = target[poppedIndex];
-            const result = target.pop();
+            const located = locate(node);
+            const event: StateEvent | undefined = located && {
+              action: "array-pop",
+              path: located.paths[0],
+              key: poppedIndex,
+              oldValue: oldValue,
+            };
+            const result = copyPayload(event, target)
+              ? target.pop()
+              : writeThenCopy(target, event!, () => target.pop());
             const newLength = target.length;
             if (isObject(oldValue)) detachPlace(oldValue, node, poppedIndex);
-            const located = locate(node);
-            if (located !== undefined) {
-              dispatch(located, {
-                action: "array-pop",
-                path: located.paths[0],
-                key: poppedIndex,
-                oldValue: oldValue,
-              });
-            }
+            if (event !== undefined) dispatch(located!, event);
             if (isObject(oldValue)) evictDeep(oldValue);
             trigger(target, Symbol.iterator);
             if (oldLength !== newLength) {
@@ -189,18 +208,19 @@ export function wrapArray<T extends any[]>(arr: T, node: LocationNode): T {
             if (target.length === 0) return undefined;
             const oldLength = target.length;
             const oldValue = target[0];
-            const result = target.shift();
+            const located = locate(node);
+            const event: StateEvent | undefined = located && {
+              action: "array-shift",
+              path: located.paths[0],
+              key: 0,
+              oldValue: oldValue,
+            };
+            const result = copyPayload(event, target)
+              ? target.shift()
+              : writeThenCopy(target, event!, () => target.shift());
             const newLength = target.length;
             relinkArray(node, target, 0, [oldValue]);
-            const located = locate(node);
-            if (located !== undefined) {
-              dispatch(located, {
-                action: "array-shift",
-                path: located.paths[0],
-                key: 0,
-                oldValue: oldValue,
-              });
-            }
+            if (event !== undefined) dispatch(located!, event);
             if (isObject(oldValue)) evictDeep(oldValue);
             trigger(target, Symbol.iterator);
             if (oldLength !== newLength) {
@@ -214,19 +234,20 @@ export function wrapArray<T extends any[]>(arr: T, node: LocationNode): T {
           methodCache[prop] = function (...items: any[]): number {
             unwrapItems(items);
             const oldLength = target.length;
-            const result = target.unshift(...items);
+            const located = items.length > 0 ? locate(node) : undefined;
+            const event: StateEvent | undefined = located && {
+              action: "array-unshift",
+              path: located.paths[0],
+              key: 0,
+              items: items,
+            };
+            const result = copyPayload(event, target)
+              ? target.unshift(...items)
+              : writeThenCopy(target, event!, () => target.unshift(...items));
             const newLength = target.length;
             if (items.length > 0) {
               relinkArray(node, target, 0, undefined, items);
-              const located = locate(node);
-              if (located !== undefined) {
-                dispatch(located, {
-                  action: "array-unshift",
-                  path: located.paths[0],
-                  key: 0,
-                  items: items,
-                });
-              }
+              if (event !== undefined) dispatch(located!, event);
               trigger(target, Symbol.iterator);
               if (oldLength !== newLength) {
                 trigger(target, "length");
@@ -251,22 +272,25 @@ export function wrapArray<T extends any[]>(arr: T, node: LocationNode): T {
             const items = args.length > 2 ? args.slice(2) : [];
             unwrapItems(items);
 
-            const deletedItems = target.splice(actualStart, actualDeleteCount, ...items);
+            const changes = actualDeleteCount > 0 || items.length > 0;
+            const located = changes ? locate(node) : undefined;
+            const event: StateEvent | undefined = located && {
+              action: "array-splice",
+              path: located.paths[0],
+              key: actualStart,
+              deleteCount: actualDeleteCount,
+              items: items.length > 0 ? items : undefined,
+              oldValues:
+                actualDeleteCount > 0 ? target.slice(actualStart, actualStart + actualDeleteCount) : undefined,
+            };
+            const deletedItems = copyPayload(event, target)
+              ? target.splice(actualStart, actualDeleteCount, ...items)
+              : writeThenCopy(target, event!, () => target.splice(actualStart, actualDeleteCount, ...items));
             const newLength = target.length;
 
-            if (actualDeleteCount > 0 || items.length > 0) {
+            if (changes) {
               relinkArray(node, target, actualStart, deletedItems, items);
-              const located = locate(node);
-              if (located !== undefined) {
-                dispatch(located, {
-                  action: "array-splice",
-                  path: located.paths[0],
-                  key: actualStart,
-                  deleteCount: actualDeleteCount,
-                  items: items.length > 0 ? items : undefined,
-                  oldValues: deletedItems.length > 0 ? deletedItems : undefined,
-                });
-              }
+              if (event !== undefined) dispatch(located!, event);
               evictRemoved(deletedItems);
               trigger(target, Symbol.iterator);
               if (oldLength !== newLength) {
@@ -383,15 +407,29 @@ export function wrapArray<T extends any[]>(arr: T, node: LocationNode): T {
           : undefined;
 
       const descriptor = Reflect.getOwnPropertyDescriptor(target, prop);
-      const result = Reflect.set(target, prop, value, receiver);
-
       const isNumericIndex =
         typeof prop === "number" ||
         (typeof prop === "string" && !isNaN(parseInt(String(prop))));
-
       // emit event and trigger effects only if the set was successful and wasn't intercepted by a setter
       // (unless it's a direct numeric index set, which doesn't have a descriptor.set)
-      if (result && (!descriptor || !descriptor.set || isNumericIndex)) {
+      const emits = !descriptor || !descriptor.set || isNumericIndex;
+      // direct length grow (e.g. arr.length = N) — emit ascending per-index sets
+      // instead of a bare length event so the remote fills every index and never
+      // ends up with a hole.
+      const grows = prop === "length" && Number(value) > Number(oldValue);
+
+      // the write does not move `target`, so its paths are known before it
+      const located = emits ? (grows ? locate(node) : locate(node, prop)) : undefined;
+      const event: StateEvent | undefined =
+        located === undefined || grows
+          ? undefined
+          : { action: "set", path: located.paths[0], oldValue, newValue: value };
+      // copies the payload, or throws, before the write
+      const result = copyPayload(event, target)
+        ? Reflect.set(target, prop, value, receiver)
+        : writeThenCopy(target, event!, () => Reflect.set(target, prop, value, receiver));
+
+      if (result && emits) {
         // move places before anything can write again (emit may throw)
         if (truncated !== undefined) {
           relinkArray(node, target, target.length, truncated);
@@ -401,34 +439,18 @@ export function wrapArray<T extends any[]>(arr: T, node: LocationNode): T {
           if (isObject(value)) attachValue(value, node, key);
         }
 
-        if (
-          Array.isArray(target) &&
-          prop === "length" &&
-          Number(value) > Number(oldValue)
-        ) {
-          // direct length grow (e.g. arr.length = N) — emit ascending per-index sets
-          // instead of a bare length event so the remote fills every index and never
-          // ends up with a hole.
-          const oldLength = Number(oldValue);
-          const newLength = Number(value);
-          const located = locate(node);
+        if (grows) {
           if (located !== undefined) {
+            const oldLength = Number(oldValue);
+            const newLength = Number(value);
             for (let i = oldLength; i < newLength; i++) {
               const index = String(i);
               const paths = located.paths.map((path) => [...path, index]);
               dispatch({ root: located.root, paths }, { action: "set", path: paths[0], newValue: undefined });
             }
           }
-        } else {
-          const located = locate(node, prop);
-          if (located !== undefined) {
-            dispatch(located, {
-              action: "set",
-              path: located.paths[0],
-              oldValue,
-              newValue: value,
-            });
-          }
+        } else if (event !== undefined) {
+          dispatch(located!, event);
         }
 
         if (isObject(oldValue) && oldValue !== value) {
@@ -442,14 +464,15 @@ export function wrapArray<T extends any[]>(arr: T, node: LocationNode): T {
     deleteProperty(target: T, prop: string | symbol): boolean {
       const oldValue = (target as any)[prop];
       const hadProperty = Object.prototype.hasOwnProperty.call(target, prop);
-      const result = Reflect.deleteProperty(target, prop);
+      const located = hadProperty ? locate(node, prop) : undefined;
+      const event: StateEvent | undefined = located && { action: "delete", path: located.paths[0], oldValue };
+      const result = copyPayload(event, target)
+        ? Reflect.deleteProperty(target, prop)
+        : writeThenCopy(target, event!, () => Reflect.deleteProperty(target, prop));
 
       if (hadProperty && result) {
         if (isObject(oldValue)) detachPlace(oldValue, node, placeKey(prop));
-        const located = locate(node, prop);
-        if (located !== undefined) {
-          dispatch(located, { action: "delete", path: located.paths[0], oldValue });
-        }
+        if (event !== undefined) dispatch(located!, event);
         trigger(target, prop);
         if (isObject(oldValue)) evictDeep(oldValue);
       }

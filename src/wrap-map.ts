@@ -9,11 +9,14 @@ import { wrapChild, wrapUnplaced } from "./reactive";
 import {
   LocationNode,
   attachValue,
+  copyPayload,
   detachPlace,
   dispatch,
   evictDeep,
   locate,
+  writeThenCopy,
 } from "./location";
+import type { StateEvent } from "./types";
 import { track, trigger } from "./watch-effect";
 import { ReactiveFlags } from "./constants";
 
@@ -66,23 +69,25 @@ export function wrapMap<K, V>(map: Map<K, V>, node: LocationNode): Map<K, V> {
           )
             return receiver;
 
-          target.set(key, value);
+          // the write does not move `target`, so its paths are known before it
+          const located = locate(node);
+          const event: StateEvent | undefined = located && {
+            action: "map-set",
+            path: located.paths[0],
+            key,
+            oldValue,
+            newValue: value,
+          };
+          // copies the payload, or throws, before the write
+          if (copyPayload(event, target)) target.set(key, value);
+          else writeThenCopy(target, event!, () => target.set(key, value));
           const newSize = target.size;
 
           // move places before anything can write again (emit may throw)
           if (isObject(oldValue)) detachPlace(oldValue, node, key);
           if (isObject(value)) attachValue(value, node, key);
 
-          const located = locate(node);
-          if (located !== undefined) {
-            dispatch(located, {
-              action: "map-set",
-              path: located.paths[0],
-              key,
-              oldValue,
-              newValue: value,
-            });
-          }
+          if (event !== undefined) dispatch(located!, event);
 
           if (!existed) {
             trigger(target, Symbol.iterator);
@@ -106,21 +111,22 @@ export function wrapMap<K, V>(map: Map<K, V>, node: LocationNode): Map<K, V> {
           const oldValue = target.get(key);
           const oldSize = target.size;
 
-          const result = target.delete(key);
+          const located = locate(node);
+          const event: StateEvent | undefined = located && {
+            action: "map-delete",
+            path: located.paths[0],
+            key,
+            oldValue,
+          };
+          const result = copyPayload(event, target)
+            ? target.delete(key)
+            : writeThenCopy(target, event!, () => target.delete(key));
           const newSize = target.size;
 
           if (result) {
             if (isObject(oldValue)) detachPlace(oldValue, node, key);
 
-            const located = locate(node);
-            if (located !== undefined) {
-              dispatch(located, {
-                action: "map-delete",
-                path: located.paths[0],
-                key,
-                oldValue,
-              });
-            }
+            if (event !== undefined) dispatch(located!, event);
 
             trigger(target, Symbol.iterator);
             if (oldSize !== newSize) {

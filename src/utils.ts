@@ -316,12 +316,37 @@ const SNAPSHOT_CHECK_AFTER = SNAPSHOT_SHARED_COPY_LIMIT + 1;
  * `SNAPSHOT_SHARED_COPY_LIMIT` extra copies of shared objects.
  */
 export function cloneTree<T>(value: T): T {
+    return copyTree(value, undefined) as T;
+}
+
+/** What `cloneTreeUnless` returns for a value that reaches the object it names. */
+export const REACHES = Symbol('reaches');
+
+/**
+ * `cloneTree(value)`, or `REACHES` as soon as the copy (or its measure)
+ * meets `guard`. A `SnapshotLimitError` thrown first is measured on objects
+ * other than `guard`.
+ */
+export function cloneTreeUnless<T>(value: T, guard: object): T | typeof REACHES {
+    try {
+        return copyTree(value, guard) as T;
+    } catch (error) {
+        if (error === reachedGuard) return REACHES;
+        throw error;
+    }
+}
+
+const reachedGuard = new Error('reactive-proxy-state: internal, a copy reached its guard');
+
+function copyTree(value: unknown, guard: object | undefined): unknown {
     if (value === null || typeof value !== 'object') return value;
     const base = cloneAncestors.length;
     const outerTop = cloneTop;
     const outerCountdown = cloneCountdown;
+    const outerGuard = cloneGuard;
     cloneTop = value;
     cloneCountdown = SNAPSHOT_CHECK_AFTER;
+    cloneGuard = guard;
     try {
         return cloneTreeInto(value, base);
     } finally {
@@ -329,13 +354,16 @@ export function cloneTree<T>(value: T): T {
         cloneCopies.length = base;
         cloneTop = outerTop;
         cloneCountdown = outerCountdown;
+        cloneGuard = outerGuard;
     }
 }
 
-// The value the current `cloneTree` call copies, and how many copies it may
-// still make before it measures that value (see `checkSharedCopies`).
+// The value the current `cloneTree` call copies, how many copies it may
+// still make before it measures that value (see `checkSharedCopies`), and
+// the object it stops at (see `cloneTreeUnless`).
 let cloneTop: object | undefined;
 let cloneCountdown = 0;
+let cloneGuard: object | undefined;
 
 /** Count one copy; at `SNAPSHOT_CHECK_AFTER` copies, measure the whole value once. */
 function countCopy(): void {
@@ -351,7 +379,7 @@ interface CopyWalk {
     /**
      * Each object met: `-(depth + 2)` while it is on the path from the top,
      * then the copies its subtree makes, or -1 when that count depends on
-     * the path (a cycle below it returns above it).
+     * the path (a cycle below it returns to it or above it).
      */
     marks: Map<object, number>;
 }
@@ -360,9 +388,9 @@ interface CopyWalk {
  * Throws when a tree copy of `value` (made like `cloneTreeInto`) would make
  * more than `SNAPSHOT_SHARED_COPY_LIMIT` copies beyond the first copy of each
  * object. The copies of a shared subtree are counted once and remembered, so
- * the walk is linear in the distinct objects. A subtree with a cycle to an
- * object above it is counted again at each place, and the walk stops as soon
- * as the limit is passed.
+ * the walk is linear in the distinct objects. An object on a cycle is counted
+ * again at each place, with the ancestors it has there; every such visit is
+ * an extra copy, and the walk stops as soon as the limit is passed.
  */
 function checkSharedCopies(value: object): void {
     const walk: CopyWalk = { extra: 0, low: Infinity, marks: new Map() };
@@ -382,6 +410,7 @@ function walkEntry(entry: unknown, depth: number, walk: CopyWalk): number {
 /** The copies a tree copy of `value` makes; sets `walk.low`. */
 function walkCopies(value: object, depth: number, walk: CopyWalk): number {
     const identity = toRaw(value) as object;
+    if (identity === cloneGuard) throw reachedGuard;
     const marks = walk.marks;
     const mark = marks.get(identity);
     if (mark !== undefined) {
@@ -440,8 +469,11 @@ function walkCopies(value: object, depth: number, walk: CopyWalk): number {
             if (walk.low < low) low = walk.low;
         }
     }
-    // remember the count only when no cycle below returns above this object
-    marks.set(identity, low >= depth ? size : -1);
+    // Remember the count only when no cycle below returns to this object or
+    // above it. Such an object is on no cycle, so no object below it can be
+    // an ancestor of another place of it, and its count is the same at every
+    // place. On a cycle, the count depends on which objects are ancestors there.
+    marks.set(identity, low > depth ? size : -1);
     walk.low = low;
     return size;
 }
@@ -462,6 +494,7 @@ function cloneChild(value: any, base: number): any {
 function cloneTreeInto(value: any, base: number): any {
     // identity from the raw target, reads through `value` (see deepClone)
     const identity = toRaw(value) as object;
+    if (identity === cloneGuard) throw reachedGuard;
     for (let i = cloneAncestors.length - 1; i >= base; i--) {
         if (cloneAncestors[i] === identity) return cloneCopies[i];
     }

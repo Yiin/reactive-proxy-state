@@ -1,6 +1,6 @@
 import { ReactiveFlags } from "./constants";
 import type { EmitFunction, Path, StateEvent } from "./types";
-import { cloneTree, globalSeen, wrapperCache, proxyStats, toRaw } from "./utils";
+import { REACHES, cloneTree, cloneTreeUnless, globalSeen, wrapperCache, proxyStats, toRaw } from "./utils";
 
 /**
  * Where each wrapped object sits in its state tree.
@@ -294,43 +294,106 @@ export function isAttached(node: LocationNode): boolean {
 }
 
 /**
- * Send `event` to every path of `target`. `event` carries live values; each
- * path gets its own deep copy of them, made now, so a later write cannot
- * change an event that waits in a queue, and two remote places never share
- * one object. The first path gets `event` itself.
+ * Send `event` to every path of `target`. Its payload holds copies already
+ * (`copyPayload`, made before the write). Every further path gets copies
+ * of those copies, all made before the first emit, so a listener that
+ * changes a payload cannot change another, and two remote places never
+ * share one object. The first path gets `event` itself.
  */
 export function dispatch(target: Target, event: StateEvent): void {
   const { root, paths } = target;
   const emit = root.emit!;
-  const live = paths.length > 1 ? { ...event } : event;
-  for (let i = 0; i < paths.length; i++) {
-    const copy = i === 0 ? event : { ...live };
-    copy.path = paths[i];
-    snapshotPayload(copy, live);
-    emit(copy);
+  if (paths.length === 1) {
+    emit(event);
+    return;
   }
+  const events: StateEvent[] = [event];
+  for (let i = 1; i < paths.length; i++) {
+    const copy = { ...event, path: paths[i] };
+    copyPayload(copy);
+    events.push(copy);
+  }
+  for (let i = 0; i < events.length; i++) emit(events[i]);
 }
 
 /**
- * Replace the payload fields of `event` with deep copies of the ones in
- * `live`. `items` is an array the wrapper made for this event and uses no
- * more, so when `event` is `live` its objects are copied in place.
+ * Replace the payload fields of `event` (live values) with deep copies.
+ * `items` and `oldValues` are arrays the wrapper made for this event; each is
+ * one payload, copied whole, with one copy limit. A payload too large to copy
+ * throws a `SnapshotLimitError` and leaves `event` as it was.
+ *
+ * With `guard`, the copies are made before the write that changes `guard`:
+ * a payload that reaches `guard` would be copied as it is before that write,
+ * so then nothing is copied and the result is false (see `writeThenCopy`).
  */
-function snapshotPayload(event: StateEvent, live: StateEvent): void {
-  if (isObject(live.newValue)) event.newValue = cloneTree(live.newValue);
-  if (isObject(live.oldValue)) event.oldValue = cloneTree(live.oldValue);
-  if (isObject(live.value)) event.value = cloneTree(live.value);
-  const items = live.items;
-  if (items !== undefined) {
-    if (event === live) {
-      for (let i = 0; i < items.length; i++) {
-        if (isObject(items[i])) items[i] = cloneTree(items[i]);
-      }
-    } else {
-      event.items = cloneTree(items);
-    }
+export function copyPayload(event: StateEvent | undefined, guard?: object): boolean {
+  if (event === undefined) return true;
+  const { newValue, oldValue, value, items, oldValues } = event;
+  const newCopy = isObject(newValue) ? copyOf(newValue, guard) : newValue;
+  if (newCopy === REACHES) return false;
+  const oldCopy = isObject(oldValue) ? copyOf(oldValue, guard) : oldValue;
+  if (oldCopy === REACHES) return false;
+  const valueCopy = isObject(value) ? copyOf(value, guard) : value;
+  if (valueCopy === REACHES) return false;
+  const itemsCopy = items !== undefined ? copyOf(items, guard) : items;
+  if (itemsCopy === REACHES) return false;
+  const oldValuesCopy = oldValues !== undefined ? copyOf(oldValues, guard) : oldValues;
+  if (oldValuesCopy === REACHES) return false;
+  if (isObject(newValue)) event.newValue = newCopy;
+  if (isObject(oldValue)) event.oldValue = oldCopy;
+  if (isObject(value)) event.value = valueCopy;
+  if (items !== undefined) event.items = itemsCopy as any[];
+  if (oldValues !== undefined) event.oldValues = oldValuesCopy as any[];
+  return true;
+}
+
+function copyOf(value: object, guard: object | undefined): unknown {
+  return guard === undefined ? cloneTree(value) : cloneTreeUnless(value, guard);
+}
+
+/**
+ * Make `write`, a change of `container` alone, then copy the payload of
+ * `event`: for a payload that reaches `container` (a cycle through it, or
+ * the container itself, as a reorder sends), which `copyPayload` could not
+ * copy before the write. A payload too large to copy puts the container's
+ * contents back and throws, so the write changes nothing.
+ */
+export function writeThenCopy<R>(container: object, event: StateEvent, write: () => R): R {
+  const restore = contentsRestorer(container);
+  const result = write();
+  try {
+    copyPayload(event);
+  } catch (error) {
+    restore();
+    throw error;
   }
-  if (live.oldValues !== undefined) event.oldValues = cloneTree(live.oldValues);
+  return result;
+}
+
+/** A function that puts back what `container` (raw) holds now: its own properties, or its entries. */
+function contentsRestorer(container: object): () => void {
+  if (container instanceof Map) {
+    const entries = [...container];
+    return () => {
+      container.clear();
+      for (const [key, entry] of entries) container.set(key, entry);
+    };
+  }
+  if (container instanceof Set) {
+    const members = [...container];
+    return () => {
+      container.clear();
+      for (const member of members) container.add(member);
+    };
+  }
+  const keys = Reflect.ownKeys(container);
+  const descriptors = keys.map((key) => Reflect.getOwnPropertyDescriptor(container, key)!);
+  return () => {
+    if (Array.isArray(container)) container.length = 0;
+    const current = Reflect.ownKeys(container);
+    for (let i = 0; i < current.length; i++) Reflect.deleteProperty(container, current[i]);
+    for (let i = 0; i < keys.length; i++) Reflect.defineProperty(container, keys[i], descriptors[i]);
+  };
 }
 
 /** Add a place unless it is already known. Returns true when it was new. */
