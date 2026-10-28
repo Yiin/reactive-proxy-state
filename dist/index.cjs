@@ -3271,7 +3271,16 @@ function dispatch(target, event) {
   const events = [event];
   for (let i = 1;i < paths.length; i++) {
     const copy = { ...event, path: paths[i] };
-    copyPayload(copy);
+    if (isObject2(event.newValue))
+      copy.newValue = cloneTree(event.newValue);
+    if (isObject2(event.oldValue))
+      copy.oldValue = cloneTree(event.oldValue);
+    if (isObject2(event.value))
+      copy.value = cloneTree(event.value);
+    if (event.items !== undefined)
+      copy.items = cloneTree(event.items);
+    if (event.oldValues !== undefined)
+      copy.oldValues = cloneTree(event.oldValues);
     events.push(copy);
   }
   for (let i = 0;i < events.length; i++)
@@ -3290,10 +3299,10 @@ function copyPayload(event, guard) {
   const valueCopy = isObject2(value) ? copyOf(value, guard) : value;
   if (valueCopy === REACHES)
     return false;
-  const itemsCopy = items !== undefined ? copyOf(items, guard) : items;
+  const itemsCopy = items !== undefined && holdsObject(items) ? copyOf(items, guard) : items;
   if (itemsCopy === REACHES)
     return false;
-  const oldValuesCopy = oldValues !== undefined ? copyOf(oldValues, guard) : oldValues;
+  const oldValuesCopy = oldValues !== undefined && holdsObject(oldValues) ? copyOf(oldValues, guard) : oldValues;
   if (oldValuesCopy === REACHES)
     return false;
   if (isObject2(newValue))
@@ -3308,19 +3317,22 @@ function copyPayload(event, guard) {
     event.oldValues = oldValuesCopy;
   return true;
 }
+function holdsObject(values) {
+  for (let i = 0;i < values.length; i++)
+    if (isObject2(values[i]))
+      return true;
+  return false;
+}
 function copyOf(value, guard) {
   return guard === undefined ? cloneTree(value) : cloneTreeUnless(value, guard);
 }
-function writeThenCopy(container, event, write) {
-  const restore = contentsRestorer(container);
-  const result = write();
+function copyAfterWrite(event, restore) {
   try {
     copyPayload(event);
   } catch (error) {
     restore();
     throw error;
   }
-  return result;
 }
 function contentsRestorer(container) {
   if (container instanceof Map) {
@@ -3988,7 +4000,10 @@ function wrapArray(arr, node) {
               key: oldLength,
               items
             };
-            const result = copyPayload(event, target) ? target.push(...items) : writeThenCopy(target, event, () => target.push(...items));
+            const restore = copyPayload(event, target) ? undefined : contentsRestorer(target);
+            const result = target.push(...items);
+            if (restore !== undefined)
+              copyAfterWrite(event, restore);
             const newLength = target.length;
             if (items.length > 0) {
               relinkArray(node, target, oldLength, undefined, items);
@@ -4017,7 +4032,10 @@ function wrapArray(arr, node) {
               key: poppedIndex,
               oldValue
             };
-            const result = copyPayload(event, target) ? target.pop() : writeThenCopy(target, event, () => target.pop());
+            const restore = copyPayload(event, target) ? undefined : contentsRestorer(target);
+            const result = target.pop();
+            if (restore !== undefined)
+              copyAfterWrite(event, restore);
             const newLength = target.length;
             if (isObject3(oldValue))
               detachPlace(oldValue, node, poppedIndex);
@@ -4046,7 +4064,10 @@ function wrapArray(arr, node) {
               key: 0,
               oldValue
             };
-            const result = copyPayload(event, target) ? target.shift() : writeThenCopy(target, event, () => target.shift());
+            const restore = copyPayload(event, target) ? undefined : contentsRestorer(target);
+            const result = target.shift();
+            if (restore !== undefined)
+              copyAfterWrite(event, restore);
             const newLength = target.length;
             relinkArray(node, target, 0, [oldValue]);
             if (event !== undefined)
@@ -4072,7 +4093,10 @@ function wrapArray(arr, node) {
               key: 0,
               items
             };
-            const result = copyPayload(event, target) ? target.unshift(...items) : writeThenCopy(target, event, () => target.unshift(...items));
+            const restore = copyPayload(event, target) ? undefined : contentsRestorer(target);
+            const result = target.unshift(...items);
+            if (restore !== undefined)
+              copyAfterWrite(event, restore);
             const newLength = target.length;
             if (items.length > 0) {
               relinkArray(node, target, 0, undefined, items);
@@ -4104,7 +4128,10 @@ function wrapArray(arr, node) {
               items: items.length > 0 ? items : undefined,
               oldValues: actualDeleteCount > 0 ? target.slice(actualStart, actualStart + actualDeleteCount) : undefined
             };
-            const deletedItems = copyPayload(event, target) ? target.splice(actualStart, actualDeleteCount, ...items) : writeThenCopy(target, event, () => target.splice(actualStart, actualDeleteCount, ...items));
+            const restore = copyPayload(event, target) ? undefined : contentsRestorer(target);
+            const deletedItems = target.splice(actualStart, actualDeleteCount, ...items);
+            if (restore !== undefined)
+              copyAfterWrite(event, restore);
             const newLength = target.length;
             if (changes) {
               relinkArray(node, target, actualStart, deletedItems, items);
@@ -4207,7 +4234,10 @@ function wrapArray(arr, node) {
       const grows = prop === "length" && Number(value) > Number(oldValue);
       const located = emits ? grows ? locate(node) : locate(node, prop) : undefined;
       const event = located === undefined || grows ? undefined : { action: "set", path: located.paths[0], oldValue, newValue: value };
-      const result = copyPayload(event, target) ? Reflect.set(target, prop, value, receiver) : writeThenCopy(target, event, () => Reflect.set(target, prop, value, receiver));
+      const restore = copyPayload(event, target) ? undefined : contentsRestorer(target);
+      const result = Reflect.set(target, prop, value, receiver);
+      if (restore !== undefined)
+        copyAfterWrite(event, restore);
       if (result && emits) {
         if (truncated !== undefined) {
           relinkArray(node, target, target.length, truncated);
@@ -4245,7 +4275,10 @@ function wrapArray(arr, node) {
       const hadProperty = Object.prototype.hasOwnProperty.call(target, prop);
       const located = hadProperty ? locate(node, prop) : undefined;
       const event = located && { action: "delete", path: located.paths[0], oldValue };
-      const result = copyPayload(event, target) ? Reflect.deleteProperty(target, prop) : writeThenCopy(target, event, () => Reflect.deleteProperty(target, prop));
+      const restore = copyPayload(event, target) ? undefined : contentsRestorer(target);
+      const result = Reflect.deleteProperty(target, prop);
+      if (restore !== undefined)
+        copyAfterWrite(event, restore);
       if (hadProperty && result) {
         if (isObject3(oldValue))
           detachPlace(oldValue, node, placeKey(prop));
@@ -4308,10 +4341,10 @@ function wrapMap(map, node) {
             oldValue,
             newValue: value2
           };
-          if (copyPayload(event, target))
-            target.set(key, value2);
-          else
-            writeThenCopy(target, event, () => target.set(key, value2));
+          const restore = copyPayload(event, target) ? undefined : contentsRestorer(target);
+          target.set(key, value2);
+          if (restore !== undefined)
+            copyAfterWrite(event, restore);
           const newSize = target.size;
           if (isObject4(oldValue))
             detachPlace(oldValue, node, key);
@@ -4347,7 +4380,10 @@ function wrapMap(map, node) {
             key,
             oldValue
           };
-          const result = copyPayload(event, target) ? target.delete(key) : writeThenCopy(target, event, () => target.delete(key));
+          const restore = copyPayload(event, target) ? undefined : contentsRestorer(target);
+          const result = target.delete(key);
+          if (restore !== undefined)
+            copyAfterWrite(event, restore);
           const newSize = target.size;
           if (result) {
             if (isObject4(oldValue))
@@ -4500,10 +4536,10 @@ function wrapSet(set, node) {
               path: located.paths[0],
               value: value2
             };
-            if (copyPayload(event, target))
-              target.add(value2);
-            else
-              writeThenCopy(target, event, () => target.add(value2));
+            const restore = copyPayload(event, target) ? undefined : contentsRestorer(target);
+            target.add(value2);
+            if (restore !== undefined)
+              copyAfterWrite(event, restore);
             const newSize = target.size;
             if (isObject5(value2))
               attachValue(value2, node, undefined);
@@ -4531,7 +4567,10 @@ function wrapSet(set, node) {
               value: value2,
               oldValue
             };
-            const result = copyPayload(event, target) ? target.delete(value2) : writeThenCopy(target, event, () => target.delete(value2));
+            const restore = copyPayload(event, target) ? undefined : contentsRestorer(target);
+            const result = target.delete(value2);
+            if (restore !== undefined)
+              copyAfterWrite(event, restore);
             const newSize = target.size;
             if (result) {
               if (isObject5(value2))
@@ -4762,7 +4801,10 @@ function wrapObject(obj, node, options) {
         oldValue,
         newValue: value
       };
-      const result = copyPayload(event, target) ? Reflect.set(target, prop, value, receiver) : writeThenCopy(target, event, () => Reflect.set(target, prop, value, receiver));
+      const restore = copyPayload(event, target) ? undefined : contentsRestorer(target);
+      const result = Reflect.set(target, prop, value, receiver);
+      if (restore !== undefined)
+        copyAfterWrite(event, restore);
       if (result && emits) {
         if (isObject6(oldValue))
           detachPlace(oldValue, node, prop);
@@ -4786,7 +4828,10 @@ function wrapObject(obj, node, options) {
         path: located.paths[0],
         oldValue
       };
-      const result = copyPayload(event, target) ? Reflect.deleteProperty(target, prop) : writeThenCopy(target, event, () => Reflect.deleteProperty(target, prop));
+      const restore = copyPayload(event, target) ? undefined : contentsRestorer(target);
+      const result = Reflect.deleteProperty(target, prop);
+      if (restore !== undefined)
+        copyAfterWrite(event, restore);
       if (hadProperty && result) {
         if (isObject6(oldValue))
           detachPlace(oldValue, node, prop);

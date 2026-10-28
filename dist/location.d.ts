@@ -92,23 +92,30 @@ export declare function isAttached(node: LocationNode): boolean;
 export declare function dispatch(target: Target, event: StateEvent): void;
 /**
  * Replace the payload fields of `event` (live values) with deep copies.
- * `items` and `oldValues` are arrays the wrapper made for this event; each is
- * one payload, copied whole, with one copy limit. A payload too large to copy
- * throws a `SnapshotLimitError` and leaves `event` as it was.
+ * `items` and `oldValues` are arrays the wrapper made for this event and
+ * only reads; each is one payload, copied whole, with one copy limit, and
+ * kept as it is when it holds no object. A payload too large to copy throws
+ * a `SnapshotLimitError` and leaves `event` as it was.
  *
  * With `guard`, the copies are made before the write that changes `guard`:
  * a payload that reaches `guard` would be copied as it is before that write,
- * so then nothing is copied and the result is false (see `writeThenCopy`).
+ * so then nothing is copied and the result is false (see `copyAfterWrite`).
  */
 export declare function copyPayload(event: StateEvent | undefined, guard?: object): boolean;
 /**
- * Make `write`, a change of `container` alone, then copy the payload of
- * `event`: for a payload that reaches `container` (a cycle through it, or
- * the container itself, as a reorder sends), which `copyPayload` could not
- * copy before the write. A payload too large to copy puts the container's
- * contents back and throws, so the write changes nothing.
+ * Copy the payload of `event` right after a write that `copyPayload` could
+ * not copy for before it: a payload that reaches the written container (a
+ * cycle through it, or the container itself, as a reorder sends). `restore`
+ * (from `contentsRestorer`, taken before the write) puts the container's
+ * contents back when the payload is too large to copy, so the write changes
+ * nothing, and the error is thrown.
+ *
+ * Call sites take `restore` and write inline, without a closure: a closure
+ * over a trap's arguments costs every call of the trap.
  */
-export declare function writeThenCopy<R>(container: object, event: StateEvent, write: () => R): R;
+export declare function copyAfterWrite(event: StateEvent, restore: () => void): void;
+/** A function that puts back what `container` (raw) holds now: its own properties, or its entries. */
+export declare function contentsRestorer(container: object): () => void;
 /**
  * Record that a proxy read found `raw` at `parent[key]`. Called on every read
  * of a nested object, so the common case (place already known) is one compare.
