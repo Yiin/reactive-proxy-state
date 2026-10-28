@@ -60,9 +60,24 @@ export interface LocationNode {
      * children to give those places back.
      */
     lostLink: boolean;
+    /**
+     * The object had no own accessor property when its proxy first wrote to
+     * it (see `writesThroughSetter`); undefined before that write.
+     */
+    dataOnly: boolean | undefined;
 }
 export declare function getLocationNode(raw: object): LocationNode | undefined;
 export declare function ensureLocationNode(raw: object): LocationNode;
+/**
+ * Does a write to `prop` of `target` (raw; its node is `node`) call an own
+ * setter? Read from the property's descriptor, unless the object had no own
+ * accessor when its proxy first wrote to it: a write through a proxy adds
+ * only data properties, so then there is none to find, and no descriptor
+ * is made per write. An accessor added later (`Object.defineProperty`) is
+ * outside the supported input. An object with more than 64 own keys is not
+ * scanned and reads the descriptor at every write.
+ */
+export declare function writesThroughSetter(target: object, prop: PropertyKey, node: LocationNode): boolean;
 /** Where an event goes: one root and every path of the object under it. */
 export interface Target {
     root: LocationRoot;
@@ -90,6 +105,20 @@ export declare function isAttached(node: LocationNode): boolean;
  * remote places never share one object. The first path gets `event` itself.
  */
 export declare function dispatch(target: Target, event: StateEvent): void;
+/** What `copyPayload` did. */
+export declare const enum Copied {
+    /** Nothing: the payload reaches its container (see `copyPayloadReaching`). */
+    Reaches = 0,
+    /** Copied the payload. */
+    Done = 1,
+    /**
+     * Copied the payload, and the values it stores (`newValue`, `value`,
+     * `items`) are fresh (see `cloneStored`): the store's place walk would
+     * find nothing in them, so `attachValue` and `relinkArray` record them in
+     * `freshStored` instead of walking them.
+     */
+    Fresh = 2
+}
 /**
  * Replace the payload fields of `event` (live values) with deep copies, made
  * before the write that changes `container` (raw). `items` and `oldValues`
@@ -99,11 +128,19 @@ export declare function dispatch(target: Target, event: StateEvent): void;
  * and leaves `event` as it was, so the write is never made.
  *
  * A payload that reaches `container` would be copied as `container` is
- * before the write. Then nothing is copied and the result is false: the
- * caller makes the write on `shallowCopy(container)` and copies with
- * `copyPayloadAfter`, still before the write.
+ * before the write. Then nothing is copied and the result is
+ * `Copied.Reaches`: the caller makes the write on `shallowCopy(container)`
+ * and copies with `copyPayloadReaching`, still before the write.
  */
-export declare function copyPayload(event: StateEvent | undefined, container: object): boolean;
+export declare function copyPayload(event: StateEvent | undefined, container: object): Copied;
+/**
+ * `copyPayloadAfter` for a write that `copyPayload` refused because its
+ * payload reaches `container`. A getter in that payload would be read
+ * before the write, and could give another value after it, so an accessor
+ * property in it is refused (an `UnsupportedStateError`) without being
+ * read. `after` comes from `shallowCopy`, which refuses the container's own.
+ */
+export declare function copyPayloadReaching(event: StateEvent, container: object, after: object): void;
 /**
  * Like `copyPayload`, for a payload that reaches `container`: `after` (a
  * `shallowCopy` of `container` with the write made on it) stands in for
@@ -117,7 +154,8 @@ export declare function copyPayloadAfter(event: StateEvent, container: object, a
  * and prototype: an array holds the same items, a map the same entries, a
  * set the same members, an object the same own enumerable properties (as
  * data). A write is made on it to copy a payload as it will be after that
- * write (see `copyPayloadAfter`).
+ * write (see `copyPayloadReaching`). An own enumerable accessor of an object
+ * is refused (an `UnsupportedStateError`) without being read.
  */
 export declare function shallowCopy(container: object): any;
 /**
@@ -132,8 +170,11 @@ export declare function setData(copy: object, key: PropertyKey, value: unknown):
 export declare function notePlace(node: LocationNode, parent: LocationNode, key: unknown): void;
 /** `parent[key]` no longer holds `value`. */
 export declare function detachPlace(value: object, parent: LocationNode, key: unknown): void;
-/** `parent[key]` now holds `value` (a raw object). */
-export declare function attachValue(value: object, parent: LocationNode, key: unknown): void;
+/**
+ * `parent[key]` now holds `value` (a raw object). A `fresh` value (its copy
+ * found it fresh, see `cloneStored`) has nothing to place.
+ */
+export declare function attachValue(value: object, parent: LocationNode, key: unknown, fresh: boolean): void;
 /**
  * A new root: give places to the objects in its initial value that need
  * them now, which are the aliases (an object at two places) and the
@@ -145,7 +186,7 @@ export declare function adoptRoot(node: LocationNode): void;
  * index `from` to the end get their current index, `removed` items lose
  * their place here, and `inserted` items (raw) join the tree.
  */
-export declare function relinkArray(arrayNode: LocationNode, array: readonly unknown[], from: number, removed?: readonly unknown[], inserted?: readonly unknown[]): void;
+export declare function relinkArray(arrayNode: LocationNode, array: readonly unknown[], from: number, removed?: readonly unknown[], inserted?: readonly unknown[], insertedFresh?: boolean): void;
 /**
  * After `sort`, `reverse`, `fill` or `copyWithin`: like `relinkArray` from
  * index 0, and an object without a node that now sits at two indexes (an

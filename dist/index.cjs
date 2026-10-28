@@ -2360,6 +2360,7 @@ __export(exports_src, {
   computed: () => computed,
   cleanupEffect: () => cleanupEffect,
   activeEffect: () => activeEffect,
+  UnsupportedStateError: () => UnsupportedStateError,
   SnapshotLimitError: () => SnapshotLimitError,
   SNAPSHOT_SHARED_COPY_LIMIT: () => SNAPSHOT_SHARED_COPY_LIMIT
 });
@@ -2400,6 +2401,7 @@ var pathCache = new WeakMap;
 var pathCacheSize = new WeakMap;
 var globalSeen = new WeakMap;
 var wrapperCache = new WeakMap;
+var locationNodes = new WeakMap;
 var proxyStats = {
   created: 0,
   arrays: 0,
@@ -2593,38 +2595,72 @@ class SnapshotLimitError extends RangeError {
     this.name = "SnapshotLimitError";
   }
 }
+
+class UnsupportedStateError extends TypeError {
+  constructor(problem) {
+    super(`reactive-proxy-state: ${problem}. Nothing was changed. See "Supported inputs" under ` + `"Synchronization Limits" in the README`);
+    this.name = "UnsupportedStateError";
+  }
+}
 var SNAPSHOT_CHECK_AFTER = SNAPSHOT_SHARED_COPY_LIMIT + 1;
 function cloneTree(value) {
-  return copyTree(value, undefined, undefined);
+  return copyTree(value, undefined, undefined, false);
 }
 var REACHES = Symbol("reaches");
 function cloneTreeUnless(value, container) {
+  return copyUnless(value, container, false);
+}
+function cloneStored(value, container) {
+  return copyUnless(value, container, true);
+}
+var copiedFresh = false;
+function copyUnless(value, container, checkFresh) {
   try {
-    return copyTree(value, container, undefined);
+    return copyTree(value, container, undefined, checkFresh);
   } catch (error) {
-    if (error === reachedContainer)
+    if (error === reachedContainer) {
+      copiedFresh = false;
       return REACHES;
+    }
     throw error;
   }
 }
 function cloneTreeAfter(value, container, contents) {
-  return copyTree(value, container, contents);
+  return copyTree(value, container, contents, false);
 }
 var reachedContainer = new Error("reactive-proxy-state: internal, a copy reached its container");
-function copyTree(value, container, contents) {
-  if (value === null || typeof value !== "object")
+function copyTree(value, container, contents, checkFresh) {
+  if (value === null || typeof value !== "object") {
+    if (checkFresh)
+      copiedFresh = true;
     return value;
+  }
+  const top = toRaw(value);
+  if (top === value && top !== container) {
+    const small = copySmall(value, checkFresh);
+    if (small !== undefined)
+      return small;
+  }
   const base = cloneAncestors.length;
   const outerTop = cloneTop;
   const outerCountdown = cloneCountdown;
   const outerContainer = cloneContainer;
   const outerContents = cloneContents;
-  cloneTop = value;
+  const outerFresh = cloneFresh;
+  const outerFirst = cloneFirst;
+  const outerSeen = cloneSeen;
+  cloneTop = top;
   cloneCountdown = SNAPSHOT_CHECK_AFTER;
   cloneContainer = container;
   cloneContents = contents;
+  cloneFresh = checkFresh && locationNodes.get(top) === undefined;
+  cloneFirst = undefined;
+  cloneSeen = undefined;
   try {
-    return cloneTreeInto(value, base);
+    const copy = cloneTreeInto(value, base);
+    if (checkFresh)
+      copiedFresh = cloneFresh;
+    return copy;
   } finally {
     cloneAncestors.length = base;
     cloneCopies.length = base;
@@ -2632,12 +2668,65 @@ function copyTree(value, container, contents) {
     cloneCountdown = outerCountdown;
     cloneContainer = outerContainer;
     cloneContents = outerContents;
+    cloneFresh = outerFresh;
+    cloneFirst = outerFirst;
+    cloneSeen = outerSeen;
   }
 }
 var cloneTop;
 var cloneCountdown = 0;
 var cloneContainer;
 var cloneContents;
+var cloneFresh = false;
+var cloneFirst;
+var cloneSeen;
+function copySmall(value, checkFresh) {
+  if (!Array.isArray(value)) {
+    const copy2 = copyLeaf(value);
+    if (copy2 !== undefined && checkFresh)
+      copiedFresh = locationNodes.get(value) === undefined;
+    return copy2;
+  }
+  const length = value.length;
+  if (length > 8)
+    return;
+  const copy = new Array(length);
+  let fresh = checkFresh && locationNodes.get(value) === undefined;
+  for (let i = 0;i < length; i++) {
+    const item = value[i];
+    if (item === null || typeof item !== "object") {
+      copy[i] = item;
+      continue;
+    }
+    if (toRaw(item) !== item)
+      return;
+    const leaf = copyLeaf(item);
+    if (leaf === undefined)
+      return;
+    copy[i] = leaf;
+    if (fresh)
+      fresh = locationNodes.get(item) === undefined && value.indexOf(item) === i;
+  }
+  if (checkFresh)
+    copiedFresh = fresh;
+  return copy;
+}
+function copyLeaf(value) {
+  if (Object.getPrototypeOf(value) !== Object.prototype)
+    return;
+  const copy = {};
+  for (const key in value) {
+    if (!hasOwn.call(value, key))
+      continue;
+    const entry = value[key];
+    if (entry !== null && typeof entry === "object")
+      return;
+    copy[key] = entry;
+  }
+  if (Object.getOwnPropertySymbols(value).length !== 0)
+    return;
+  return copy;
+}
 function readsOf(identity) {
   if (identity !== cloneContainer)
     return identity;
@@ -2646,8 +2735,36 @@ function readsOf(identity) {
   return cloneContents;
 }
 function countCopy() {
-  if (--cloneCountdown === 0)
-    checkSharedCopies(cloneTop);
+  if (--cloneCountdown === 0) {
+    if (cloneFresh)
+      cloneCountdown = SNAPSHOT_CHECK_AFTER;
+    else
+      checkSharedCopies(cloneTop);
+  }
+}
+function noteFresh(identity) {
+  if (identity === cloneTop || locationNodes.get(identity) !== undefined) {
+    cloneFresh = false;
+    return;
+  }
+  const first = cloneFirst;
+  if (first === undefined) {
+    cloneFirst = identity;
+    return;
+  }
+  if (identity === first) {
+    cloneFresh = false;
+    return;
+  }
+  let seen = cloneSeen;
+  if (seen === undefined) {
+    seen = cloneSeen = new Set;
+    seen.add(first);
+  }
+  const size = seen.size;
+  seen.add(identity);
+  if (seen.size === size)
+    cloneFresh = false;
 }
 function checkSharedCopies(value) {
   const walk = { extra: 0, low: Infinity, marks: new Map };
@@ -2742,7 +2859,11 @@ var cloneCopies = [];
 var hasOwn = Object.prototype.hasOwnProperty;
 var isEnumerable = Object.prototype.propertyIsEnumerable;
 function cloneChild(value, base) {
-  return value === null || typeof value !== "object" ? value : cloneTreeInto(value, base);
+  if (value === null || typeof value !== "object")
+    return value;
+  if (cloneFresh)
+    noteFresh(toRaw(value));
+  return cloneTreeInto(value, base);
 }
 function cloneTreeInto(value, base) {
   const identity = toRaw(value);
@@ -3113,7 +3234,7 @@ class Place {
     return this.parentRef.deref();
   }
 }
-var nodes = new WeakMap;
+var nodes = locationNodes;
 var nodeCount = 0;
 var FAST_CHAIN_LIMIT = 256;
 function isObject2(value) {
@@ -3135,11 +3256,32 @@ function ensureLocationNode(raw) {
       proxy: undefined,
       evicted: undefined,
       relinked: 0,
-      lostLink: false
+      lostLink: false,
+      dataOnly: undefined
     };
     nodes.set(raw, node);
   }
   return node;
+}
+function writesThroughSetter(target, prop, node) {
+  let dataOnly = node.dataOnly;
+  if (dataOnly === undefined)
+    dataOnly = node.dataOnly = hasNoOwnAccessor(target);
+  if (dataOnly)
+    return false;
+  const descriptor = Reflect.getOwnPropertyDescriptor(target, prop);
+  return descriptor !== undefined && descriptor.set !== undefined;
+}
+function hasNoOwnAccessor(target) {
+  const keys = Reflect.ownKeys(target);
+  if (keys.length > 64)
+    return false;
+  for (let i = 0;i < keys.length; i++) {
+    const descriptor = Reflect.getOwnPropertyDescriptor(target, keys[i]);
+    if (descriptor.get !== undefined || descriptor.set !== undefined)
+      return false;
+  }
+  return true;
 }
 function holdsIn(parent, key, raw) {
   if (parent === undefined)
@@ -3301,23 +3443,36 @@ function dispatch(target, event) {
 }
 function copyPayload(event, container) {
   if (event === undefined)
-    return true;
+    return 1 /* Done */;
   const { newValue, oldValue, value, items, oldValues } = event;
-  const newCopy = isObject2(newValue) ? cloneTreeUnless(newValue, container) : newValue;
-  if (newCopy === REACHES)
-    return false;
+  let fresh = true;
+  let newCopy = newValue;
+  if (isObject2(newValue)) {
+    newCopy = cloneStored(newValue, container);
+    if (newCopy === REACHES)
+      return 0 /* Reaches */;
+    fresh = copiedFresh;
+  }
+  let valueCopy = value;
+  if (isObject2(value)) {
+    valueCopy = cloneStored(value, container);
+    if (valueCopy === REACHES)
+      return 0 /* Reaches */;
+    fresh &&= copiedFresh;
+  }
+  let itemsCopy = items;
+  if (items !== undefined && holdsObject(items)) {
+    itemsCopy = cloneStored(items, container);
+    if (itemsCopy === REACHES)
+      return 0 /* Reaches */;
+    fresh &&= copiedFresh;
+  }
   const oldCopy = isObject2(oldValue) ? cloneTreeUnless(oldValue, container) : oldValue;
   if (oldCopy === REACHES)
-    return false;
-  const valueCopy = isObject2(value) ? cloneTreeUnless(value, container) : value;
-  if (valueCopy === REACHES)
-    return false;
-  const itemsCopy = items !== undefined && holdsObject(items) ? cloneTreeUnless(items, container) : items;
-  if (itemsCopy === REACHES)
-    return false;
+    return 0 /* Reaches */;
   const oldValuesCopy = oldValues !== undefined && holdsObject(oldValues) ? cloneTreeUnless(oldValues, container) : oldValues;
   if (oldValuesCopy === REACHES)
-    return false;
+    return 0 /* Reaches */;
   if (isObject2(newValue))
     event.newValue = newCopy;
   if (isObject2(oldValue))
@@ -3328,7 +3483,11 @@ function copyPayload(event, container) {
     event.items = itemsCopy;
   if (oldValues !== undefined)
     event.oldValues = oldValuesCopy;
-  return true;
+  return fresh ? 2 /* Fresh */ : 1 /* Done */;
+}
+function copyPayloadReaching(event, container, after) {
+  refuseAccessors(event, container, after);
+  copyPayloadAfter(event, container, after);
 }
 function copyPayloadAfter(event, container, after) {
   const { newValue, oldValue, value, items, oldValues } = event;
@@ -3362,17 +3521,59 @@ function shallowCopy(container) {
   if (container instanceof Set)
     return new Set(container);
   const copy = Object.create(Object.getPrototypeOf(container));
-  for (const key in container) {
-    if (Object.prototype.hasOwnProperty.call(container, key))
-      setData(copy, key, container[key]);
-  }
-  const symbolKeys = Object.getOwnPropertySymbols(container);
-  for (let i = 0;i < symbolKeys.length; i++) {
-    if (Object.prototype.propertyIsEnumerable.call(container, symbolKeys[i])) {
-      setData(copy, symbolKeys[i], container[symbolKeys[i]]);
-    }
+  const keys = Reflect.ownKeys(container);
+  for (let i = 0;i < keys.length; i++) {
+    const value = enumerableData(container, keys[i]);
+    if (value !== NOT_ENUMERABLE)
+      setData(copy, keys[i], value);
   }
   return copy;
+}
+var NOT_ENUMERABLE = Symbol("not enumerable");
+function enumerableData(object, key) {
+  const descriptor = Reflect.getOwnPropertyDescriptor(object, key);
+  if (!descriptor.enumerable)
+    return NOT_ENUMERABLE;
+  if (descriptor.get !== undefined || descriptor.set !== undefined) {
+    throw new UnsupportedStateError(`the accessor property '${String(key)}' sits in a payload that reaches back into the ` + `object it is written to, and a getter cannot be read as it will be after the write`);
+  }
+  return descriptor.value;
+}
+function refuseAccessors(event, container, after) {
+  const pending = [event.newValue, event.oldValue, event.value];
+  if (event.items !== undefined)
+    pending.push(event.items);
+  if (event.oldValues !== undefined)
+    pending.push(event.oldValues);
+  const seen = new Set;
+  while (pending.length > 0) {
+    const entry = pending.pop();
+    if (!isObject2(entry))
+      continue;
+    let value = toRaw(entry);
+    if (value === container)
+      value = after;
+    if (seen.has(value))
+      continue;
+    seen.add(value);
+    if (Array.isArray(value)) {
+      for (let i = 0;i < value.length; i++)
+        pending.push(value[i]);
+    } else if (value instanceof Map) {
+      for (const [key, item] of value)
+        pending.push(key, item);
+    } else if (value instanceof Set) {
+      for (const item of value)
+        pending.push(item);
+    } else if (!(value instanceof Date)) {
+      const keys = Reflect.ownKeys(value);
+      for (let i = 0;i < keys.length; i++) {
+        const item = enumerableData(value, keys[i]);
+        if (item !== NOT_ENUMERABLE)
+          pending.push(item);
+      }
+    }
+  }
 }
 function setData(copy, key, value) {
   Object.defineProperty(copy, key, { value, writable: true, enumerable: true, configurable: true });
@@ -3445,12 +3646,14 @@ function adopt(raw, walk) {
   let node = nodes.get(raw);
   if (node !== undefined && !node.lostLink && walk.revisit?.has(raw) !== true)
     return node;
-  if (walk.seen.has(raw)) {
+  const seen = walk.seen;
+  const size = seen.size;
+  seen.add(raw);
+  if (seen.size === size) {
     if (node === undefined)
       (walk.repeated ??= new Set).add(raw);
     return node;
   }
-  walk.seen.add(raw);
   if (node !== undefined) {
     if (node.lostLink)
       walk.relinked.push(node);
@@ -3460,11 +3663,14 @@ function adopt(raw, walk) {
     return;
   if (walk.aliases?.has(raw))
     node = ensureLocationNode(raw);
+  if (freshStored.has(raw))
+    return node;
   node = adoptChildren(raw, node, walk);
   if (node !== undefined && walk.aliases === undefined)
     (walk.created ??= new Set).add(raw);
   return node;
 }
+var freshStored = new WeakSet;
 function adoptChildren(raw, node, walk) {
   if (Array.isArray(raw)) {
     for (let i = 0;i < raw.length; i++) {
@@ -3574,7 +3780,11 @@ function insertedNeedWalk(inserted) {
   }
   return false;
 }
-function attachValue(value, parent, key) {
+function attachValue(value, parent, key, fresh) {
+  if (fresh) {
+    freshStored.add(value);
+    return;
+  }
   const existing = nodes.get(value);
   if (existing !== undefined && !existing.lostLink) {
     if (addPlace(existing, parent, key) && existing.places.length > 1)
@@ -3599,7 +3809,14 @@ function adoptRoot(node) {
   });
   pruneTouched(touched);
 }
-function relinkArray(arrayNode, array, from, removed, inserted) {
+function relinkArray(arrayNode, array, from, removed, inserted, insertedFresh = false) {
+  if (inserted !== undefined && insertedFresh) {
+    for (let i = 0;i < inserted.length; i++) {
+      if (isObject2(inserted[i]))
+        freshStored.add(inserted[i]);
+    }
+    inserted = undefined;
+  }
   relink(arrayNode, array, from, removed, inserted, false);
 }
 function relinkReorder(arrayNode, array, removed, inserted) {
@@ -3928,14 +4145,80 @@ function unwrapItems(items) {
       items[i] = unwrapForStore(items[i]);
   }
 }
-function writeSorted(target, sorted) {
-  for (let i = 0;i < sorted.length; i++) {
-    if (i in sorted) {
-      if (!Reflect.set(target, i, sorted[i]))
-        throw new TypeError(`Cannot assign to read only property '${i}'`);
-    } else if (!Reflect.deleteProperty(target, i)) {
-      throw new TypeError(`Cannot delete property '${i}'`);
+function planReorder(target, prop, method, args) {
+  const length = target.length;
+  if (prop === "fill" || prop === "copyWithin") {
+    const fill = prop === "fill";
+    const to = fill ? 0 : clampIndex(toIntegerOrInfinity(args[0]), length);
+    const start = clampIndex(toIntegerOrInfinity(args[1]), length);
+    const end = args[2] === undefined ? length : clampIndex(toIntegerOrInfinity(args[2]), length);
+    const after2 = target.slice();
+    method.call(after2, fill ? args[0] : to, start, end);
+    const size = after2.length;
+    if (fill)
+      return { after: after2, first: Math.min(start, size), last: Math.min(end, size), skip: -1 };
+    const from = Math.min(to, size);
+    const count = Math.min(Math.min(end, size) - Math.min(start, size), size - from);
+    return { after: after2, first: from, last: from + Math.max(count, 0), skip: -1 };
+  }
+  const after = target.slice();
+  method.apply(after, args);
+  if (prop === "reverse") {
+    return { after, first: 0, last: length, skip: length % 2 === 1 ? (length - 1) / 2 : -1 };
+  }
+  const sorted = length < 2 ? 0 : length;
+  for (let i = length;i < target.length; i++) {
+    if (i in target)
+      after[i] = target[i];
+    else
+      after.length = i + 1;
+  }
+  return { after, first: 0, last: sorted, skip: -1 };
+}
+function checkReorder(target, reorder) {
+  const { after, first, last, skip } = reorder;
+  let extensible;
+  for (let i = first;i < last; i++) {
+    if (i === skip)
+      continue;
+    if (i in after) {
+      if (i in target)
+        target[i] = target[i];
+      else if (!(extensible ??= Object.isExtensible(target))) {
+        throw new TypeError(`Cannot add property ${i}, array is not extensible`);
+      }
+    } else if (i in target && !Reflect.getOwnPropertyDescriptor(target, i).configurable) {
+      throw new TypeError(`Cannot delete property '${i}' of array`);
     }
+  }
+}
+function reorderChanges(target, after) {
+  if (after.length !== target.length)
+    return true;
+  for (let i = 0;i < after.length; i++) {
+    const value = after[i];
+    const current = target[i];
+    if (value !== current) {
+      if (value === value || current === current)
+        return true;
+    } else if (value === 0) {
+      if (1 / value !== 1 / current)
+        return true;
+    } else if (value === undefined && i in after !== i in target) {
+      return true;
+    }
+  }
+  return false;
+}
+function writeReorder(target, reorder) {
+  const { after, first, last, skip } = reorder;
+  for (let i = first;i < last; i++) {
+    if (i === skip)
+      continue;
+    if (i in after)
+      target[i] = after[i];
+    else
+      delete target[i];
   }
 }
 function evictRemoved(removed) {
@@ -3971,17 +4254,13 @@ function wrapArray(arr, node) {
           methodCache[prop] = function(...args) {
             if (prop === "fill" && isObject3(args[0]))
               args[0] = unwrapForStore(args[0]);
+            const reorder = planReorder(target, prop, method, args);
             const before = target.slice();
-            const after = target.slice();
-            method.apply(after, args);
-            let changed = false;
-            for (let i = 0;i < before.length; i++) {
-              if (before[i] !== after[i]) {
-                changed = true;
-                break;
-              }
-            }
-            const located = changed ? locate(node) : undefined;
+            checkReorder(target, reorder);
+            const after = reorder.after;
+            if (!reorderChanges(target, after))
+              return proxy;
+            const located = locate(node);
             const event = located && {
               action: "replace",
               path: located.paths[0],
@@ -3990,12 +4269,7 @@ function wrapArray(arr, node) {
             };
             if (event !== undefined)
               copyPayloadAfter(event, target, after);
-            if (prop === "sort")
-              writeSorted(target, after);
-            else
-              method.apply(target, args);
-            if (!changed)
-              return proxy;
+            writeReorder(target, reorder);
             relinkReorder(node, target, before, prop === "fill" ? [args[0]] : undefined);
             if (event !== undefined)
               dispatch(located, event);
@@ -4017,15 +4291,16 @@ function wrapArray(arr, node) {
               key: oldLength,
               items
             };
-            if (!copyPayload(event, target)) {
+            const copied = copyPayload(event, target);
+            if (copied === 0 /* Reaches */) {
               const after = target.slice();
               after.push(...items);
-              copyPayloadAfter(event, target, after);
+              copyPayloadReaching(event, target, after);
             }
             const result = target.push(...items);
             const newLength = target.length;
             if (items.length > 0) {
-              relinkArray(node, target, oldLength, undefined, items);
+              relinkArray(node, target, oldLength, undefined, items, copied === 2 /* Fresh */);
               if (event !== undefined)
                 dispatch(located, event);
               trigger(target, Symbol.iterator);
@@ -4051,10 +4326,10 @@ function wrapArray(arr, node) {
               key: poppedIndex,
               oldValue
             };
-            if (!copyPayload(event, target)) {
+            if (copyPayload(event, target) === 0 /* Reaches */) {
               const after = target.slice();
               after.pop();
-              copyPayloadAfter(event, target, after);
+              copyPayloadReaching(event, target, after);
             }
             const result = target.pop();
             const newLength = target.length;
@@ -4085,10 +4360,10 @@ function wrapArray(arr, node) {
               key: 0,
               oldValue
             };
-            if (!copyPayload(event, target)) {
+            if (copyPayload(event, target) === 0 /* Reaches */) {
               const after = target.slice();
               after.shift();
-              copyPayloadAfter(event, target, after);
+              copyPayloadReaching(event, target, after);
             }
             const result = target.shift();
             const newLength = target.length;
@@ -4116,15 +4391,16 @@ function wrapArray(arr, node) {
               key: 0,
               items
             };
-            if (!copyPayload(event, target)) {
+            const copied = copyPayload(event, target);
+            if (copied === 0 /* Reaches */) {
               const after = target.slice();
               after.unshift(...items);
-              copyPayloadAfter(event, target, after);
+              copyPayloadReaching(event, target, after);
             }
             const result = target.unshift(...items);
             const newLength = target.length;
             if (items.length > 0) {
-              relinkArray(node, target, 0, undefined, items);
+              relinkArray(node, target, 0, undefined, items, copied === 2 /* Fresh */);
               if (event !== undefined)
                 dispatch(located, event);
               trigger(target, Symbol.iterator);
@@ -4153,15 +4429,16 @@ function wrapArray(arr, node) {
               items: items.length > 0 ? items : undefined,
               oldValues: actualDeleteCount > 0 ? target.slice(actualStart, actualStart + actualDeleteCount) : undefined
             };
-            if (!copyPayload(event, target)) {
+            const copied = copyPayload(event, target);
+            if (copied === 0 /* Reaches */) {
               const after = target.slice();
               after.splice(actualStart, actualDeleteCount, ...items);
-              copyPayloadAfter(event, target, after);
+              copyPayloadReaching(event, target, after);
             }
             const deletedItems = target.splice(actualStart, actualDeleteCount, ...items);
             const newLength = target.length;
             if (changes) {
-              relinkArray(node, target, actualStart, deletedItems, items);
+              relinkArray(node, target, actualStart, deletedItems, items, copied === 2 /* Fresh */);
               if (event !== undefined)
                 dispatch(located, event);
               evictRemoved(deletedItems);
@@ -4255,16 +4532,16 @@ function wrapArray(arr, node) {
       if (isObject3(oldValue) && isObject3(value) && deepEqual(oldValue, value))
         return true;
       const truncated = prop === "length" && Number(value) < target.length ? target.slice(Number(value)) : undefined;
-      const descriptor = Reflect.getOwnPropertyDescriptor(target, prop);
-      const isNumericIndex = typeof prop === "number" || typeof prop === "string" && !isNaN(parseInt(String(prop)));
-      const emits = !descriptor || !descriptor.set || isNumericIndex;
+      const isNumericIndex = typeof prop === "number" || arrayIndex(prop) >= 0 || typeof prop === "string" && !isNaN(parseInt(prop));
+      const emits = isNumericIndex || prop === "length" || !writesThroughSetter(target, prop, node);
       const grows = prop === "length" && Number(value) > Number(oldValue);
       const located = emits ? grows ? locate(node) : locate(node, prop) : undefined;
       const event = located === undefined || grows ? undefined : { action: "set", path: located.paths[0], oldValue, newValue: value };
-      if (!copyPayload(event, target)) {
+      const copied = copyPayload(event, target);
+      if (copied === 0 /* Reaches */) {
         const after = target.slice();
         Reflect.set(after, prop, value);
-        copyPayloadAfter(event, target, after);
+        copyPayloadReaching(event, target, after);
       }
       const result = Reflect.set(target, prop, value, receiver);
       if (result && emits) {
@@ -4275,7 +4552,7 @@ function wrapArray(arr, node) {
           if (isObject3(oldValue))
             detachPlace(oldValue, node, key);
           if (isObject3(value))
-            attachValue(value, node, key);
+            attachValue(value, node, key, copied === 2 /* Fresh */);
         }
         if (grows) {
           if (located !== undefined) {
@@ -4304,10 +4581,10 @@ function wrapArray(arr, node) {
       const hadProperty = Object.prototype.hasOwnProperty.call(target, prop);
       const located = hadProperty ? locate(node, prop) : undefined;
       const event = located && { action: "delete", path: located.paths[0], oldValue };
-      if (!copyPayload(event, target)) {
+      if (copyPayload(event, target) === 0 /* Reaches */) {
         const after = target.slice();
         Reflect.deleteProperty(after, prop);
-        copyPayloadAfter(event, target, after);
+        copyPayloadReaching(event, target, after);
       }
       const result = Reflect.deleteProperty(target, prop);
       if (hadProperty && result) {
@@ -4372,15 +4649,16 @@ function wrapMap(map, node) {
             oldValue,
             newValue: value2
           };
-          if (!copyPayload(event, target)) {
-            copyPayloadAfter(event, target, shallowCopy(target).set(key, value2));
+          const copied = copyPayload(event, target);
+          if (copied === 0 /* Reaches */) {
+            copyPayloadReaching(event, target, shallowCopy(target).set(key, value2));
           }
           target.set(key, value2);
           const newSize = target.size;
           if (isObject4(oldValue))
             detachPlace(oldValue, node, key);
           if (isObject4(value2))
-            attachValue(value2, node, key);
+            attachValue(value2, node, key, copied === 2 /* Fresh */);
           if (event !== undefined)
             dispatch(located, event);
           if (!existed) {
@@ -4411,10 +4689,10 @@ function wrapMap(map, node) {
             key,
             oldValue
           };
-          if (!copyPayload(event, target)) {
+          if (copyPayload(event, target) === 0 /* Reaches */) {
             const after = shallowCopy(target);
             after.delete(key);
-            copyPayloadAfter(event, target, after);
+            copyPayloadReaching(event, target, after);
           }
           const result = target.delete(key);
           const newSize = target.size;
@@ -4569,13 +4847,14 @@ function wrapSet(set, node) {
               path: located.paths[0],
               value: value2
             };
-            if (!copyPayload(event, target)) {
-              copyPayloadAfter(event, target, shallowCopy(target).add(value2));
+            const copied = copyPayload(event, target);
+            if (copied === 0 /* Reaches */) {
+              copyPayloadReaching(event, target, shallowCopy(target).add(value2));
             }
             target.add(value2);
             const newSize = target.size;
             if (isObject5(value2))
-              attachValue(value2, node, undefined);
+              attachValue(value2, node, undefined, copied === 2 /* Fresh */);
             if (event !== undefined)
               dispatch(located, event);
             trigger(target, Symbol.iterator);
@@ -4600,10 +4879,10 @@ function wrapSet(set, node) {
               value: value2,
               oldValue
             };
-            if (!copyPayload(event, target)) {
+            if (copyPayload(event, target) === 0 /* Reaches */) {
               const after = shallowCopy(target);
               after.delete(value2);
-              copyPayloadAfter(event, target, after);
+              copyPayloadReaching(event, target, after);
             }
             const result = target.delete(value2);
             const newSize = target.size;
@@ -4753,14 +5032,12 @@ function reactive(obj, emit, path = [], options) {
   if (emit && path.length === 0 && options?.async) {
     emit = createAsyncEmit(emit);
   }
+  let fresh = false;
   if (emit && path.length === 0) {
     try {
-      const initialEvent = {
-        action: "replace",
-        path: [],
-        newValue: cloneTree(obj)
-      };
-      emit(initialEvent);
+      const newValue = cloneStored(obj, undefined);
+      fresh = copiedFresh;
+      emit({ action: "replace", path: [], newValue });
     } catch (error) {
       if (error instanceof SnapshotLimitError)
         throw error;
@@ -4770,7 +5047,7 @@ function reactive(obj, emit, path = [], options) {
   const node = ensureLocationNode(obj);
   node.root = { emit, path };
   node.scope = node.root;
-  if (emit)
+  if (emit && !fresh)
     adoptRoot(node);
   return createProxy(obj, node, options);
 }
@@ -4827,8 +5104,7 @@ function wrapObject(obj, node, options) {
         return true;
       if (!options?.async && isObject6(oldValue) && isObject6(value) && deepEqual(oldValue, value))
         return true;
-      const descriptor = Reflect.getOwnPropertyDescriptor(target, prop);
-      const emits = !descriptor || !descriptor.set;
+      const emits = !writesThroughSetter(target, prop, node);
       const located = emits ? locate(node, prop) : undefined;
       const event = located && {
         action: "set",
@@ -4836,18 +5112,20 @@ function wrapObject(obj, node, options) {
         oldValue,
         newValue: value
       };
-      if (!copyPayload(event, target)) {
+      const copied = copyPayload(event, target);
+      if (copied === 0 /* Reaches */) {
         const after = shallowCopy(target);
+        const descriptor = Reflect.getOwnPropertyDescriptor(target, prop);
         if (descriptor === undefined || descriptor.enumerable)
           setData(after, prop, value);
-        copyPayloadAfter(event, target, after);
+        copyPayloadReaching(event, target, after);
       }
       const result = Reflect.set(target, prop, value, receiver);
       if (result && emits) {
         if (isObject6(oldValue))
           detachPlace(oldValue, node, prop);
         if (isObject6(value))
-          attachValue(value, node, prop);
+          attachValue(value, node, prop, copied === 2 /* Fresh */);
         if (event !== undefined)
           dispatch(located, event);
         trigger(target, prop);
@@ -4866,10 +5144,10 @@ function wrapObject(obj, node, options) {
         path: located.paths[0],
         oldValue
       };
-      if (!copyPayload(event, target)) {
+      if (copyPayload(event, target) === 0 /* Reaches */) {
         const after = shallowCopy(target);
         delete after[prop];
-        copyPayloadAfter(event, target, after);
+        copyPayloadReaching(event, target, after);
       }
       const result = Reflect.deleteProperty(target, prop);
       if (hadProperty && result) {

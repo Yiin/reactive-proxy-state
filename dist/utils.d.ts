@@ -1,3 +1,4 @@
+import type { LocationNode } from "./location";
 /**
  * Returns the raw, original object underlying a reactive proxy.
  * If the input is not a proxy, returns the input itself.
@@ -11,6 +12,7 @@ export declare function unwrapForStore(value: any): any;
 export declare const pathCache: WeakMap<object, Map<string, any>>;
 export declare const globalSeen: WeakMap<any, any>;
 export declare const wrapperCache: WeakMap<object, object>;
+export declare const locationNodes: WeakMap<object, LocationNode>;
 export declare const proxyStats: {
     created: number;
     arrays: number;
@@ -70,6 +72,13 @@ export declare class SnapshotLimitError extends RangeError {
     constructor(extraCopies: number);
 }
 /**
+ * A write the library cannot synchronize, refused before anything changed.
+ * See "Supported inputs" under "Synchronization Limits" in the README.
+ */
+export declare class UnsupportedStateError extends TypeError {
+    constructor(problem: string);
+}
+/**
  * Deep clone for event payloads. Unlike `deepClone`, an object that appears
  * at several places in `value` is copied once per place, so the result is a
  * tree: a replica holds one copy per place, and a write through a shared
@@ -90,6 +99,18 @@ export declare const REACHES: unique symbol;
  * objects other than `container`.
  */
 export declare function cloneTreeUnless<T>(value: T, container: object): T | typeof REACHES;
+/**
+ * `cloneTreeUnless(value, container)` for a value about to be stored (the
+ * new value of a write, inserted items, a new root; `container` may be
+ * undefined). It also finds whether the value is fresh: no object in it has
+ * a location node, and no object sits at two places in it (an alias or a
+ * cycle). `copiedFresh` says so when the call returns. The place walk of a
+ * store finds nothing to do in a fresh value, so the store skips it (see
+ * `attachValue`). The check stops at the first object that is not fresh.
+ */
+export declare function cloneStored<T>(value: T, container: object | undefined): T | typeof REACHES;
+/** Whether the value the last `cloneStored` call copied is fresh; set when it returns. */
+export declare let copiedFresh: boolean;
 /**
  * The copy `cloneTree(value)` makes once `container` holds what `contents`
  * holds: wherever the copy (and its measure) meets `container`, it reads
