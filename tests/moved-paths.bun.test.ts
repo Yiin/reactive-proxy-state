@@ -176,6 +176,8 @@ describe("paths after structural array changes (RPS1 matrix)", () => {
     expect(list.sort((left, right) => right.id.localeCompare(left.id))).toBe(list);
     expect(sync.paths()).toEqual(["replace:list"]);
     expect(ids(sync.remote.list)).toBe("C,B,A");
+    // the old order rides along, so a consumer can undo the event
+    expect(ids(sync.events[0].oldValue)).toBe("A,B,C");
     sync.clear();
     expect(list.reverse()).toBe(list);
     expect(sync.paths()).toEqual(["replace:list"]);

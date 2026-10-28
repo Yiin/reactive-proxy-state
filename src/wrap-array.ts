@@ -103,6 +103,7 @@ export function wrapArray<T extends any[]>(arr: T, node: LocationNode): T {
                 dispatch(located, {
                   action: "replace",
                   path: located.paths[0],
+                  oldValue: before,
                   newValue: cloneTree(target),
                 });
               }

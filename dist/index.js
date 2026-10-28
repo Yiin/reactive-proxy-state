@@ -3411,6 +3411,7 @@ function wrapArray(arr, node) {
                 dispatch(located, {
                   action: "replace",
                   path: located.paths[0],
+                  oldValue: before,
                   newValue: cloneTree(target)
                 });
               }
