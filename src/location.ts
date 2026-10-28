@@ -75,12 +75,19 @@ export class Place {
     this.parentRef = new WeakRef(parent);
     this.parentId = parent.id;
     this.key = key;
+    parent.childPlaces++;
   }
 
   /** The container's node; undefined once the container was collected. */
   get parent(): LocationNode | undefined {
     return this.parentRef.deref();
   }
+}
+
+/** `place` left its node's `places`: its container counts one place fewer (see `childPlaces`). */
+function dropped(place: Place): void {
+  const parent = place.parent;
+  if (parent !== undefined) parent.childPlaces--;
 }
 
 export interface LocationNode {
@@ -98,6 +105,8 @@ export interface LocationNode {
   evicted: WeakRef<object> | undefined;
   /** The last `relinkArray` call that placed this object (tells repeats apart). */
   relinked: number;
+  /** In that call: how many of its old places in the array it has not met again yet. */
+  relinkedPlaces: number;
   /**
    * A child's place under this object, or under an object below it, was
    * dropped while this object was detached. Storing it again walks its
@@ -109,6 +118,13 @@ export interface LocationNode {
    * it (see `writesThroughSetter`); undefined before that write.
    */
   dataOnly: boolean | undefined;
+  /**
+   * How many places name this node as their container: every `Place` made
+   * with it counts, and each place dropped from its object's `places` stops
+   * counting. A place whose object was collected still counts, so the
+   * number is never below the places there are (see `relink`).
+   */
+  childPlaces: number;
 }
 
 const nodes = locationNodes;
@@ -143,8 +159,10 @@ export function ensureLocationNode(raw: object): LocationNode {
       proxy: undefined,
       evicted: undefined,
       relinked: 0,
+      relinkedPlaces: 0,
       lostLink: false,
       dataOnly: undefined,
+      childPlaces: 0,
     };
     nodes.set(raw, node);
   }
@@ -248,6 +266,7 @@ function chain(node: LocationNode, tail: PropertyKey | undefined): Target | null
     const place = places[0];
     const parent = place.parent;
     if (!holdsIn(parent, place.key, current.raw)) {
+      dropped(place);
       places.length = 0;
       return null;
     }
@@ -302,7 +321,7 @@ function collect(
     }
     collect(parent, [segment(parent, place.key, node.raw), ...suffix], visiting, out, firstOnly);
   }
-  if (stale) node.places = places.filter((place) => holds(place, node.raw));
+  if (stale) node.places = keepPlaces(places, (place) => holds(place, node.raw));
   visiting.delete(node);
 }
 
@@ -686,17 +705,30 @@ function addPlace(node: LocationNode, parent: LocationNode, key: unknown): boole
  * it again gives the place back (see `lostLink`).
  */
 function prunePlaces(node: LocationNode): void {
-  let places = node.places.filter((place) => holds(place, node.raw));
+  let places = keepPlaces(node.places, (place) => holds(place, node.raw));
   if (places.length > 1) {
     const live = places.filter((place) => isAttached(place.parent!));
     if (live.length > 0 && live.length < places.length) {
       for (let i = 0; i < places.length; i++) {
-        if (!live.includes(places[i])) markLostLink(places[i].parent!);
+        if (!live.includes(places[i])) {
+          markLostLink(places[i].parent!);
+          dropped(places[i]);
+        }
       }
       places = live;
     }
   }
   node.places = places;
+}
+
+/** The places that pass `keep`; the others are dropped. */
+function keepPlaces(places: Place[], keep: (place: Place) => boolean): Place[] {
+  const kept: Place[] = [];
+  for (let i = 0; i < places.length; i++) {
+    if (keep(places[i])) kept.push(places[i]);
+    else dropped(places[i]);
+  }
+  return kept;
 }
 
 /** `node` lost a child's place; it and every container above it relink on their next store. */
@@ -727,6 +759,7 @@ export function detachPlace(value: object, parent: LocationNode, key: unknown): 
   const places = node.places;
   for (let i = 0; i < places.length; i++) {
     if (samePlace(places[i], parent, key)) {
+      dropped(places[i]);
       places.splice(i, 1);
       return;
     }
@@ -1070,19 +1103,29 @@ function relink(
       }
     });
   }
+  // a removed item with a node may still sit at another index, without its places here
+  let removedNode = false;
   if (removed !== undefined) {
     for (let i = 0; i < removed.length; i++) {
       const value = removed[i];
       if (isObject(value)) {
         const node = nodes.get(value);
-        if (node !== undefined) stripIndexes(node, arrayNode, from);
+        if (node !== undefined) {
+          stripIndexes(node, arrayNode, from);
+          removedNode = true;
+        }
       }
     }
   }
   const call = ++relinkCalls;
   // index of the first visit of each object without a node
   let firstIndex: Map<object, number> | undefined;
-  for (let i = from; i < array.length; i++) {
+  // Places here before the change still to meet. An item without a place
+  // here needs none, unless it was inserted or removed with a node (a removed
+  // object can sit at another index too) or is an alias a reorder made, so
+  // once every such place was met the rest is skipped.
+  let left = findAliases || removedNode || holdsNode(inserted) ? Infinity : arrayNode.childPlaces;
+  for (let i = from; i < array.length && left > 0; i++) {
     const value = array[i];
     if (!isObject(value)) continue;
     let node = nodes.get(value);
@@ -1098,6 +1141,7 @@ function relink(
       if ((value as any)[ReactiveFlags.SKIP]) continue;
       node = ensureLocationNode(value);
       node.relinked = call;
+      node.relinkedPlaces = 0;
       node.places.push(new Place(arrayNode, first));
     } else if (node.relinked !== call) {
       // first time this call meets the object: move its place here
@@ -1110,9 +1154,16 @@ function relink(
         places[0].key >= from
       ) {
         places[0].key = i;
+        node.relinkedPlaces = 0;
+        left--;
         continue;
       }
-      stripIndexes(node, arrayNode, from);
+      // its old places here, met again one per index it sits at now
+      node.relinkedPlaces = stripIndexes(node, arrayNode, from);
+    }
+    if (node.relinkedPlaces > 0) {
+      node.relinkedPlaces--;
+      left--;
     }
     node.places.push(new Place(arrayNode, i));
     if (node.places.length > 1) touched.push(node);
@@ -1122,14 +1173,29 @@ function relink(
 
 let relinkCalls = 0;
 
-function stripIndexes(node: LocationNode, arrayNode: LocationNode, from: number): void {
+/** Does `values` hold an object with a location node? */
+function holdsNode(values: readonly unknown[] | undefined): boolean {
+  if (values === undefined) return false;
+  for (let i = 0; i < values.length; i++) {
+    const value = values[i];
+    if (isObject(value) && nodes.get(value) !== undefined) return true;
+  }
+  return false;
+}
+
+/** Drop the places of `node` at indexes of `arrayNode` from `from` on; returns how many. */
+function stripIndexes(node: LocationNode, arrayNode: LocationNode, from: number): number {
   const places = node.places;
+  let count = 0;
   for (let i = places.length - 1; i >= 0; i--) {
     const place = places[i];
     if (place.parentId === arrayNode.id && typeof place.key === "number" && place.key >= from) {
+      arrayNode.childPlaces--;
       places.splice(i, 1);
+      count++;
     }
   }
+  return count;
 }
 
 /**
