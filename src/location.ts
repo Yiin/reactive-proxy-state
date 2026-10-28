@@ -340,6 +340,42 @@ export function isAttached(node: LocationNode): boolean {
 }
 
 /**
+ * Was the object in the tree just before the store that is placing it now?
+ * Its places are read as they are, before the store adds its own. `former`
+ * is the node of the value that store replaced, when the written object was
+ * in the tree: only that store took it out, so it still counts. A place the
+ * store itself changed (an index a splice shifted) reads as gone, so an
+ * object that was in the tree can get false. False only costs a walk.
+ */
+function attachedBefore(node: LocationNode, former: LocationNode | undefined): boolean {
+  let current = node;
+  for (let steps = 0; steps < FAST_CHAIN_LIMIT; steps++) {
+    if (current.root !== undefined || current === former) return true;
+    const places = current.places;
+    if (places.length !== 1) break;
+    const place = places[0];
+    const parent = place.parent;
+    if (!holdsIn(parent, place.key, current.raw)) return false;
+    current = parent;
+  }
+  // several places, or a long chain: search every place
+  const pending: LocationNode[] = [current];
+  const visited = new Set<LocationNode>(pending);
+  while (pending.length > 0) {
+    const next = pending.pop()!;
+    if (next.root !== undefined || next === former) return true;
+    const places = next.places;
+    for (let i = 0; i < places.length; i++) {
+      const parent = places[i].parent;
+      if (!holdsIn(parent, places[i].key, next.raw) || visited.has(parent)) continue;
+      visited.add(parent);
+      pending.push(parent);
+    }
+  }
+  return false;
+}
+
+/**
  * Send `event` to every path of `target`. Its payload holds copies already
  * (`copyPayload` or `copyPayloadAfter`, made before the write). Every
  * further path gets copies of those copies, all made before the first emit,
@@ -614,10 +650,13 @@ export function detachPlace(value: object, parent: LocationNode, key: unknown): 
 
 /**
  * One walk over values that were just stored. It gives a place to every
- * object inside them that has a node, and stops at those objects: their own
+ * object inside them that has a node, and stops at those objects when they
+ * were in the tree just before this store (see `attachedBefore`): their own
  * children still hold their places under them, unless the object lost one
- * (`lostLink`), and then it walks on. Containers on the way get nodes only
- * when something inside them has one.
+ * (`lostLink`). A known object that comes back from outside the tree is
+ * walked like a new one: while it was out, an object below it may have been
+ * stored elsewhere, and storing it next to that object makes an alias.
+ * Containers on the way get nodes only when something inside them has one.
  *
  * An object met twice is an alias (or a cycle). The first walk only notes
  * it; a second walk then gives each such object a node at its first visit,
@@ -633,15 +672,20 @@ interface Walk {
   repeated: Set<object> | undefined;
   /** Objects that get a node at their first visit (the repeats of the first walk). */
   aliases: Set<object> | undefined;
-  /** Objects this walk gave a node to, as containers of a known object. */
+  /**
+   * Objects with a node this walk went into: containers it gave a node to
+   * (they hold a known object), and known objects that came back.
+   */
   created: Set<object> | undefined;
   /** Objects with a node the walk goes into anyway (the `created` of the first walk). */
   revisit: Set<object> | undefined;
   /** Nodes with `lostLink` the walk went into; cleared when the store is done. */
   relinked: LocationNode[];
+  /** The node of the value the store replaced, when it was in the tree (see `attachedBefore`). */
+  former: LocationNode | undefined;
 }
 
-function newWalk(touched: LocationNode[], first?: Walk): Walk {
+function newWalk(touched: LocationNode[], former: LocationNode | undefined, first?: Walk): Walk {
   return {
     touched,
     seen: new Set(),
@@ -650,12 +694,17 @@ function newWalk(touched: LocationNode[], first?: Walk): Walk {
     created: undefined,
     revisit: first?.created,
     relinked: [],
+    former,
   };
 }
 
 function adopt(raw: object, walk: Walk): LocationNode | undefined {
   let node = nodes.get(raw);
-  if (node !== undefined && !node.lostLink && walk.revisit?.has(raw) !== true) return node;
+  if (node !== undefined && !node.lostLink && walk.revisit?.has(raw) !== true) {
+    if (attachedBefore(node, walk.former)) return node;
+    // it comes back from outside the tree: walk it, in both walks
+    if (walk.aliases === undefined) (walk.created ??= new Set()).add(raw);
+  }
   // one set operation: an object already seen leaves the size as it was
   const seen = walk.seen;
   const size = seen.size;
@@ -724,12 +773,12 @@ function adoptChild(
  * Walk `values` with `visit` (one call per top value), and walk again when
  * the first walk met aliases. Clears `lostLink` on the nodes it went into.
  */
-function adoptAll(touched: LocationNode[], visit: (walk: Walk) => void): void {
-  let walk = newWalk(touched);
+function adoptAll(touched: LocationNode[], former: LocationNode | undefined, visit: (walk: Walk) => void): void {
+  let walk = newWalk(touched, former);
   visit(walk);
   if (walk.repeated !== undefined) {
     const first = walk;
-    walk = newWalk(touched, first);
+    walk = newWalk(touched, former, first);
     visit(walk);
     for (let i = 0; i < first.relinked.length; i++) first.relinked[i].lostLink = false;
   }
@@ -764,7 +813,10 @@ function hasObjectChild(raw: object): boolean {
   return false;
 }
 
-/** Must the values `relink` inserts be walked? Not when each is a new leaf, met once. */
+/**
+ * Must the values `relink` inserts be walked? Not when each is a new leaf met
+ * once, or a known object that was in the tree before.
+ */
 function insertedNeedWalk(inserted: readonly unknown[]): boolean {
   // fresh leaves met so far, to find one inserted twice
   let fresh: Set<object> | undefined;
@@ -773,7 +825,7 @@ function insertedNeedWalk(inserted: readonly unknown[]): boolean {
     if (!isObject(value)) continue;
     const node = nodes.get(value);
     if (node !== undefined) {
-      if (node.lostLink) return true;
+      if (node.lostLink || !attachedBefore(node, undefined)) return true;
       continue;
     }
     if (hasObjectChild(value)) return true;
@@ -789,18 +841,27 @@ function insertedNeedWalk(inserted: readonly unknown[]): boolean {
 /**
  * `parent[key]` now holds `value` (a raw object). A `fresh` value (the copy
  * this store made found it fresh, see `cloneStored`) has nothing to place.
+ * `replaced` is the value the store wrote over, when `parent` was in the
+ * tree before the store (see `attachedBefore`).
  */
-export function attachValue(value: object, parent: LocationNode, key: unknown, fresh: boolean): void {
+export function attachValue(
+  value: object,
+  parent: LocationNode,
+  key: unknown,
+  fresh: boolean,
+  replaced?: unknown
+): void {
   if (fresh) return;
+  const former = isObject(replaced) ? nodes.get(replaced) : undefined;
   const existing = nodes.get(value);
-  if (existing !== undefined && !existing.lostLink) {
+  if (existing !== undefined && !existing.lostLink && attachedBefore(existing, former)) {
     // a known object moved or got a second place; its children keep theirs
     if (addPlace(existing, parent, key) && existing.places.length > 1) prunePlaces(existing);
     return;
   }
   if (existing === undefined && !hasObjectChild(value)) return;
   const touched: LocationNode[] = [];
-  adoptAll(touched, (walk) => {
+  adoptAll(touched, former, (walk) => {
     const node = adopt(value, walk);
     if (node !== undefined && addPlace(node, parent, key)) touched.push(node);
   });
@@ -814,7 +875,7 @@ export function attachValue(value: object, parent: LocationNode, key: unknown, f
  */
 export function adoptRoot(node: LocationNode): void {
   const touched: LocationNode[] = [];
-  adoptAll(touched, (walk) => {
+  adoptAll(touched, undefined, (walk) => {
     walk.seen.add(node.raw);
     adoptChildren(node.raw, node, walk);
   });
@@ -863,7 +924,7 @@ function relink(
 ): void {
   const touched: LocationNode[] = [];
   if (inserted !== undefined && insertedNeedWalk(inserted)) {
-    adoptAll(touched, (walk) => {
+    adoptAll(touched, undefined, (walk) => {
       for (let i = 0; i < inserted.length; i++) {
         const value = inserted[i];
         if (isObject(value)) adopt(value, walk);

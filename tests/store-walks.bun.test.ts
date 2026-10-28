@@ -164,6 +164,90 @@ for (const async of [false, true]) {
     });
   });
 
+  describe(`a known object that comes back from outside the tree is walked again, async=${async}`, () => {
+    test("an array read before leaves; its item's child is stored and read elsewhere; the array comes back", async () => {
+      const sync = await setup({ list: [{ id: 0 }], other: null }, async);
+      const child = { n: 0 };
+      const list = sync.state.list;
+      list.push({ child });
+      sync.state.list = [];
+      sync.state.other = child;
+      const retained = sync.state.other;
+      sync.state.list = toRaw(list);
+      await settle();
+      sync.events.length = 0;
+      retained.n = 1;
+      await settle();
+      expect(sync.inSync()).toBe(true);
+      expect(sync.paths()).toEqual(["list.1.child.n", "other.n"]);
+    });
+
+    test("an object read before is removed, then stored next to its own child", async () => {
+      const sync = await setup({ list: [], box: null }, async);
+      const child = { n: 0 };
+      const item = { child, id: 1 };
+      sync.state.list.push(item);
+      void sync.state.list[0].id;
+      sync.state.list.pop();
+      sync.state.box = { a: item, b: child };
+      await settle();
+      sync.events.length = 0;
+      sync.state.box.b.n = 1;
+      await settle();
+      expect(sync.inSync()).toBe(true);
+      expect(sync.paths()).toEqual(["box.a.child.n", "box.b.n"]);
+    });
+
+    test("an object read before is removed, its child stored and read elsewhere, then pushed back", async () => {
+      const sync = await setup({ list: [], other: null }, async);
+      const child = { n: 0 };
+      const item = { deep: { child }, id: 1 };
+      sync.state.list.push(item);
+      void sync.state.list[0].deep;
+      sync.state.list.splice(0, 1);
+      sync.state.other = child;
+      const retained = sync.state.other;
+      sync.state.list.push(item);
+      await settle();
+      sync.events.length = 0;
+      retained.n = 1;
+      await settle();
+      expect(sync.inSync()).toBe(true);
+      expect(sync.paths()).toEqual(["list.0.deep.child.n", "other.n"]);
+    });
+
+    test("an item moved between arrays keeps every write in sync", async () => {
+      const sync = await setup({ a: [{ id: 1, inner: { m: 0, deep: { k: 0 } } }], b: [], other: null }, async);
+      const item = sync.state.a[0];
+      void item.inner.m;
+      const [moved] = sync.state.a.splice(0, 1);
+      sync.state.other = toRaw(moved).inner.deep;
+      const deep = sync.state.other;
+      sync.state.b.push(moved);
+      await settle();
+      sync.events.length = 0;
+      deep.k = 3;
+      sync.state.b[0].inner.m = 2;
+      await settle();
+      expect(sync.inSync()).toBe(true);
+      expect(sync.paths()).toEqual(["b.0.inner.deep.k", "b.0.inner.m", "other.k"]);
+    });
+
+    test("a filter keeps known items in place, with no extra event", async () => {
+      const sync = await setup({ list: [{ id: 0, h: [{ at: 0 }] }, { id: 1, h: [{ at: 1 }] }] }, async);
+      const first = sync.state.list[0].h[0];
+      sync.state.list.push({ id: 2, h: [{ at: 2 }] });
+      sync.state.list = sync.state.list.filter((job: any) => job.id !== 1);
+      await settle();
+      sync.events.length = 0;
+      first.at = 5;
+      sync.state.list[1].h[0].at = 6;
+      await settle();
+      expect(sync.inSync()).toBe(true);
+      expect(sync.paths()).toEqual(["list.0.h.0.at", "list.1.h.0.at"]);
+    });
+  });
+
   test(`a new root holding a value another root stored before, next to its child, async=${async}`, async () => {
     const first = await setup({ list: [] }, async);
     const child = { n: 0 };

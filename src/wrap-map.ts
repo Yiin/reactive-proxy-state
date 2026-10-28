@@ -90,7 +90,7 @@ export function wrapMap<K, V>(map: Map<K, V>, node: LocationNode): Map<K, V> {
 
           // move places before anything can write again (emit may throw)
           if (isObject(oldValue)) detachPlace(oldValue, node, key);
-          if (isObject(value)) attachValue(value, node, key, copied === Copied.Fresh);
+          if (isObject(value)) attachValue(value, node, key, copied === Copied.Fresh, located && oldValue);
 
           if (event !== undefined) dispatch(located!, event);
 

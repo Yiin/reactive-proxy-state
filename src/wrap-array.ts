@@ -561,7 +561,7 @@ export function wrapArray<T extends any[]>(arr: T, node: LocationNode): T {
         } else if (prop !== "length") {
           const key = placeKey(prop);
           if (isObject(oldValue)) detachPlace(oldValue, node, key);
-          if (isObject(value)) attachValue(value, node, key, copied === Copied.Fresh);
+          if (isObject(value)) attachValue(value, node, key, copied === Copied.Fresh, located && oldValue);
         }
 
         if (grows) {
