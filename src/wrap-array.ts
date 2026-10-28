@@ -124,11 +124,19 @@ function planReorder(target: unknown[], prop: string | symbol, method: Function,
 }
 
 /**
+ * Does this code run in strict mode? The ES module bundle does; the
+ * CommonJS bundle does not, and there a failed write is silent.
+ */
+const strictWrites = (function (this: unknown) {
+  return this === undefined;
+})();
+
+/**
  * Throw a TypeError, before any write, when `target` would refuse a write
  * of `reorder`: a read-only index, a hole in a non-extensible array, or a
  * non-configurable index to delete. Writing an index the value it holds
- * changes nothing, and in this strict-mode module throws a TypeError
- * exactly when the index is read-only.
+ * changes nothing; in strict mode it throws a TypeError exactly when the
+ * index is read-only. Without strict mode, `Reflect.set` says so, slower.
  */
 function checkReorder(target: unknown[], reorder: Reorder): void {
   const { after, first, last, skip } = reorder;
@@ -136,8 +144,10 @@ function checkReorder(target: unknown[], reorder: Reorder): void {
   for (let i = first; i < last; i++) {
     if (i === skip) continue;
     if (i in after) {
-      if (i in target) target[i] = target[i];
-      else if (!(extensible ??= Object.isExtensible(target))) {
+      if (i in target) {
+        if (strictWrites) target[i] = target[i];
+        else if (!Reflect.set(target, i, target[i])) throw new TypeError(`Cannot assign to read only property '${i}' of array`);
+      } else if (!(extensible ??= Object.isExtensible(target))) {
         throw new TypeError(`Cannot add property ${i}, array is not extensible`);
       }
     } else if (i in target && !Reflect.getOwnPropertyDescriptor(target, i)!.configurable) {
