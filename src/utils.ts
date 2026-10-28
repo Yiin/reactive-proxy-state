@@ -726,55 +726,90 @@ function cloneTreeInto(value: any, base: number): any {
     }
 
     countCopy();
-    let copy: any;
+    // an object goes on the ancestor stack before its first object child,
+    // the only one that can meet it again: a leaf never goes on it
+    let pushed = false;
     if (Array.isArray(value)) {
         const length = value.length;
-        copy = new Array(length);
-        cloneAncestors.push(identity);
-        cloneCopies.push(copy);
-        for (let i = 0; i < length; i++) copy[i] = cloneChild(value[i], base);
-    } else {
-        const prototype = Object.getPrototypeOf(value);
-        if (prototype === Object.prototype) {
-            copy = {};
-        } else if (value instanceof Date) {
-            return new Date(value.getTime());
-        } else if (value instanceof Map) {
-            copy = new Map();
-            cloneAncestors.push(identity);
-            cloneCopies.push(copy);
-            value.forEach((entry, key) => {
-                copy.set(cloneChild(key, base), cloneChild(entry, base));
-            });
+        const copy = new Array(length);
+        for (let i = 0; i < length; i++) {
+            const child = value[i];
+            if (child === null || typeof child !== 'object') {
+                copy[i] = child;
+                continue;
+            }
+            if (!pushed) {
+                pushed = true;
+                cloneAncestors.push(identity);
+                cloneCopies.push(copy);
+            }
+            copy[i] = cloneChild(child, base);
+        }
+        if (pushed) {
             cloneAncestors.pop();
             cloneCopies.pop();
-            return copy;
-        } else if (value instanceof Set) {
-            copy = new Set();
-            cloneAncestors.push(identity);
-            cloneCopies.push(copy);
-            value.forEach(entry => {
-                copy.add(cloneChild(entry, base));
-            });
-            cloneAncestors.pop();
-            cloneCopies.pop();
-            return copy;
-        } else {
-            copy = Object.create(prototype);
         }
-        cloneAncestors.push(identity);
-        cloneCopies.push(copy);
-        for (const key in value) {
-            if (hasOwn.call(value, key)) copy[key] = cloneChild(value[key], base);
-        }
-        const symbolKeys = Object.getOwnPropertySymbols(value);
-        for (let i = 0; i < symbolKeys.length; i++) {
-            const symbolKey = symbolKeys[i];
-            if (isEnumerable.call(value, symbolKey)) copy[symbolKey] = cloneChild(value[symbolKey], base);
-        }
+        return copy;
     }
-    cloneAncestors.pop();
-    cloneCopies.pop();
+    const prototype = Object.getPrototypeOf(value);
+    let copy: any;
+    if (prototype === Object.prototype) {
+        copy = {};
+    } else if (value instanceof Date) {
+        return new Date(value.getTime());
+    } else if (value instanceof Map) {
+        const map = new Map();
+        cloneAncestors.push(identity);
+        cloneCopies.push(map);
+        value.forEach((entry, key) => {
+            map.set(cloneChild(key, base), cloneChild(entry, base));
+        });
+        cloneAncestors.pop();
+        cloneCopies.pop();
+        return map;
+    } else if (value instanceof Set) {
+        const set = new Set();
+        cloneAncestors.push(identity);
+        cloneCopies.push(set);
+        value.forEach(entry => {
+            set.add(cloneChild(entry, base));
+        });
+        cloneAncestors.pop();
+        cloneCopies.pop();
+        return set;
+    } else {
+        copy = Object.create(prototype);
+    }
+    for (const key in value) {
+        if (!hasOwn.call(value, key)) continue;
+        const child = value[key];
+        if (child === null || typeof child !== 'object') {
+            copy[key] = child;
+            continue;
+        }
+        if (!pushed) {
+            pushed = true;
+            cloneAncestors.push(identity);
+            cloneCopies.push(copy);
+        }
+        copy[key] = cloneChild(child, base);
+    }
+    const symbolKeys = Object.getOwnPropertySymbols(value);
+    for (let i = 0; i < symbolKeys.length; i++) {
+        const symbolKey = symbolKeys[i];
+        if (!isEnumerable.call(value, symbolKey)) continue;
+        const child = value[symbolKey];
+        if (child !== null && typeof child === 'object' && !pushed) {
+            pushed = true;
+            cloneAncestors.push(identity);
+            cloneCopies.push(copy);
+        }
+        copy[symbolKey] = cloneChild(child, base);
+    }
+    if (pushed) {
+        cloneAncestors.pop();
+        cloneCopies.pop();
+    }
     return copy;
 }
 
