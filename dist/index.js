@@ -4108,6 +4108,9 @@ function planReorder(target, prop, method, args) {
   }
   return { after, first: 0, last: sorted, skip: -1 };
 }
+var strictWrites = function() {
+  return this === undefined;
+}();
 function checkReorder(target, reorder) {
   const { after, first, last, skip } = reorder;
   let extensible;
@@ -4115,9 +4118,12 @@ function checkReorder(target, reorder) {
     if (i === skip)
       continue;
     if (i in after) {
-      if (i in target)
-        target[i] = target[i];
-      else if (!(extensible ??= Object.isExtensible(target))) {
+      if (i in target) {
+        if (strictWrites)
+          target[i] = target[i];
+        else if (!Reflect.set(target, i, target[i]))
+          throw new TypeError(`Cannot assign to read only property '${i}' of array`);
+      } else if (!(extensible ??= Object.isExtensible(target))) {
         throw new TypeError(`Cannot add property ${i}, array is not extensible`);
       }
     } else if (i in target && !Reflect.getOwnPropertyDescriptor(target, i).configurable) {
