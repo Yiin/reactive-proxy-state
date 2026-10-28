@@ -683,9 +683,16 @@ interface Walk {
   relinked: LocationNode[];
   /** The node of the value the store replaced, when it was in the tree (see `attachedBefore`). */
   former: LocationNode | undefined;
+  /** Objects without a node that were in the tree before this store (see `heldBefore`). */
+  held: Set<object> | undefined;
 }
 
-function newWalk(touched: LocationNode[], former: LocationNode | undefined, first?: Walk): Walk {
+function newWalk(
+  touched: LocationNode[],
+  former: LocationNode | undefined,
+  held: Set<object> | undefined,
+  first?: Walk
+): Walk {
   return {
     touched,
     seen: new Set(),
@@ -695,6 +702,7 @@ function newWalk(touched: LocationNode[], former: LocationNode | undefined, firs
     revisit: first?.created,
     relinked: [],
     former,
+    held,
   };
 }
 
@@ -719,6 +727,7 @@ function adopt(raw: object, walk: Walk): LocationNode | undefined {
   }
   if ((raw as any)[ReactiveFlags.SKIP] || (raw as any)[ReactiveFlags.IS_REACTIVE]) return undefined;
   if (walk.aliases?.has(raw)) node = ensureLocationNode(raw);
+  if (walk.held?.has(raw)) return node;
   node = adoptChildren(raw, node, walk);
   if (node !== undefined && walk.aliases === undefined) (walk.created ??= new Set()).add(raw);
   return node;
@@ -773,12 +782,17 @@ function adoptChild(
  * Walk `values` with `visit` (one call per top value), and walk again when
  * the first walk met aliases. Clears `lostLink` on the nodes it went into.
  */
-function adoptAll(touched: LocationNode[], former: LocationNode | undefined, visit: (walk: Walk) => void): void {
-  let walk = newWalk(touched, former);
+function adoptAll(
+  touched: LocationNode[],
+  former: LocationNode | undefined,
+  held: Set<object> | undefined,
+  visit: (walk: Walk) => void
+): void {
+  let walk = newWalk(touched, former, held);
   visit(walk);
   if (walk.repeated !== undefined) {
     const first = walk;
-    walk = newWalk(touched, former, first);
+    walk = newWalk(touched, former, held, first);
     visit(walk);
     for (let i = 0; i < first.relinked.length; i++) first.relinked[i].lostLink = false;
   }
@@ -839,6 +853,31 @@ function insertedNeedWalk(inserted: readonly unknown[]): boolean {
 }
 
 /**
+ * The objects a store into an array need not walk: when `value` (an array
+ * written over `replaced`, an array that was in the tree) holds no object
+ * without a node that `replaced` does not hold too, as after a `filter`,
+ * then the items of `replaced`. An object without a node that was in the
+ * tree has nothing below it that needs a place: an object below it gets a
+ * node only through its proxy, which gives it a node first, or at a second
+ * place, which a store made through a proxy (see "Supported inputs" in the
+ * README). Undefined when some object without a node comes from elsewhere.
+ */
+function heldBefore(value: object, replaced: unknown): Set<object> | undefined {
+  if (!Array.isArray(value) || !Array.isArray(replaced)) return undefined;
+  let before: Set<object> | undefined;
+  for (let i = 0; i < value.length; i++) {
+    const item = value[i];
+    if (!isObject(item) || nodes.get(item) !== undefined) continue;
+    if (before === undefined) {
+      before = new Set();
+      for (let j = 0; j < replaced.length; j++) if (isObject(replaced[j])) before.add(replaced[j]);
+    }
+    if (!before.has(item)) return undefined;
+  }
+  return before;
+}
+
+/**
  * `parent[key]` now holds `value` (a raw object). A `fresh` value (the copy
  * this store made found it fresh, see `cloneStored`) has nothing to place.
  * `replaced` is the value the store wrote over, when `parent` was in the
@@ -860,8 +899,9 @@ export function attachValue(
     return;
   }
   if (existing === undefined && !hasObjectChild(value)) return;
+  const held = former === undefined ? undefined : heldBefore(value, replaced);
   const touched: LocationNode[] = [];
-  adoptAll(touched, former, (walk) => {
+  adoptAll(touched, former, held, (walk) => {
     const node = adopt(value, walk);
     if (node !== undefined && addPlace(node, parent, key)) touched.push(node);
   });
@@ -875,7 +915,7 @@ export function attachValue(
  */
 export function adoptRoot(node: LocationNode): void {
   const touched: LocationNode[] = [];
-  adoptAll(touched, undefined, (walk) => {
+  adoptAll(touched, undefined, undefined, (walk) => {
     walk.seen.add(node.raw);
     adoptChildren(node.raw, node, walk);
   });
@@ -924,7 +964,7 @@ function relink(
 ): void {
   const touched: LocationNode[] = [];
   if (inserted !== undefined && insertedNeedWalk(inserted)) {
-    adoptAll(touched, undefined, (walk) => {
+    adoptAll(touched, undefined, undefined, (walk) => {
       for (let i = 0; i < inserted.length; i++) {
         const value = inserted[i];
         if (isObject(value)) adopt(value, walk);
