@@ -3,10 +3,13 @@ import type { EmitFunction, Path, StateEvent } from "./types";
 import {
   REACHES,
   UnsupportedStateError,
+  cloneStored,
   cloneTree,
   cloneTreeAfter,
   cloneTreeUnless,
+  copiedFresh,
   globalSeen,
+  locationNodes,
   wrapperCache,
   proxyStats,
   toRaw,
@@ -87,7 +90,7 @@ export interface LocationNode {
   lostLink: boolean;
 }
 
-const nodes = new WeakMap<object, LocationNode>();
+const nodes = locationNodes;
 let nodeCount = 0;
 // A longer chain of single places is resolved by the general walk, which
 // guards against cycles.
@@ -331,6 +334,21 @@ export function dispatch(target: Target, event: StateEvent): void {
   for (let i = 0; i < events.length; i++) emit(events[i]);
 }
 
+/** What `copyPayload` did. */
+export const enum Copied {
+  /** Nothing: the payload reaches its container (see `copyPayloadReaching`). */
+  Reaches,
+  /** Copied the payload. */
+  Done,
+  /**
+   * Copied the payload, and the values it stores (`newValue`, `value`,
+   * `items`) are fresh (see `cloneStored`): the store's place walk would
+   * find nothing in them, so `attachValue` and the inserted-items walk of
+   * `relinkArray` are skipped.
+   */
+  Fresh,
+}
+
 /**
  * Replace the payload fields of `event` (live values) with deep copies, made
  * before the write that changes `container` (raw). `items` and `oldValues`
@@ -340,30 +358,43 @@ export function dispatch(target: Target, event: StateEvent): void {
  * and leaves `event` as it was, so the write is never made.
  *
  * A payload that reaches `container` would be copied as `container` is
- * before the write. Then nothing is copied and the result is false: the
- * caller makes the write on `shallowCopy(container)` and copies with
- * `copyPayloadAfter`, still before the write.
+ * before the write. Then nothing is copied and the result is
+ * `Copied.Reaches`: the caller makes the write on `shallowCopy(container)`
+ * and copies with `copyPayloadReaching`, still before the write.
  */
-export function copyPayload(event: StateEvent | undefined, container: object): boolean {
-  if (event === undefined) return true;
+export function copyPayload(event: StateEvent | undefined, container: object): Copied {
+  if (event === undefined) return Copied.Done;
   const { newValue, oldValue, value, items, oldValues } = event;
-  const newCopy = isObject(newValue) ? cloneTreeUnless(newValue, container) : newValue;
-  if (newCopy === REACHES) return false;
+  let fresh = true;
+  let newCopy = newValue;
+  if (isObject(newValue)) {
+    newCopy = cloneStored(newValue, container);
+    if (newCopy === REACHES) return Copied.Reaches;
+    fresh = copiedFresh;
+  }
+  let valueCopy = value;
+  if (isObject(value)) {
+    valueCopy = cloneStored(value, container);
+    if (valueCopy === REACHES) return Copied.Reaches;
+    fresh &&= copiedFresh;
+  }
+  let itemsCopy: unknown = items;
+  if (items !== undefined && holdsObject(items)) {
+    itemsCopy = cloneStored(items, container);
+    if (itemsCopy === REACHES) return Copied.Reaches;
+    fresh &&= copiedFresh;
+  }
   const oldCopy = isObject(oldValue) ? cloneTreeUnless(oldValue, container) : oldValue;
-  if (oldCopy === REACHES) return false;
-  const valueCopy = isObject(value) ? cloneTreeUnless(value, container) : value;
-  if (valueCopy === REACHES) return false;
-  const itemsCopy = items !== undefined && holdsObject(items) ? cloneTreeUnless(items, container) : items;
-  if (itemsCopy === REACHES) return false;
+  if (oldCopy === REACHES) return Copied.Reaches;
   const oldValuesCopy =
     oldValues !== undefined && holdsObject(oldValues) ? cloneTreeUnless(oldValues, container) : oldValues;
-  if (oldValuesCopy === REACHES) return false;
+  if (oldValuesCopy === REACHES) return Copied.Reaches;
   if (isObject(newValue)) event.newValue = newCopy;
   if (isObject(oldValue)) event.oldValue = oldCopy;
   if (isObject(value)) event.value = valueCopy;
   if (items !== undefined) event.items = itemsCopy as any[];
   if (oldValues !== undefined) event.oldValues = oldValuesCopy as any[];
-  return true;
+  return fresh ? Copied.Fresh : Copied.Done;
 }
 
 /**
@@ -591,11 +622,14 @@ function newWalk(touched: LocationNode[], first?: Walk): Walk {
 function adopt(raw: object, walk: Walk): LocationNode | undefined {
   let node = nodes.get(raw);
   if (node !== undefined && !node.lostLink && walk.revisit?.has(raw) !== true) return node;
-  if (walk.seen.has(raw)) {
+  // one set operation: an object already seen leaves the size as it was
+  const seen = walk.seen;
+  const size = seen.size;
+  seen.add(raw);
+  if (seen.size === size) {
     if (node === undefined) (walk.repeated ??= new Set()).add(raw);
     return node;
   }
-  walk.seen.add(raw);
   if (node !== undefined) {
     if (node.lostLink) walk.relinked.push(node);
     return adoptChildren(raw, node, walk);

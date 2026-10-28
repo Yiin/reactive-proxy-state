@@ -7,6 +7,7 @@ import {
 } from "./utils";
 import { wrapChild, wrapUnplaced } from "./reactive";
 import {
+  Copied,
   LocationNode,
   attachValue,
   copyPayload,
@@ -80,7 +81,8 @@ export function wrapMap<K, V>(map: Map<K, V>, node: LocationNode): Map<K, V> {
             newValue: value,
           };
           // copies the payload, or throws, before the write
-          if (!copyPayload(event, target)) {
+          const copied = copyPayload(event, target);
+          if (copied === Copied.Reaches) {
             copyPayloadReaching(event!, target, shallowCopy(target).set(key, value));
           }
           target.set(key, value);
@@ -88,7 +90,7 @@ export function wrapMap<K, V>(map: Map<K, V>, node: LocationNode): Map<K, V> {
 
           // move places before anything can write again (emit may throw)
           if (isObject(oldValue)) detachPlace(oldValue, node, key);
-          if (isObject(value)) attachValue(value, node, key);
+          if (isObject(value) && copied !== Copied.Fresh) attachValue(value, node, key);
 
           if (event !== undefined) dispatch(located!, event);
 
@@ -121,7 +123,7 @@ export function wrapMap<K, V>(map: Map<K, V>, node: LocationNode): Map<K, V> {
             key,
             oldValue,
           };
-          if (!copyPayload(event, target)) {
+          if (copyPayload(event, target) === Copied.Reaches) {
             const after = shallowCopy(target);
             after.delete(key);
             copyPayloadReaching(event!, target, after);

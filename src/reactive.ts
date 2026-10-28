@@ -1,6 +1,7 @@
 import { EmitFunction, Path, ReactiveOptions, StateEvent } from "./types";
-import { SnapshotLimitError, cloneTree, deepEqual, globalSeen, proxyStats, unwrapForStore } from "./utils";
+import { SnapshotLimitError, cloneStored, copiedFresh, deepEqual, globalSeen, proxyStats, unwrapForStore } from "./utils";
 import {
+  Copied,
   LocationNode,
   adoptRoot,
   attachValue,
@@ -92,14 +93,12 @@ export function reactive<T extends object>(
   // emit the initial state event, with a copy like every other event. A
   // value too large to copy (see SNAPSHOT_SHARED_COPY_LIMIT) throws here,
   // before the root has a proxy.
+  let fresh = false;
   if (emit && path.length === 0) {
     try {
-      const initialEvent: StateEvent = {
-        action: "replace",
-        path: [],
-        newValue: cloneTree(obj),
-      };
-      emit(initialEvent);
+      const newValue = cloneStored(obj, undefined);
+      fresh = copiedFresh;
+      emit({ action: "replace", path: [], newValue });
     } catch (error) {
       if (error instanceof SnapshotLimitError) throw error;
       console.error("Failed to emit initial reactive state:", error);
@@ -109,8 +108,9 @@ export function reactive<T extends object>(
   const node = ensureLocationNode(obj);
   node.root = { emit, path };
   node.scope = node.root;
-  // an object at two places in the initial value emits to both from the start
-  if (emit) adoptRoot(node);
+  // an object at two places in the initial value emits to both from the
+  // start; a fresh value has no such object (see `cloneStored`)
+  if (emit && !fresh) adoptRoot(node);
   return createProxy(obj, node, options);
 }
 
@@ -215,7 +215,8 @@ function wrapObject<T extends object>(obj: T, node: LocationNode, options?: Reac
         newValue: value,
       };
       // copies the payload, or throws, before the write
-      if (!copyPayload(event, target)) {
+      const copied = copyPayload(event, target);
+      if (copied === Copied.Reaches) {
         // the payload reaches `target`: copy it with the write made on a copy of `target`
         const after = shallowCopy(target);
         // a non-enumerable property stays out of copies, written or not
@@ -228,7 +229,7 @@ function wrapObject<T extends object>(obj: T, node: LocationNode, options?: Reac
       if (result && emits) {
         // move places before anything can write again (emit may throw)
         if (isObject(oldValue)) detachPlace(oldValue, node, prop);
-        if (isObject(value)) attachValue(value, node, prop);
+        if (isObject(value) && copied !== Copied.Fresh) attachValue(value, node, prop);
 
         if (event !== undefined) dispatch(located!, event);
 
@@ -253,7 +254,7 @@ function wrapObject<T extends object>(obj: T, node: LocationNode, options?: Reac
         path: located.paths[0],
         oldValue,
       };
-      if (!copyPayload(event, target)) {
+      if (copyPayload(event, target) === Copied.Reaches) {
         const after = shallowCopy(target);
         delete after[prop];
         copyPayloadReaching(event!, target, after);

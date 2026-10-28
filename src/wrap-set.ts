@@ -1,6 +1,7 @@
 import { unwrapForStore, wrapperCache, globalSeen, proxyStats } from "./utils";
 import { wrapChild } from "./reactive";
 import {
+  Copied,
   LocationNode,
   attachValue,
   copyPayload,
@@ -62,13 +63,14 @@ export function wrapSet<T>(set: Set<T>, node: LocationNode): Set<T> {
               value: value,
             };
             // copies the payload, or throws, before the write
-            if (!copyPayload(event, target)) {
+            const copied = copyPayload(event, target);
+            if (copied === Copied.Reaches) {
               copyPayloadReaching(event!, target, shallowCopy(target).add(value));
             }
             target.add(value);
             const newSize = target.size;
 
-            if (isObject(value)) attachValue(value, node, undefined);
+            if (isObject(value) && copied !== Copied.Fresh) attachValue(value, node, undefined);
             if (event !== undefined) dispatch(located!, event);
             trigger(target, Symbol.iterator);
             if (oldSize !== newSize) {
@@ -93,7 +95,7 @@ export function wrapSet<T>(set: Set<T>, node: LocationNode): Set<T> {
               value: value,
               oldValue: oldValue,
             };
-            if (!copyPayload(event, target)) {
+            if (copyPayload(event, target) === Copied.Reaches) {
               const after = shallowCopy(target);
               after.delete(value);
               copyPayloadReaching(event!, target, after);
