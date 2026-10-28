@@ -1,25 +1,28 @@
-import { EmitFunction, Path, StateEvent } from "./types";
 import {
-  deepClone,
+  cloneTree,
   deepEqual,
   unwrapForStore,
-  getPathConcat,
-  setPathConcat,
   wrapperCache,
   globalSeen,
   proxyStats,
 } from "./utils";
-import { reactive } from "./reactive";
-import { wrapArray } from "./wrap-array";
-import { wrapSet } from "./wrap-set";
+import { wrapChild, wrapUnplaced } from "./reactive";
+import {
+  LocationNode,
+  attachValue,
+  detachPlace,
+  dispatch,
+  evictDeep,
+  locate,
+} from "./location";
 import { track, trigger } from "./watch-effect";
 import { ReactiveFlags } from "./constants";
 
-export function wrapMap<K, V>(
-  map: Map<K, V>,
-  emit?: EmitFunction,
-  path: Path = []
-): Map<K, V> {
+function isObject(value: unknown): value is object {
+  return value !== null && typeof value === "object";
+}
+
+export function wrapMap<K, V>(map: Map<K, V>, node: LocationNode): Map<K, V> {
   const cachedProxy = wrapperCache.get(map);
   if (cachedProxy) return cachedProxy as Map<K, V>;
   if (globalSeen.has(map)) return globalSeen.get(map);
@@ -67,21 +70,20 @@ export function wrapMap<K, V>(
           target.set(key, value);
           const newSize = target.size;
 
-          const pathKey = path.join(".");
-          let cachedPath = getPathConcat(pathKey);
-          if (cachedPath === undefined) {
-            cachedPath = path;
-            setPathConcat(pathKey, cachedPath);
-          }
+          // move places before anything can write again (emit may throw)
+          if (isObject(oldValue)) detachPlace(oldValue, node, key);
+          if (isObject(value)) attachValue(value, node, key);
 
-          const event: StateEvent = {
-            action: "map-set",
-            path: cachedPath,
-            key,
-            oldValue,
-            newValue: value !== null && typeof value === 'object' ? deepClone(value) : value,
-          };
-          emit?.(event);
+          const located = locate(node);
+          if (located !== undefined) {
+            dispatch(located, {
+              action: "map-set",
+              path: located.paths[0],
+              key,
+              oldValue,
+              newValue: isObject(value) ? cloneTree(value) : value,
+            });
+          }
 
           if (!existed) {
             trigger(target, Symbol.iterator);
@@ -92,6 +94,7 @@ export function wrapMap<K, V>(
             trigger(target, String(key));
           }
 
+          if (isObject(oldValue)) evictDeep(oldValue);
           return receiver;
         };
         return methodCache[prop];
@@ -108,26 +111,24 @@ export function wrapMap<K, V>(
           const newSize = target.size;
 
           if (result) {
-            const pathKey = path.join(".");
-            let cachedPath = getPathConcat(pathKey);
-            if (cachedPath === undefined) {
-              cachedPath = path;
-              setPathConcat(pathKey, cachedPath);
-            }
+            if (isObject(oldValue)) detachPlace(oldValue, node, key);
 
-            const event: StateEvent = {
-              action: "map-delete",
-              path: cachedPath,
-              key,
-              oldValue,
-            };
-            emit?.(event);
+            const located = locate(node);
+            if (located !== undefined) {
+              dispatch(located, {
+                action: "map-delete",
+                path: located.paths[0],
+                key,
+                oldValue,
+              });
+            }
 
             trigger(target, Symbol.iterator);
             if (oldSize !== newSize) {
               trigger(target, "size");
             }
             trigger(target, String(key));
+            if (isObject(oldValue)) evictDeep(oldValue);
           }
 
           return result;
@@ -139,19 +140,29 @@ export function wrapMap<K, V>(
           const oldSize = target.size;
           if (oldSize === 0) return;
 
+          const removed = [...target];
           target.clear();
           const newSize = target.size;
 
-          const event: StateEvent = {
-            action: "map-clear",
-            path: path,
-            key: null,
-          };
-          emit?.(event);
+          for (const [key, value] of removed) {
+            if (isObject(value)) detachPlace(value, node, key);
+          }
+
+          const located = locate(node);
+          if (located !== undefined) {
+            dispatch(located, {
+              action: "map-clear",
+              path: located.paths[0],
+              key: null,
+            });
+          }
 
           trigger(target, Symbol.iterator);
           if (oldSize !== newSize) {
             trigger(target, "size");
+          }
+          for (const [, value] of removed) {
+            if (isObject(value)) evictDeep(value);
           }
         };
         return methodCache[prop];
@@ -162,26 +173,7 @@ export function wrapMap<K, V>(
           const value = target.get(key);
 
           if (!value || typeof value !== "object") return value;
-          if (globalSeen.has(value)) return globalSeen.get(value);
-
-          const cachedValueProxy = wrapperCache.get(value);
-          if (cachedValueProxy) return cachedValueProxy;
-
-          const keyString = String(key);
-          const pathKey =
-            path.length > 0 ? `${path.join(".")}.${keyString}` : keyString;
-          let newPath = getPathConcat(pathKey);
-
-          if (newPath === undefined) {
-            newPath = path.concat(keyString);
-            setPathConcat(pathKey, newPath);
-          }
-
-          if (value instanceof Map) return wrapMap(value, emit, newPath);
-          if (value instanceof Set) return wrapSet(value, emit, newPath);
-          if (Array.isArray(value)) return wrapArray(value, emit, newPath);
-          if (value instanceof Date) return new Date(value.getTime());
-          return reactive(value, emit, newPath);
+          return wrapChild(value, node, key);
         };
         return methodCache[prop];
       }
@@ -202,7 +194,6 @@ export function wrapMap<K, V>(
         prop === "forEach"
       ) {
         track(target, Symbol.iterator);
-        const originalMethod = Reflect.get(target, prop, receiver);
 
         if (prop === "forEach") {
           methodCache[prop] = (
@@ -217,77 +208,20 @@ export function wrapMap<K, V>(
           return methodCache[prop];
         }
 
-        methodCache[prop] = function* (...args: any[]) {
-          const iterator = originalMethod.apply(target, args);
-
-          for (const entry of iterator) {
-            let keyToWrap = entry;
-            let valueToWrap = entry;
-            let isEntry = false;
-
-            if (prop === "entries" || prop === Symbol.iterator) {
-              keyToWrap = entry[0];
-              valueToWrap = entry[1];
-              isEntry = true;
+        methodCache[prop] = function* () {
+          for (const [key, value] of target.entries()) {
+            if (prop === "keys") {
+              yield key;
+              continue;
             }
-
-            let wrappedKey = keyToWrap;
-            if (isEntry && keyToWrap && typeof keyToWrap === "object") {
-              if (globalSeen.has(keyToWrap)) {
-                wrappedKey = globalSeen.get(keyToWrap);
-              } else {
-                const pathKey =
-                  path.length > 0
-                    ? `${path.join(".")}.${String(keyToWrap)}`
-                    : String(keyToWrap);
-                let keyPath = getPathConcat(pathKey);
-                if (keyPath === undefined) {
-                  keyPath = path.concat(String(keyToWrap));
-                  setPathConcat(pathKey, keyPath);
-                }
-                wrappedKey = reactive(keyToWrap, emit, keyPath);
-              }
-            }
-
-            let wrappedValue = valueToWrap;
-            if (valueToWrap && typeof valueToWrap === "object") {
-              if (globalSeen.has(valueToWrap)) {
-                wrappedValue = globalSeen.get(valueToWrap);
-              } else {
-                const cachedValueProxy = wrapperCache.get(valueToWrap);
-                if (cachedValueProxy) {
-                  wrappedValue = cachedValueProxy;
-                } else {
-                  const keyString = String(keyToWrap);
-                  const pathKey =
-                    path.length > 0
-                      ? `${path.join(".")}.${keyString}`
-                      : keyString;
-                  let newPath = getPathConcat(pathKey);
-                  if (newPath === undefined) {
-                    newPath = path.concat(keyString);
-                    setPathConcat(pathKey, newPath);
-                  }
-                  if (valueToWrap instanceof Map)
-                    wrappedValue = wrapMap(valueToWrap, emit, newPath);
-                  else if (valueToWrap instanceof Set)
-                    wrappedValue = wrapSet(valueToWrap, emit, newPath);
-                  else if (Array.isArray(valueToWrap))
-                    wrappedValue = wrapArray(valueToWrap, emit, newPath);
-                  else if (valueToWrap instanceof Date)
-                    wrappedValue = new Date(valueToWrap.getTime());
-                  else wrappedValue = reactive(valueToWrap, emit, newPath);
-                }
-              }
-            }
-
-            if (prop === "entries" || prop === Symbol.iterator) {
-              yield [wrappedKey, wrappedValue];
-            } else if (prop === "values") {
+            const wrappedValue = isObject(value) ? wrapChild(value, node, key) : value;
+            if (prop === "values") {
               yield wrappedValue;
-            } else {
-              yield wrappedKey;
+              continue;
             }
+            // An object key has no place in the tree: its proxy emits only
+            // if the same object also sits somewhere as a value.
+            yield [isObject(key) ? wrapUnplaced(key) : key, wrappedValue];
           }
         };
         return methodCache[prop];

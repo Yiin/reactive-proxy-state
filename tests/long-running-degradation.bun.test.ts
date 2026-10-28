@@ -10,7 +10,7 @@
  */
 import { describe, test, expect, beforeEach } from 'bun:test'
 import { reactive, getProxyStats, resetProxyStats, deepToRaw } from '../src'
-import { globalSeen, wrapperCache, pathConcatCache } from '../src/utils'
+import { globalSeen, wrapperCache } from '../src/utils'
 import type { StateEvent } from '../src/types'
 
 // ---------------------------------------------------------------------------
@@ -165,7 +165,6 @@ describe('long-running degradation', () => {
       heapMB: number
       proxiesCreated: number
       proxiesEvicted: number
-      pathCacheSize: number
     }[] = []
 
     let batchTimes: number[] = []
@@ -193,22 +192,20 @@ describe('long-running degradation', () => {
           heapMB: Math.round(process.memoryUsage().heapUsed / (1024 * 1024)),
           proxiesCreated: stats.created,
           proxiesEvicted: stats.staleEvicted,
-          pathCacheSize: stats.pathConcatCacheSize,
         })
         batchTimes = []
       }
     }
 
     console.log('\n=== 100k Mutation Cycles ===')
-    console.log('  cycle     | median ms | heap MB | proxies (created/evicted) | pathCache')
-    console.log('  ----------|-----------|---------|---------------------------|----------')
+    console.log('  cycle     | median ms | heap MB | proxies (created/evicted)')
+    console.log('  ----------|-----------|---------|--------------------------')
     for (const cp of checkpoints) {
       console.log(
         `  ${String(cp.cycle).padStart(9)} | ` +
         `${cp.mutateMedianMs.toFixed(3).padStart(9)} | ` +
         `${String(cp.heapMB).padStart(7)} | ` +
-        `${String(cp.proxiesCreated).padStart(12)}/${String(cp.proxiesEvicted).padEnd(13)} | ` +
-        `${cp.pathCacheSize}`
+        `${String(cp.proxiesCreated).padStart(12)}/${String(cp.proxiesEvicted)}`
       )
     }
 

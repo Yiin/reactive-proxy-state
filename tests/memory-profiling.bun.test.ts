@@ -722,20 +722,6 @@ describe('memory profiling', () => {
     console.log(`  Reclaimed on stop:    ${fmt(heapAfterWatch - heapAfterCleanup)}`)
   })
 
-  test('pathConcatCache bounded', () => {
-    const state = createProductionStateTree()
-    const proxy = reactive(state) as any
-
-    // Traverse all paths
-    JSON.stringify(proxy)
-
-    const stats = getProxyStats()
-    console.log('\n=== Path Cache ===')
-    console.log(`  pathConcatCache size: ${stats.pathConcatCacheSize}`)
-
-    expect(stats.pathConcatCacheSize).toBeLessThanOrEqual(1000)
-  })
-
   test('emit event collector memory', () => {
     // Check if collected events themselves are a significant memory source
     const state = createProductionStateTree()

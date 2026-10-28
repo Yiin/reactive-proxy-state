@@ -1,15 +1,16 @@
 import { EmitFunction, Path, ReactiveOptions, StateEvent } from "./types";
+import { cloneTree, deepEqual, globalSeen, proxyStats, unwrapForStore } from "./utils";
 import {
-  deepClone,
-  deepEqual,
-  globalSeen,
-  wrapperCache,
-  getPathConcat,
-  setPathConcat,
-  proxyStats,
+  LocationNode,
+  attachValue,
+  detachPlace,
+  dispatch,
+  ensureLocationNode,
   evictDeep,
-  unwrapForStore,
-} from "./utils";
+  locate,
+  notePlace,
+  restoreEvicted,
+} from "./location";
 import { wrapArray } from "./wrap-array";
 import { wrapMap } from "./wrap-map";
 import { wrapSet } from "./wrap-set";
@@ -54,7 +55,11 @@ function createAsyncEmit(emit: EmitFunction): EmitFunction {
 }
 
 /**
- * Create a reactive proxy for an object
+ * Create a reactive proxy for an object.
+ *
+ * Called by users, this makes a root: events from anywhere below it go to
+ * `emit`, with paths that start with `path`. Nested objects are wrapped on
+ * read by `wrapChild`.
  */
 export function reactive<T extends object>(
   obj: T,
@@ -67,11 +72,12 @@ export function reactive<T extends object>(
     return obj;
   }
 
-  // prevent infinite recursion with circular references
-  if (globalSeen.has(obj)) return globalSeen.get(obj);
+  // one proxy per raw object
+  const existing = globalSeen.get(obj);
+  if (existing !== undefined) return existing;
 
   // At the root call, wrap emit with async batching if requested.
-  // The wrapped emit is passed to all nested wrappers so they inherit the behavior.
+  // Every location under this root emits through the wrapped function.
   if (emit && path.length === 0 && options?.async) {
     emit = createAsyncEmit(emit)
   }
@@ -91,32 +97,49 @@ export function reactive<T extends object>(
     }
   }
 
-  // Delegate to specific wrappers for root collections
-  if (Array.isArray(obj)) {
-    return wrapArray(obj, emit, path) as T;
-  }
-  if (obj instanceof Map) {
-    return wrapMap(obj, emit, path) as T;
-  }
-  if (obj instanceof Set) {
-    return wrapSet(obj, emit, path) as T;
-  }
+  const node = ensureLocationNode(obj);
+  node.root = { emit, path };
+  node.scope = node.root;
+  return createProxy(obj, node, options);
+}
 
-  // helper to wrap nested values recursively
-  function wrapValue(val: any, subPath: Path): any {
-    if (!isObject(val)) return val; // primitives are returned directly
-    if (globalSeen.has(val)) return globalSeen.get(val); // handle cycles within nested structures
+/**
+ * The proxy for `raw`, which a read found at `parent[key]`. Records that
+ * place, so the proxy's events name where the object is now.
+ */
+export function wrapChild(
+  raw: any,
+  parent: LocationNode,
+  key: unknown,
+  options?: ReactiveOptions
+): any {
+  if (raw[ReactiveFlags.SKIP]) return raw;
+  if (raw instanceof Date) return new Date(raw.getTime()); // dates are not proxied, return copy
+  const node = ensureLocationNode(raw);
+  notePlace(node, parent, key);
+  node.scope ??= parent.scope;
+  const existing = globalSeen.get(raw);
+  if (existing !== undefined) return existing;
+  return restoreEvicted(node) ?? createProxy(raw, node, options);
+}
 
-    // delegate wrapping to specific functions based on type
-    if (Array.isArray(val)) return wrapArray(val, emit, subPath);
-    if (val instanceof Map) return wrapMap(val, emit, subPath);
-    if (val instanceof Set) return wrapSet(val, emit, subPath);
-    if (val instanceof Date) return new Date(val.getTime()); // dates are not proxied, return copy
+/** The proxy for an object that has no place of its own (a map key). */
+export function wrapUnplaced(raw: any): any {
+  if (raw[ReactiveFlags.SKIP]) return raw;
+  const existing = globalSeen.get(raw);
+  if (existing !== undefined) return existing;
+  const node = ensureLocationNode(raw);
+  return restoreEvicted(node) ?? createProxy(raw, node);
+}
 
-    // default to reactive for plain objects
-    return reactive(val, emit, subPath, options);
-  }
+function createProxy(raw: any, node: LocationNode, options?: ReactiveOptions): any {
+  if (Array.isArray(raw)) return wrapArray(raw, node);
+  if (raw instanceof Map) return wrapMap(raw, node);
+  if (raw instanceof Set) return wrapSet(raw, node);
+  return wrapObject(raw, node, options);
+}
 
+function wrapObject<T extends object>(obj: T, node: LocationNode, options?: ReactiveOptions): T {
   const proxy = new Proxy(obj, {
     get(target: T, prop: string | symbol, receiver: any): any {
       // Special handling for reactive flags
@@ -135,19 +158,8 @@ export function reactive<T extends object>(
       // return non-objects directly without wrapping
       if (!isObject(value)) return value;
 
-      // calculate the path for the nested property, using cache for performance
-      const propKey = String(prop);
-      const pathKey =
-        path.length > 0 ? `${path.join(".")}.${propKey}` : propKey;
-      let newPath = getPathConcat(pathKey);
-
-      if (newPath === undefined) {
-        newPath = path.concat(propKey);
-        setPathConcat(pathKey, newPath);
-      }
-
       // wrap the nested value if it's an object/collection
-      return wrapValue(value, newPath);
+      return wrapChild(value, node, prop, options);
     },
     set(target: T, prop: string | symbol, value: any, receiver: any): boolean {
       // Spreading a reactive proxy (`{ ...proxy }`) embeds proxy wrappers
@@ -175,32 +187,27 @@ export function reactive<T extends object>(
 
       // only emit and trigger if the set was successful and wasn't intercepted by a setter
       if (result && (!descriptor || !descriptor.set)) {
-        // calculate path, using cache
-        const propKey = String(prop);
-        const pathKey =
-          path.length > 0 ? `${path.join(".")}.${propKey}` : propKey;
-        let newPath = getPathConcat(pathKey);
+        // move places before anything can write again (emit may throw)
+        if (isObject(oldValue)) detachPlace(oldValue, node, prop);
+        if (isObject(value)) attachValue(value, node, prop);
 
-        if (newPath === undefined) {
-          newPath = path.concat(propKey);
-          setPathConcat(pathKey, newPath);
+        const located = locate(node, prop);
+        if (located !== undefined) {
+          dispatch(located, {
+            action: "set",
+            path: located.paths[0],
+            oldValue,
+            newValue: isObject(value) ? cloneTree(value) : value,
+          });
         }
-
-        const event: StateEvent = {
-          action: "set",
-          path: newPath,
-          oldValue,
-          newValue: isObject(value) ? deepClone(value) : value,
-        };
-
-        emit?.(event);
 
         // notify effects watching this property
         trigger(target, prop);
 
-        // Recursively evict the entire old object tree from proxy caches so
-        // GC can collect all stale proxies and their methodCache closures.
-        if (isObject(oldValue) && oldValue !== value) {
+        // Evict the old object tree from proxy caches so GC can collect
+        // stale proxies and their methodCache closures. A part of it that
+        // still sits in the tree keeps its proxy.
+        if (isObject(oldValue)) {
           evictDeep(oldValue);
         }
       }
@@ -213,24 +220,16 @@ export function reactive<T extends object>(
 
       // only emit and trigger if the property existed and deletion was successful
       if (hadProperty && result) {
-        // calculate path, using cache
-        const propKey = String(prop);
-        const pathKey =
-          path.length > 0 ? `${path.join(".")}.${propKey}` : propKey;
-        let newPath = getPathConcat(pathKey);
+        if (isObject(oldValue)) detachPlace(oldValue, node, prop);
 
-        if (newPath === undefined) {
-          newPath = path.concat(propKey);
-          setPathConcat(pathKey, newPath);
+        const located = locate(node, prop);
+        if (located !== undefined) {
+          dispatch(located, {
+            action: "delete",
+            path: located.paths[0],
+            oldValue,
+          });
         }
-
-        const event: StateEvent = {
-          action: "delete",
-          path: newPath,
-          oldValue,
-        };
-
-        emit?.(event);
 
         // notify effects watching this property
         trigger(target, prop);

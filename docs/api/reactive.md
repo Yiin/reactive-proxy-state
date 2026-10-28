@@ -108,6 +108,23 @@ state.user.name = "Bob";
 // Emits: { action: 'set', path: ['user', 'name'], oldValue: 'Alice', newValue: 'Bob' }
 ```
 
+### Paths follow moves
+
+An event's path names where the object is when the event is made. A proxy you keep across a structural change still writes to the right place:
+
+```ts
+const state = reactive({ list: [{ id: "A", xp: 0 }, { id: "B", xp: 0 }] }, emit);
+const b = state.list[1];
+state.list.splice(0, 1); // emits { action: 'array-splice', path: ['list'], key: 0, deleteCount: 1, ... }
+b.xp = 12; // emits { action: 'set', path: ['list', '0', 'xp'], ... }
+```
+
+- `splice`, `shift`, `unshift`, `pop`, `push`, index writes, `length` writes, whole-array replacement and map or set changes all move the paths of the objects they keep, at any depth.
+- `sort`, `reverse`, `fill` and `copyWithin` emit one `replace` event with the array's new contents, and return the proxy.
+- A proxy whose object left the tree emits nothing. If the object comes back, its proxy emits at the new place.
+- An object placed at two places (`list[0] = list[1]`) emits one event per place for each write, because a replica holds a copy at each place. Event payloads never share objects between places.
+- An object reachable from two roots emits only to the root it was first read under.
+
 When forwarding events across workers or other structured-clone boundaries, convert them first:
 
 ```ts

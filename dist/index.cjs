@@ -73,9 +73,9 @@ var require_shared_cjs = __commonJS((exports2) => {
   var isFunction = (val) => typeof val === "function";
   var isString = (val) => typeof val === "string";
   var isSymbol = (val) => typeof val === "symbol";
-  var isObject4 = (val) => val !== null && typeof val === "object";
+  var isObject7 = (val) => val !== null && typeof val === "object";
   var isPromise = (val) => {
-    return (isObject4(val) || isFunction(val)) && isFunction(val.then) && isFunction(val.catch);
+    return (isObject7(val) || isFunction(val)) && isFunction(val.then) && isFunction(val.catch);
   };
   var objectToString = Object.prototype.toString;
   var toTypeString = (value) => objectToString.call(value);
@@ -277,7 +277,7 @@ var require_shared_cjs = __commonJS((exports2) => {
         }
       }
       return res;
-    } else if (isString(value) || isObject4(value)) {
+    } else if (isString(value) || isObject7(value)) {
       return value;
     }
   }
@@ -320,7 +320,7 @@ var require_shared_cjs = __commonJS((exports2) => {
           res += normalized + " ";
         }
       }
-    } else if (isObject4(value)) {
+    } else if (isObject7(value)) {
       for (const name in value) {
         if (value[name]) {
           res += name + " ";
@@ -457,8 +457,8 @@ var require_shared_cjs = __commonJS((exports2) => {
     if (aValidType || bValidType) {
       return aValidType && bValidType ? looseCompareArrays(a, b) : false;
     }
-    aValidType = isObject4(a);
-    bValidType = isObject4(b);
+    aValidType = isObject7(a);
+    bValidType = isObject7(b);
     if (aValidType || bValidType) {
       if (!aValidType || !bValidType) {
         return false;
@@ -485,7 +485,7 @@ var require_shared_cjs = __commonJS((exports2) => {
     return !!(val && val["__v_isRef"] === true);
   };
   var toDisplayString = (val) => {
-    return isString(val) ? val : val == null ? "" : isArray(val) || isObject4(val) && (val.toString === objectToString || !isFunction(val.toString)) ? isRef3(val) ? toDisplayString(val.value) : JSON.stringify(val, replacer, 2) : String(val);
+    return isString(val) ? val : val == null ? "" : isArray(val) || isObject7(val) && (val.toString === objectToString || !isFunction(val.toString)) ? isRef3(val) ? toDisplayString(val.value) : JSON.stringify(val, replacer, 2) : String(val);
   };
   var replacer = (_key, val) => {
     if (isRef3(val)) {
@@ -503,7 +503,7 @@ var require_shared_cjs = __commonJS((exports2) => {
       };
     } else if (isSymbol(val)) {
       return stringifySymbol(val);
-    } else if (isObject4(val) && !isArray(val) && !isPlainObject(val)) {
+    } else if (isObject7(val) && !isArray(val) && !isPlainObject(val)) {
       return String(val);
     }
     return val;
@@ -552,7 +552,7 @@ var require_shared_cjs = __commonJS((exports2) => {
   exports2.isMap = isMap;
   exports2.isMathMLTag = isMathMLTag;
   exports2.isModelListener = isModelListener;
-  exports2.isObject = isObject4;
+  exports2.isObject = isObject7;
   exports2.isOn = isOn;
   exports2.isPlainObject = isPlainObject;
   exports2.isPromise = isPromise;
@@ -2327,6 +2327,8 @@ var require_reactivity_cjs = __commonJS((exports2) => {
 // src/index.ts
 var exports_src = {};
 __export(exports_src, {
+  wrapUnplaced: () => wrapUnplaced,
+  wrapChild: () => wrapChild,
   watchEffect: () => watchEffect,
   watch: () => watch,
   updateState: () => updateState,
@@ -2395,8 +2397,6 @@ var deepEqualCache = new WeakMap;
 var MAX_CACHE_SIZE = 1000;
 var pathCache = new WeakMap;
 var pathCacheSize = new WeakMap;
-var pathConcatCache = new Map;
-var MAX_PATH_CACHE_SIZE = 1000;
 var globalSeen = new WeakMap;
 var wrapperCache = new WeakMap;
 var proxyStats = {
@@ -2408,7 +2408,7 @@ var proxyStats = {
   staleEvicted: 0
 };
 function getProxyStats() {
-  return { ...proxyStats, pathConcatCacheSize: pathConcatCache.size };
+  return { ...proxyStats };
 }
 function resetProxyStats() {
   proxyStats.created = 0;
@@ -2417,41 +2417,6 @@ function resetProxyStats() {
   proxyStats.sets = 0;
   proxyStats.objects = 0;
   proxyStats.staleEvicted = 0;
-}
-function evictDeep(value) {
-  if (value == null || typeof value !== "object")
-    return;
-  value = toRaw(value);
-  if (!globalSeen.has(value))
-    return;
-  globalSeen.delete(value);
-  wrapperCache.delete(value);
-  proxyStats.staleEvicted++;
-  if (Array.isArray(value)) {
-    for (let i = 0;i < value.length; i++) {
-      if (value[i] != null && typeof value[i] === "object") {
-        evictDeep(value[i]);
-      }
-    }
-  } else if (value instanceof Map) {
-    for (const v of value.values()) {
-      if (v != null && typeof v === "object")
-        evictDeep(v);
-    }
-  } else if (value instanceof Set) {
-    for (const v of value) {
-      if (v != null && typeof v === "object")
-        evictDeep(v);
-    }
-  } else {
-    const keys = Object.keys(value);
-    for (let i = 0;i < keys.length; i++) {
-      const child = value[keys[i]];
-      if (child != null && typeof child === "object") {
-        evictDeep(child);
-      }
-    }
-  }
 }
 function cleanupPathCache(root) {
   const cache = pathCache.get(root);
@@ -2465,18 +2430,6 @@ function cleanupPathCache(root) {
       count++;
     }
     pathCacheSize.set(root, MAX_CACHE_SIZE - entriesToRemove);
-  }
-}
-function cleanupPathConcatCache() {
-  if (pathConcatCache.size > MAX_PATH_CACHE_SIZE) {
-    const entriesToRemove = Math.floor(MAX_PATH_CACHE_SIZE * 0.2);
-    let count = 0;
-    for (const key of pathConcatCache.keys()) {
-      if (count >= entriesToRemove)
-        break;
-      pathConcatCache.delete(key);
-      count++;
-    }
   }
 }
 function deepEqual(a, b, seen = new WeakMap) {
@@ -2566,21 +2519,6 @@ function evictDescendantsFromPathCache(root, pathKey) {
     pathCacheSize.set(root, (pathCacheSize.get(root) ?? cache.size) - evicted);
   }
 }
-function getPathConcat(path) {
-  const result = pathConcatCache.get(path);
-  if (result !== undefined) {
-    pathConcatCache.delete(path);
-    pathConcatCache.set(path, result);
-  }
-  return result;
-}
-function setPathConcat(path, value) {
-  if (pathConcatCache.has(path)) {
-    pathConcatCache.delete(path);
-  }
-  pathConcatCache.set(path, value);
-  cleanupPathConcatCache();
-}
 function isObject(val) {
   return val !== null && typeof val === "object";
 }
@@ -2613,6 +2551,54 @@ function traverse(value, seen = new Set) {
     }
   }
   return value;
+}
+function cloneTree(value, ancestors = new Map) {
+  if (value === null || typeof value !== "object") {
+    return value;
+  }
+  if (value instanceof Date) {
+    return new Date(value.getTime());
+  }
+  const identity = toRaw(value);
+  const cycle = ancestors.get(identity);
+  if (cycle !== undefined)
+    return cycle;
+  let copy;
+  if (Array.isArray(value)) {
+    copy = [];
+    ancestors.set(identity, copy);
+    for (let i = 0;i < value.length; i++) {
+      copy[i] = cloneTree(value[i], ancestors);
+    }
+  } else if (value instanceof Map) {
+    copy = new Map;
+    ancestors.set(identity, copy);
+    value.forEach((entry, key) => {
+      copy.set(cloneTree(key, ancestors), cloneTree(entry, ancestors));
+    });
+  } else if (value instanceof Set) {
+    copy = new Set;
+    ancestors.set(identity, copy);
+    value.forEach((entry) => {
+      copy.add(cloneTree(entry, ancestors));
+    });
+  } else {
+    copy = Object.create(Object.getPrototypeOf(value));
+    ancestors.set(identity, copy);
+    for (const key in value) {
+      if (Object.prototype.hasOwnProperty.call(value, key)) {
+        copy[key] = cloneTree(value[key], ancestors);
+      }
+    }
+    const symbolKeys = Object.getOwnPropertySymbols(value);
+    for (const symbolKey of symbolKeys) {
+      if (Object.prototype.propertyIsEnumerable.call(value, symbolKey)) {
+        copy[symbolKey] = cloneTree(value[symbolKey], ancestors);
+      }
+    }
+  }
+  ancestors.delete(identity);
+  return copy;
 }
 function deepClone(value, seen = new WeakMap) {
   if (value === null || typeof value !== "object") {
@@ -2906,6 +2892,346 @@ function updateState(root, event) {
     evictDescendantsFromPathCache(root, fullPathKey);
   }
 }
+// src/location.ts
+var nodes = new WeakMap;
+var FAST_CHAIN_LIMIT = 256;
+function isObject2(value) {
+  return value !== null && typeof value === "object";
+}
+function ensureLocationNode(raw) {
+  let node = nodes.get(raw);
+  if (node === undefined) {
+    node = {
+      raw,
+      kind: raw instanceof Map ? 1 /* Map */ : raw instanceof Set ? 2 /* Set */ : 0 /* Plain */,
+      places: [],
+      root: undefined,
+      scope: undefined,
+      evicted: undefined
+    };
+    nodes.set(raw, node);
+  }
+  return node;
+}
+function holds(place, raw) {
+  const container = place.parent.raw;
+  switch (place.parent.kind) {
+    case 1 /* Map */:
+      return container.get(place.key) === raw;
+    case 2 /* Set */:
+      return container.has(raw);
+    default:
+      return container[place.key] === raw;
+  }
+}
+function segment(place, raw) {
+  if (place.parent.kind === 2 /* Set */) {
+    let index = 0;
+    for (const member of place.parent.raw) {
+      if (member === raw)
+        break;
+      index++;
+    }
+    return String(index);
+  }
+  return String(place.key);
+}
+function samePlace(place, parent, key) {
+  return place.parent === parent && (parent.kind === 2 /* Set */ || place.key === key);
+}
+function find(node, tail, firstOnly) {
+  let reversed;
+  let current = node;
+  for (let steps = 0;steps < FAST_CHAIN_LIMIT; steps++) {
+    const places = current.places;
+    const root = current.root;
+    if (root !== undefined) {
+      if (places.length !== 0)
+        break;
+      return [{ root, path: buildPath(root.path, reversed, tail) }];
+    }
+    if (places.length !== 1) {
+      if (places.length === 0)
+        return [];
+      break;
+    }
+    const place = places[0];
+    if (!holds(place, current.raw)) {
+      places.length = 0;
+      return [];
+    }
+    (reversed ??= []).push(segment(place, current.raw));
+    current = place.parent;
+  }
+  const out = [];
+  collect(node, tail === undefined ? [] : [String(tail)], new Set, out, firstOnly);
+  return out;
+}
+function buildPath(base, reversed, tail) {
+  const middle = reversed === undefined ? 0 : reversed.length;
+  const path = new Array(base.length + middle + (tail === undefined ? 0 : 1));
+  let index = 0;
+  for (let i = 0;i < base.length; i++)
+    path[index++] = base[i];
+  for (let i = middle - 1;i >= 0; i--)
+    path[index++] = reversed[i];
+  if (tail !== undefined)
+    path[index] = String(tail);
+  return path;
+}
+function collect(node, suffix, visiting, out, firstOnly) {
+  if (visiting.has(node))
+    return;
+  visiting.add(node);
+  const root = node.root;
+  if (root !== undefined) {
+    out.push({ root, path: [...root.path, ...suffix] });
+  }
+  const places = node.places;
+  let stale = false;
+  for (let i = 0;i < places.length && !(firstOnly && out.length > 0); i++) {
+    const place = places[i];
+    if (!holds(place, node.raw)) {
+      stale = true;
+      continue;
+    }
+    collect(place.parent, [segment(place, node.raw), ...suffix], visiting, out, firstOnly);
+  }
+  if (stale)
+    node.places = places.filter((place) => holds(place, node.raw));
+  visiting.delete(node);
+}
+function locate(node, tail) {
+  const found = find(node, tail, false);
+  if (found.length === 0)
+    return;
+  let root = found[0].root;
+  for (let i = 1;i < found.length; i++) {
+    if (found[i].root !== root) {
+      if (node.scope !== undefined && found.some((entry) => entry.root === node.scope)) {
+        root = node.scope;
+      }
+      break;
+    }
+  }
+  if (root.emit === undefined)
+    return;
+  const paths = [];
+  for (let i = 0;i < found.length; i++) {
+    if (found[i].root === root)
+      paths.push(found[i].path);
+  }
+  return { root, paths };
+}
+function isAttached(node) {
+  return find(node, undefined, true).length > 0;
+}
+function dispatch(target, event) {
+  const { root, paths } = target;
+  const emit = root.emit;
+  for (let i = 0;i < paths.length; i++) {
+    const path = paths[i];
+    if (i === 0) {
+      event.path = path;
+      emit(event);
+      continue;
+    }
+    const copy = { ...event, path };
+    if ("newValue" in event)
+      copy.newValue = cloneTree(event.newValue);
+    if ("value" in event)
+      copy.value = cloneTree(event.value);
+    if (event.items !== undefined)
+      copy.items = cloneTree(event.items);
+    emit(copy);
+  }
+}
+function addPlace(node, parent, key) {
+  const places = node.places;
+  for (let i = 0;i < places.length; i++) {
+    if (samePlace(places[i], parent, key))
+      return false;
+  }
+  places.push({ parent, key });
+  return true;
+}
+function prunePlaces(node) {
+  let places = node.places.filter((place) => holds(place, node.raw));
+  if (places.length > 1) {
+    const live = places.filter((place) => isAttached(place.parent));
+    if (live.length > 0)
+      places = live;
+  }
+  node.places = places;
+}
+function notePlace(node, parent, key) {
+  const places = node.places;
+  if (places.length === 1 && samePlace(places[0], parent, key))
+    return;
+  if (addPlace(node, parent, key) && node.places.length > 1)
+    prunePlaces(node);
+}
+function detachPlace(value, parent, key) {
+  const node = nodes.get(value);
+  if (node === undefined)
+    return;
+  const places = node.places;
+  for (let i = 0;i < places.length; i++) {
+    if (samePlace(places[i], parent, key)) {
+      places.splice(i, 1);
+      return;
+    }
+  }
+}
+function adopt(raw, touched, seen) {
+  let node = nodes.get(raw);
+  if (node !== undefined)
+    return node;
+  if (seen.has(raw))
+    return;
+  seen.add(raw);
+  if (raw["__v_skip" /* SKIP */] || raw["__v_isReactive" /* IS_REACTIVE */])
+    return;
+  if (raw instanceof Date || ArrayBuffer.isView(raw))
+    return;
+  const link = (key, child) => {
+    if (!isObject2(child))
+      return;
+    const childNode = adopt(child, touched, seen);
+    if (childNode === undefined)
+      return;
+    node ??= ensureLocationNode(raw);
+    if (addPlace(childNode, node, key))
+      touched.push(childNode);
+  };
+  if (Array.isArray(raw)) {
+    for (let i = 0;i < raw.length; i++)
+      link(i, raw[i]);
+  } else if (raw instanceof Map) {
+    for (const [key, value] of raw)
+      link(key, value);
+  } else if (raw instanceof Set) {
+    for (const member of raw)
+      link(undefined, member);
+  } else {
+    const keys = Object.keys(raw);
+    for (let i = 0;i < keys.length; i++)
+      link(keys[i], raw[keys[i]]);
+  }
+  return node;
+}
+function pruneTouched(touched) {
+  for (let i = 0;i < touched.length; i++) {
+    if (touched[i].places.length > 1)
+      prunePlaces(touched[i]);
+  }
+}
+function attachValue(value, parent, key) {
+  const touched = [];
+  const node = adopt(value, touched, new Set);
+  if (node !== undefined && addPlace(node, parent, key))
+    touched.push(node);
+  pruneTouched(touched);
+}
+function relinkArray(arrayNode, array, from, removed, inserted) {
+  const touched = [];
+  if (inserted !== undefined) {
+    const seen = new Set;
+    for (let i = 0;i < inserted.length; i++) {
+      const value = inserted[i];
+      if (isObject2(value))
+        adopt(value, touched, seen);
+    }
+  }
+  if (removed !== undefined) {
+    for (let i = 0;i < removed.length; i++) {
+      const value = removed[i];
+      if (isObject2(value))
+        stripIndexes(value, arrayNode, from);
+    }
+  }
+  for (let i = from;i < array.length; i++) {
+    const value = array[i];
+    if (isObject2(value))
+      stripIndexes(value, arrayNode, from);
+  }
+  for (let i = from;i < array.length; i++) {
+    const value = array[i];
+    if (!isObject2(value))
+      continue;
+    const node = nodes.get(value);
+    if (node === undefined)
+      continue;
+    node.places.push({ parent: arrayNode, key: i });
+    if (node.places.length > 1)
+      touched.push(node);
+  }
+  pruneTouched(touched);
+}
+function stripIndexes(value, arrayNode, from) {
+  const node = nodes.get(value);
+  if (node === undefined)
+    return;
+  const places = node.places;
+  for (let i = places.length - 1;i >= 0; i--) {
+    const place = places[i];
+    if (place.parent === arrayNode && typeof place.key === "number" && place.key >= from) {
+      places.splice(i, 1);
+    }
+  }
+}
+function evictDeep(value, parent) {
+  if (value == null || typeof value !== "object")
+    return;
+  value = toRaw(value);
+  const proxy = globalSeen.get(value);
+  if (proxy === undefined)
+    return;
+  const node = nodes.get(value);
+  if (node !== undefined) {
+    const onlyUnderParent = parent !== undefined && node.root === undefined && node.places.length === 1 && node.places[0].parent === parent;
+    if (!onlyUnderParent && isAttached(node))
+      return;
+    node.evicted = new WeakRef(proxy);
+  }
+  globalSeen.delete(value);
+  wrapperCache.delete(value);
+  proxyStats.staleEvicted++;
+  if (Array.isArray(value)) {
+    for (let i = 0;i < value.length; i++) {
+      if (value[i] != null && typeof value[i] === "object")
+        evictDeep(value[i], node);
+    }
+  } else if (value instanceof Map) {
+    for (const child of value.values()) {
+      if (child != null && typeof child === "object")
+        evictDeep(child, node);
+    }
+  } else if (value instanceof Set) {
+    for (const child of value) {
+      if (child != null && typeof child === "object")
+        evictDeep(child, node);
+    }
+  } else {
+    const keys = Object.keys(value);
+    for (let i = 0;i < keys.length; i++) {
+      const child = value[keys[i]];
+      if (child != null && typeof child === "object")
+        evictDeep(child, node);
+    }
+  }
+}
+function restoreEvicted(node) {
+  const proxy = node.evicted?.deref();
+  node.evicted = undefined;
+  if (proxy === undefined)
+    return;
+  globalSeen.set(node.raw, proxy);
+  wrapperCache.set(node.raw, proxy);
+  proxyStats.staleEvicted--;
+  return proxy;
+}
+
 // src/watch-effect.ts
 var activeEffect = null;
 var queuedEffects = new Map;
@@ -3072,8 +3398,578 @@ function watchEffect(effectCallback, options = {}) {
   return stopHandle;
 }
 
+// src/wrap-array.ts
+function isObject3(v) {
+  return v && typeof v === "object";
+}
+function arrayIndex(prop) {
+  if (typeof prop !== "string" || prop.length === 0 || prop.length > 10)
+    return -1;
+  const first = prop.charCodeAt(0);
+  if (first < 48 || first > 57 || first === 48 && prop.length > 1)
+    return -1;
+  for (let i = 1;i < prop.length; i++) {
+    const code = prop.charCodeAt(i);
+    if (code < 48 || code > 57)
+      return -1;
+  }
+  const index = Number(prop);
+  return index < 4294967295 ? index : -1;
+}
+function placeKey(prop) {
+  const index = arrayIndex(prop);
+  return index >= 0 ? index : prop;
+}
+function unwrapItems(items) {
+  for (let i = 0;i < items.length; i++) {
+    if (isObject3(items[i]))
+      items[i] = unwrapForStore(items[i]);
+  }
+}
+function evictRemoved(removed) {
+  for (let i = 0;i < removed.length; i++) {
+    if (isObject3(removed[i]))
+      evictDeep(removed[i]);
+  }
+}
+function wrapArray(arr, node) {
+  const cachedProxy = wrapperCache.get(arr);
+  if (cachedProxy)
+    return cachedProxy;
+  if (globalSeen.has(arr))
+    return globalSeen.get(arr);
+  const methodCache = {};
+  const proxy = new Proxy(arr, {
+    get(target, prop, receiver) {
+      if (prop === "__v_raw" /* RAW */)
+        return target;
+      if (prop === "__v_isReactive" /* IS_REACTIVE */)
+        return true;
+      track(target, prop);
+      if (methodCache[prop]) {
+        return methodCache[prop];
+      }
+      switch (prop) {
+        case "sort":
+        case "reverse":
+        case "fill":
+        case "copyWithin": {
+          track(target, "length");
+          const method = Array.prototype[prop];
+          methodCache[prop] = function(...args) {
+            if (prop === "fill" && isObject3(args[0]))
+              args[0] = unwrapForStore(args[0]);
+            const before = target.slice();
+            method.apply(target, args);
+            let changed = false;
+            for (let i = 0;i < before.length; i++) {
+              if (before[i] !== target[i]) {
+                changed = true;
+                break;
+              }
+            }
+            if (changed) {
+              relinkArray(node, target, 0, before, prop === "fill" ? [args[0]] : undefined);
+              const located = locate(node);
+              if (located !== undefined) {
+                dispatch(located, {
+                  action: "replace",
+                  path: located.paths[0],
+                  newValue: cloneTree(target)
+                });
+              }
+              trigger(target, Symbol.iterator);
+              evictRemoved(before);
+            }
+            return proxy;
+          };
+          return methodCache[prop];
+        }
+        case "push":
+          track(target, "length");
+          methodCache[prop] = function(...items) {
+            unwrapItems(items);
+            const oldLength = target.length;
+            const result = target.push(...items);
+            const newLength = target.length;
+            if (items.length > 0) {
+              relinkArray(node, target, oldLength, undefined, items);
+              const located = locate(node);
+              if (located !== undefined) {
+                dispatch(located, {
+                  action: "array-push",
+                  path: located.paths[0],
+                  key: oldLength,
+                  items
+                });
+              }
+              trigger(target, Symbol.iterator);
+              if (oldLength !== newLength) {
+                trigger(target, "length");
+              }
+            }
+            return result;
+          };
+          return methodCache[prop];
+        case "pop":
+          track(target, "length");
+          methodCache[prop] = function() {
+            if (target.length === 0)
+              return;
+            const oldLength = target.length;
+            const poppedIndex = oldLength - 1;
+            const oldValue = target[poppedIndex];
+            const result = target.pop();
+            const newLength = target.length;
+            if (isObject3(oldValue))
+              detachPlace(oldValue, node, poppedIndex);
+            const located = locate(node);
+            if (located !== undefined) {
+              dispatch(located, {
+                action: "array-pop",
+                path: located.paths[0],
+                key: poppedIndex,
+                oldValue
+              });
+            }
+            if (isObject3(oldValue))
+              evictDeep(oldValue);
+            trigger(target, Symbol.iterator);
+            if (oldLength !== newLength) {
+              trigger(target, "length");
+            }
+            return result;
+          };
+          return methodCache[prop];
+        case "shift":
+          track(target, "length");
+          methodCache[prop] = function() {
+            if (target.length === 0)
+              return;
+            const oldLength = target.length;
+            const oldValue = target[0];
+            const result = target.shift();
+            const newLength = target.length;
+            relinkArray(node, target, 0, [oldValue]);
+            const located = locate(node);
+            if (located !== undefined) {
+              dispatch(located, {
+                action: "array-shift",
+                path: located.paths[0],
+                key: 0,
+                oldValue
+              });
+            }
+            if (isObject3(oldValue))
+              evictDeep(oldValue);
+            trigger(target, Symbol.iterator);
+            if (oldLength !== newLength) {
+              trigger(target, "length");
+            }
+            return result;
+          };
+          return methodCache[prop];
+        case "unshift":
+          track(target, "length");
+          methodCache[prop] = function(...items) {
+            unwrapItems(items);
+            const oldLength = target.length;
+            const result = target.unshift(...items);
+            const newLength = target.length;
+            if (items.length > 0) {
+              relinkArray(node, target, 0, undefined, items);
+              const located = locate(node);
+              if (located !== undefined) {
+                dispatch(located, {
+                  action: "array-unshift",
+                  path: located.paths[0],
+                  key: 0,
+                  items
+                });
+              }
+              trigger(target, Symbol.iterator);
+              if (oldLength !== newLength) {
+                trigger(target, "length");
+              }
+            }
+            return result;
+          };
+          return methodCache[prop];
+        case "splice":
+          track(target, "length");
+          methodCache[prop] = function(start, deleteCount, ...items) {
+            unwrapItems(items);
+            const oldLength = target.length;
+            const actualStart = start < 0 ? Math.max(target.length + start, 0) : Math.min(start, target.length);
+            const deleteCountNum = deleteCount === undefined ? target.length - actualStart : Number(deleteCount);
+            const actualDeleteCount = Math.min(deleteCountNum, target.length - actualStart);
+            const deletedItems = target.slice(actualStart, actualStart + actualDeleteCount);
+            const result = target.splice(start, deleteCountNum, ...items);
+            const newLength = target.length;
+            if (actualDeleteCount > 0 || items.length > 0) {
+              relinkArray(node, target, actualStart, deletedItems, items);
+              const located = locate(node);
+              if (located !== undefined) {
+                dispatch(located, {
+                  action: "array-splice",
+                  path: located.paths[0],
+                  key: actualStart,
+                  deleteCount: actualDeleteCount,
+                  items: items.length > 0 ? items : undefined,
+                  oldValues: deletedItems.length > 0 ? deletedItems : undefined
+                });
+              }
+              evictRemoved(deletedItems);
+              trigger(target, Symbol.iterator);
+              if (oldLength !== newLength) {
+                trigger(target, "length");
+              }
+            }
+            return result;
+          };
+          return methodCache[prop];
+        case "find": {
+          track(target, Symbol.iterator);
+          if (!methodCache[prop]) {
+            methodCache[prop] = function(predicate, thisArg) {
+              const idx = Array.prototype.findIndex.call(target, predicate, thisArg);
+              if (idx === -1)
+                return;
+              const value2 = target[idx];
+              if (!isObject3(value2))
+                return value2;
+              return wrapChild(value2, node, idx);
+            };
+          }
+          return methodCache[prop];
+        }
+        case "at": {
+          track(target, Symbol.iterator);
+          if (!methodCache[prop]) {
+            methodCache[prop] = function(index) {
+              let idx = Number(index);
+              if (!Number.isInteger(idx))
+                idx = Math.trunc(idx);
+              if (idx < 0)
+                idx = target.length + idx;
+              if (idx < 0 || idx >= target.length)
+                return;
+              const value2 = target[idx];
+              if (!isObject3(value2))
+                return value2;
+              return wrapChild(value2, node, idx);
+            };
+          }
+          return methodCache[prop];
+        }
+        case Symbol.iterator:
+        case "values":
+        case "keys":
+        case "entries":
+        case "forEach":
+        case "map":
+        case "filter":
+        case "reduce":
+        case "reduceRight":
+        case "findIndex":
+        case "every":
+        case "some":
+        case "join":
+          track(target, Symbol.iterator);
+          break;
+        case "length":
+          track(target, "length");
+          return Reflect.get(target, prop, receiver);
+      }
+      const value = Reflect.get(target, prop, receiver);
+      const isNumericIndex = typeof prop === "number" || typeof prop === "string" && !isNaN(parseInt(prop, 10));
+      if (isNumericIndex) {
+        track(target, String(prop));
+        if (!isObject3(value))
+          return value;
+        return wrapChild(value, node, placeKey(prop));
+      }
+      if (typeof value === "function") {
+        return value.bind(target);
+      }
+      return value;
+    },
+    set(target, prop, value, receiver) {
+      if (isObject3(value))
+        value = unwrapForStore(value);
+      const oldValue = target[prop];
+      if (oldValue === value && Reflect.has(target, prop))
+        return true;
+      if (isObject3(oldValue) && isObject3(value) && deepEqual(oldValue, value, new WeakMap))
+        return true;
+      const truncated = prop === "length" && Number(value) < target.length ? target.slice(Number(value)) : undefined;
+      const descriptor = Reflect.getOwnPropertyDescriptor(target, prop);
+      const result = Reflect.set(target, prop, value, receiver);
+      const isNumericIndex = typeof prop === "number" || typeof prop === "string" && !isNaN(parseInt(String(prop)));
+      if (result && (!descriptor || !descriptor.set || isNumericIndex)) {
+        if (truncated !== undefined) {
+          relinkArray(node, target, target.length, truncated);
+        } else if (prop !== "length") {
+          const key = placeKey(prop);
+          if (isObject3(oldValue))
+            detachPlace(oldValue, node, key);
+          if (isObject3(value))
+            attachValue(value, node, key);
+        }
+        if (Array.isArray(target) && prop === "length" && Number(value) > Number(oldValue)) {
+          const oldLength = Number(oldValue);
+          const newLength = Number(value);
+          for (let i = oldLength;i < newLength; i++) {
+            const located = locate(node, String(i));
+            if (located !== undefined) {
+              dispatch(located, { action: "set", path: located.paths[0], newValue: undefined });
+            }
+          }
+        } else {
+          const located = locate(node, prop);
+          if (located !== undefined) {
+            dispatch(located, {
+              action: "set",
+              path: located.paths[0],
+              oldValue,
+              newValue: isObject3(value) ? cloneTree(value) : value
+            });
+          }
+        }
+        if (isObject3(oldValue) && oldValue !== value) {
+          evictDeep(oldValue);
+        }
+        if (truncated !== undefined)
+          evictRemoved(truncated);
+        trigger(target, prop);
+      }
+      return result;
+    },
+    deleteProperty(target, prop) {
+      const oldValue = target[prop];
+      const hadProperty = Object.prototype.hasOwnProperty.call(target, prop);
+      const result = Reflect.deleteProperty(target, prop);
+      if (hadProperty && result) {
+        if (isObject3(oldValue))
+          detachPlace(oldValue, node, placeKey(prop));
+        const located = locate(node, prop);
+        if (located !== undefined) {
+          dispatch(located, { action: "delete", path: located.paths[0], oldValue });
+        }
+        trigger(target, prop);
+        if (isObject3(oldValue))
+          evictDeep(oldValue);
+      }
+      return result;
+    }
+  });
+  globalSeen.set(arr, proxy);
+  wrapperCache.set(arr, proxy);
+  proxyStats.created++;
+  proxyStats.arrays++;
+  return proxy;
+}
+
+// src/wrap-map.ts
+function isObject4(value) {
+  return value !== null && typeof value === "object";
+}
+function wrapMap(map, node) {
+  const cachedProxy = wrapperCache.get(map);
+  if (cachedProxy)
+    return cachedProxy;
+  if (globalSeen.has(map))
+    return globalSeen.get(map);
+  const methodCache = {};
+  const proxy = new Proxy(map, {
+    get(target, prop, receiver) {
+      if (prop === "__v_raw" /* RAW */)
+        return target;
+      if (prop === "__v_isReactive" /* IS_REACTIVE */)
+        return true;
+      track(target, prop);
+      if (prop === Symbol.iterator || prop === "entries" || prop === "values" || prop === "keys" || prop === "forEach") {
+        track(target, Symbol.iterator);
+      }
+      if (methodCache[prop]) {
+        return methodCache[prop];
+      }
+      if (prop === "set") {
+        methodCache[prop] = function(key, value2) {
+          if (value2 != null && typeof value2 === "object")
+            value2 = unwrapForStore(value2);
+          const existed = target.has(key);
+          const oldValue = target.get(key);
+          const oldSize = target.size;
+          if (oldValue === value2)
+            return receiver;
+          if (oldValue && typeof oldValue === "object" && value2 && typeof value2 === "object" && deepEqual(oldValue, value2, new WeakMap))
+            return receiver;
+          target.set(key, value2);
+          const newSize = target.size;
+          if (isObject4(oldValue))
+            detachPlace(oldValue, node, key);
+          if (isObject4(value2))
+            attachValue(value2, node, key);
+          const located = locate(node);
+          if (located !== undefined) {
+            dispatch(located, {
+              action: "map-set",
+              path: located.paths[0],
+              key,
+              oldValue,
+              newValue: isObject4(value2) ? cloneTree(value2) : value2
+            });
+          }
+          if (!existed) {
+            trigger(target, Symbol.iterator);
+            if (oldSize !== newSize) {
+              trigger(target, "size");
+            }
+          } else {
+            trigger(target, String(key));
+          }
+          if (isObject4(oldValue))
+            evictDeep(oldValue);
+          return receiver;
+        };
+        return methodCache[prop];
+      }
+      if (prop === "delete") {
+        methodCache[prop] = function(key) {
+          const existed = target.has(key);
+          if (!existed)
+            return false;
+          const oldValue = target.get(key);
+          const oldSize = target.size;
+          const result = target.delete(key);
+          const newSize = target.size;
+          if (result) {
+            if (isObject4(oldValue))
+              detachPlace(oldValue, node, key);
+            const located = locate(node);
+            if (located !== undefined) {
+              dispatch(located, {
+                action: "map-delete",
+                path: located.paths[0],
+                key,
+                oldValue
+              });
+            }
+            trigger(target, Symbol.iterator);
+            if (oldSize !== newSize) {
+              trigger(target, "size");
+            }
+            trigger(target, String(key));
+            if (isObject4(oldValue))
+              evictDeep(oldValue);
+          }
+          return result;
+        };
+        return methodCache[prop];
+      }
+      if (prop === "clear") {
+        methodCache[prop] = function() {
+          const oldSize = target.size;
+          if (oldSize === 0)
+            return;
+          const removed = [...target];
+          target.clear();
+          const newSize = target.size;
+          for (const [key, value2] of removed) {
+            if (isObject4(value2))
+              detachPlace(value2, node, key);
+          }
+          const located = locate(node);
+          if (located !== undefined) {
+            dispatch(located, {
+              action: "map-clear",
+              path: located.paths[0],
+              key: null
+            });
+          }
+          trigger(target, Symbol.iterator);
+          if (oldSize !== newSize) {
+            trigger(target, "size");
+          }
+          for (const [, value2] of removed) {
+            if (isObject4(value2))
+              evictDeep(value2);
+          }
+        };
+        return methodCache[prop];
+      }
+      if (prop === "get") {
+        methodCache[prop] = function(key) {
+          track(target, String(key));
+          const value2 = target.get(key);
+          if (!value2 || typeof value2 !== "object")
+            return value2;
+          return wrapChild(value2, node, key);
+        };
+        return methodCache[prop];
+      }
+      if (prop === "has") {
+        track(target, Symbol.iterator);
+        methodCache[prop] = function(key) {
+          track(target, String(key));
+          return target.has(key);
+        }.bind(target);
+        return methodCache[prop];
+      }
+      if (prop === Symbol.iterator || prop === "entries" || prop === "values" || prop === "keys" || prop === "forEach") {
+        track(target, Symbol.iterator);
+        if (prop === "forEach") {
+          methodCache[prop] = (callbackfn, thisArg) => {
+            const entriesIterator = proxy.entries();
+            for (const [key, value2] of entriesIterator) {
+              callbackfn.call(thisArg, value2, key, proxy);
+            }
+          };
+          return methodCache[prop];
+        }
+        methodCache[prop] = function* () {
+          for (const [key, value2] of target.entries()) {
+            if (prop === "keys") {
+              yield key;
+              continue;
+            }
+            const wrappedValue = isObject4(value2) ? wrapChild(value2, node, key) : value2;
+            if (prop === "values") {
+              yield wrappedValue;
+              continue;
+            }
+            yield [isObject4(key) ? wrapUnplaced(key) : key, wrappedValue];
+          }
+        };
+        return methodCache[prop];
+      }
+      if (prop === "size") {
+        track(target, "size");
+        return target.size;
+      }
+      if (prop === "constructor") {
+        return Map;
+      }
+      const value = Reflect.get(target, prop, receiver);
+      if (typeof value === "function") {
+        return value.bind(target);
+      }
+      return value;
+    }
+  });
+  globalSeen.set(map, proxy);
+  wrapperCache.set(map, proxy);
+  proxyStats.created++;
+  proxyStats.maps++;
+  return proxy;
+}
+
 // src/wrap-set.ts
-function wrapSet(set, emit, path = []) {
+function isObject5(value) {
+  return value !== null && typeof value === "object";
+}
+function wrapSet(set, node) {
   const cachedProxy = wrapperCache.get(set);
   if (cachedProxy)
     return cachedProxy;
@@ -3102,12 +3998,16 @@ function wrapSet(set, emit, path = []) {
           if (!existed) {
             target.add(value2);
             const newSize = target.size;
-            const event = {
-              action: "set-add",
-              path,
-              value: value2
-            };
-            emit?.(event);
+            if (isObject5(value2))
+              attachValue(value2, node, undefined);
+            const located = locate(node);
+            if (located !== undefined) {
+              dispatch(located, {
+                action: "set-add",
+                path: located.paths[0],
+                value: value2
+              });
+            }
             trigger(target, Symbol.iterator);
             if (oldSize !== newSize) {
               trigger(target, "size");
@@ -3126,17 +4026,23 @@ function wrapSet(set, emit, path = []) {
             const result = target.delete(value2);
             const newSize = target.size;
             if (result) {
-              const event = {
-                action: "set-delete",
-                path,
-                value: value2,
-                oldValue
-              };
-              emit?.(event);
+              if (isObject5(value2))
+                detachPlace(value2, node, undefined);
+              const located = locate(node);
+              if (located !== undefined) {
+                dispatch(located, {
+                  action: "set-delete",
+                  path: located.paths[0],
+                  value: value2,
+                  oldValue
+                });
+              }
               trigger(target, Symbol.iterator);
               if (oldSize !== newSize) {
                 trigger(target, "size");
               }
+              if (isObject5(value2))
+                evictDeep(value2);
             }
             return result;
           }
@@ -3149,17 +4055,28 @@ function wrapSet(set, emit, path = []) {
           const oldSize = target.size;
           if (oldSize === 0)
             return;
+          const removed = [...target];
           target.clear();
           const newSize = target.size;
-          const event = {
-            action: "set-clear",
-            path,
-            value: null
-          };
-          emit?.(event);
+          for (const member of removed) {
+            if (isObject5(member))
+              detachPlace(member, node, undefined);
+          }
+          const located = locate(node);
+          if (located !== undefined) {
+            dispatch(located, {
+              action: "set-clear",
+              path: located.paths[0],
+              value: null
+            });
+          }
           trigger(target, Symbol.iterator);
           if (oldSize !== newSize) {
             trigger(target, "size");
+          }
+          for (const member of removed) {
+            if (isObject5(member))
+              evictDeep(member);
           }
         };
         return methodCache[prop];
@@ -3195,35 +4112,7 @@ function wrapSet(set, emit, path = []) {
               valueToWrap = entry[1];
             }
             track(target, String(index));
-            let wrappedValue = valueToWrap;
-            if (valueToWrap && typeof valueToWrap === "object") {
-              if (globalSeen.has(valueToWrap)) {
-                wrappedValue = globalSeen.get(valueToWrap);
-              } else {
-                const cachedValueProxy = wrapperCache.get(valueToWrap);
-                if (cachedValueProxy) {
-                  wrappedValue = cachedValueProxy;
-                } else {
-                  const keyForPath = String(index);
-                  const pathKey = path.length > 0 ? `${path.join(".")}.${keyForPath}` : keyForPath;
-                  let newPath = getPathConcat(pathKey);
-                  if (newPath === undefined) {
-                    newPath = path.concat(keyForPath);
-                    setPathConcat(pathKey, newPath);
-                  }
-                  if (valueToWrap instanceof Map)
-                    wrappedValue = wrapMap(valueToWrap, emit, newPath);
-                  else if (valueToWrap instanceof Set)
-                    wrappedValue = wrapSet(valueToWrap, emit, newPath);
-                  else if (Array.isArray(valueToWrap))
-                    wrappedValue = wrapArray(valueToWrap, emit, newPath);
-                  else if (valueToWrap instanceof Date)
-                    wrappedValue = new Date(valueToWrap.getTime());
-                  else
-                    wrappedValue = reactive(valueToWrap, emit, newPath);
-                }
-              }
-            }
+            const wrappedValue = isObject5(valueToWrap) ? wrapChild(valueToWrap, node, undefined) : valueToWrap;
             if (prop === "entries") {
               yield [wrappedValue, wrappedValue];
             } else {
@@ -3255,583 +4144,8 @@ function wrapSet(set, emit, path = []) {
   return proxy;
 }
 
-// src/wrap-map.ts
-function wrapMap(map, emit, path = []) {
-  const cachedProxy = wrapperCache.get(map);
-  if (cachedProxy)
-    return cachedProxy;
-  if (globalSeen.has(map))
-    return globalSeen.get(map);
-  const methodCache = {};
-  const proxy = new Proxy(map, {
-    get(target, prop, receiver) {
-      if (prop === "__v_raw" /* RAW */)
-        return target;
-      if (prop === "__v_isReactive" /* IS_REACTIVE */)
-        return true;
-      track(target, prop);
-      if (prop === Symbol.iterator || prop === "entries" || prop === "values" || prop === "keys" || prop === "forEach") {
-        track(target, Symbol.iterator);
-      }
-      if (methodCache[prop]) {
-        return methodCache[prop];
-      }
-      if (prop === "set") {
-        methodCache[prop] = function(key, value2) {
-          if (value2 != null && typeof value2 === "object")
-            value2 = unwrapForStore(value2);
-          const existed = target.has(key);
-          const oldValue = target.get(key);
-          const oldSize = target.size;
-          if (oldValue === value2)
-            return receiver;
-          if (oldValue && typeof oldValue === "object" && value2 && typeof value2 === "object" && deepEqual(oldValue, value2, new WeakMap))
-            return receiver;
-          target.set(key, value2);
-          const newSize = target.size;
-          const pathKey = path.join(".");
-          let cachedPath = getPathConcat(pathKey);
-          if (cachedPath === undefined) {
-            cachedPath = path;
-            setPathConcat(pathKey, cachedPath);
-          }
-          const event = {
-            action: "map-set",
-            path: cachedPath,
-            key,
-            oldValue,
-            newValue: value2 !== null && typeof value2 === "object" ? deepClone(value2) : value2
-          };
-          emit?.(event);
-          if (!existed) {
-            trigger(target, Symbol.iterator);
-            if (oldSize !== newSize) {
-              trigger(target, "size");
-            }
-          } else {
-            trigger(target, String(key));
-          }
-          return receiver;
-        };
-        return methodCache[prop];
-      }
-      if (prop === "delete") {
-        methodCache[prop] = function(key) {
-          const existed = target.has(key);
-          if (!existed)
-            return false;
-          const oldValue = target.get(key);
-          const oldSize = target.size;
-          const result = target.delete(key);
-          const newSize = target.size;
-          if (result) {
-            const pathKey = path.join(".");
-            let cachedPath = getPathConcat(pathKey);
-            if (cachedPath === undefined) {
-              cachedPath = path;
-              setPathConcat(pathKey, cachedPath);
-            }
-            const event = {
-              action: "map-delete",
-              path: cachedPath,
-              key,
-              oldValue
-            };
-            emit?.(event);
-            trigger(target, Symbol.iterator);
-            if (oldSize !== newSize) {
-              trigger(target, "size");
-            }
-            trigger(target, String(key));
-          }
-          return result;
-        };
-        return methodCache[prop];
-      }
-      if (prop === "clear") {
-        methodCache[prop] = function() {
-          const oldSize = target.size;
-          if (oldSize === 0)
-            return;
-          target.clear();
-          const newSize = target.size;
-          const event = {
-            action: "map-clear",
-            path,
-            key: null
-          };
-          emit?.(event);
-          trigger(target, Symbol.iterator);
-          if (oldSize !== newSize) {
-            trigger(target, "size");
-          }
-        };
-        return methodCache[prop];
-      }
-      if (prop === "get") {
-        methodCache[prop] = function(key) {
-          track(target, String(key));
-          const value2 = target.get(key);
-          if (!value2 || typeof value2 !== "object")
-            return value2;
-          if (globalSeen.has(value2))
-            return globalSeen.get(value2);
-          const cachedValueProxy = wrapperCache.get(value2);
-          if (cachedValueProxy)
-            return cachedValueProxy;
-          const keyString = String(key);
-          const pathKey = path.length > 0 ? `${path.join(".")}.${keyString}` : keyString;
-          let newPath = getPathConcat(pathKey);
-          if (newPath === undefined) {
-            newPath = path.concat(keyString);
-            setPathConcat(pathKey, newPath);
-          }
-          if (value2 instanceof Map)
-            return wrapMap(value2, emit, newPath);
-          if (value2 instanceof Set)
-            return wrapSet(value2, emit, newPath);
-          if (Array.isArray(value2))
-            return wrapArray(value2, emit, newPath);
-          if (value2 instanceof Date)
-            return new Date(value2.getTime());
-          return reactive(value2, emit, newPath);
-        };
-        return methodCache[prop];
-      }
-      if (prop === "has") {
-        track(target, Symbol.iterator);
-        methodCache[prop] = function(key) {
-          track(target, String(key));
-          return target.has(key);
-        }.bind(target);
-        return methodCache[prop];
-      }
-      if (prop === Symbol.iterator || prop === "entries" || prop === "values" || prop === "keys" || prop === "forEach") {
-        track(target, Symbol.iterator);
-        const originalMethod = Reflect.get(target, prop, receiver);
-        if (prop === "forEach") {
-          methodCache[prop] = (callbackfn, thisArg) => {
-            const entriesIterator = proxy.entries();
-            for (const [key, value2] of entriesIterator) {
-              callbackfn.call(thisArg, value2, key, proxy);
-            }
-          };
-          return methodCache[prop];
-        }
-        methodCache[prop] = function* (...args) {
-          const iterator = originalMethod.apply(target, args);
-          for (const entry of iterator) {
-            let keyToWrap = entry;
-            let valueToWrap = entry;
-            let isEntry = false;
-            if (prop === "entries" || prop === Symbol.iterator) {
-              keyToWrap = entry[0];
-              valueToWrap = entry[1];
-              isEntry = true;
-            }
-            let wrappedKey = keyToWrap;
-            if (isEntry && keyToWrap && typeof keyToWrap === "object") {
-              if (globalSeen.has(keyToWrap)) {
-                wrappedKey = globalSeen.get(keyToWrap);
-              } else {
-                const pathKey = path.length > 0 ? `${path.join(".")}.${String(keyToWrap)}` : String(keyToWrap);
-                let keyPath = getPathConcat(pathKey);
-                if (keyPath === undefined) {
-                  keyPath = path.concat(String(keyToWrap));
-                  setPathConcat(pathKey, keyPath);
-                }
-                wrappedKey = reactive(keyToWrap, emit, keyPath);
-              }
-            }
-            let wrappedValue = valueToWrap;
-            if (valueToWrap && typeof valueToWrap === "object") {
-              if (globalSeen.has(valueToWrap)) {
-                wrappedValue = globalSeen.get(valueToWrap);
-              } else {
-                const cachedValueProxy = wrapperCache.get(valueToWrap);
-                if (cachedValueProxy) {
-                  wrappedValue = cachedValueProxy;
-                } else {
-                  const keyString = String(keyToWrap);
-                  const pathKey = path.length > 0 ? `${path.join(".")}.${keyString}` : keyString;
-                  let newPath = getPathConcat(pathKey);
-                  if (newPath === undefined) {
-                    newPath = path.concat(keyString);
-                    setPathConcat(pathKey, newPath);
-                  }
-                  if (valueToWrap instanceof Map)
-                    wrappedValue = wrapMap(valueToWrap, emit, newPath);
-                  else if (valueToWrap instanceof Set)
-                    wrappedValue = wrapSet(valueToWrap, emit, newPath);
-                  else if (Array.isArray(valueToWrap))
-                    wrappedValue = wrapArray(valueToWrap, emit, newPath);
-                  else if (valueToWrap instanceof Date)
-                    wrappedValue = new Date(valueToWrap.getTime());
-                  else
-                    wrappedValue = reactive(valueToWrap, emit, newPath);
-                }
-              }
-            }
-            if (prop === "entries" || prop === Symbol.iterator) {
-              yield [wrappedKey, wrappedValue];
-            } else if (prop === "values") {
-              yield wrappedValue;
-            } else {
-              yield wrappedKey;
-            }
-          }
-        };
-        return methodCache[prop];
-      }
-      if (prop === "size") {
-        track(target, "size");
-        return target.size;
-      }
-      if (prop === "constructor") {
-        return Map;
-      }
-      const value = Reflect.get(target, prop, receiver);
-      if (typeof value === "function") {
-        return value.bind(target);
-      }
-      return value;
-    }
-  });
-  globalSeen.set(map, proxy);
-  wrapperCache.set(map, proxy);
-  proxyStats.created++;
-  proxyStats.maps++;
-  return proxy;
-}
-
-// src/wrap-array.ts
-function isObject2(v) {
-  return v && typeof v === "object";
-}
-function wrapArray(arr, emit, path = []) {
-  const cachedProxy = wrapperCache.get(arr);
-  if (cachedProxy)
-    return cachedProxy;
-  if (globalSeen.has(arr))
-    return globalSeen.get(arr);
-  const methodCache = {};
-  const proxy = new Proxy(arr, {
-    get(target, prop, receiver) {
-      if (prop === "__v_raw" /* RAW */)
-        return target;
-      if (prop === "__v_isReactive" /* IS_REACTIVE */)
-        return true;
-      track(target, prop);
-      if (methodCache[prop]) {
-        return methodCache[prop];
-      }
-      switch (prop) {
-        case "push":
-          track(target, "length");
-          methodCache[prop] = function(...items) {
-            const oldLength = target.length;
-            const result = target.push(...items);
-            const newLength = target.length;
-            if (items.length > 0) {
-              const event = {
-                action: "array-push",
-                path,
-                key: oldLength,
-                items
-              };
-              emit?.(event);
-              trigger(target, Symbol.iterator);
-              if (oldLength !== newLength) {
-                trigger(target, "length");
-              }
-            }
-            return result;
-          };
-          return methodCache[prop];
-        case "pop":
-          track(target, "length");
-          methodCache[prop] = function() {
-            if (target.length === 0)
-              return;
-            const oldLength = target.length;
-            const poppedIndex = oldLength - 1;
-            const oldValue = target[poppedIndex];
-            const result = target.pop();
-            const newLength = target.length;
-            const event = {
-              action: "array-pop",
-              path,
-              key: poppedIndex,
-              oldValue
-            };
-            emit?.(event);
-            if (isObject2(oldValue))
-              evictDeep(oldValue);
-            trigger(target, Symbol.iterator);
-            if (oldLength !== newLength) {
-              trigger(target, "length");
-            }
-            return result;
-          };
-          return methodCache[prop];
-        case "shift":
-          track(target, "length");
-          methodCache[prop] = function() {
-            if (target.length === 0)
-              return;
-            const oldLength = target.length;
-            const oldValue = target[0];
-            const result = target.shift();
-            const newLength = target.length;
-            const event = {
-              action: "array-shift",
-              path,
-              key: 0,
-              oldValue
-            };
-            emit?.(event);
-            if (isObject2(oldValue))
-              evictDeep(oldValue);
-            trigger(target, Symbol.iterator);
-            if (oldLength !== newLength) {
-              trigger(target, "length");
-            }
-            return result;
-          };
-          return methodCache[prop];
-        case "unshift":
-          track(target, "length");
-          methodCache[prop] = function(...items) {
-            const oldLength = target.length;
-            const result = target.unshift(...items);
-            const newLength = target.length;
-            if (items.length > 0) {
-              const event = {
-                action: "array-unshift",
-                path,
-                key: 0,
-                items
-              };
-              emit?.(event);
-              trigger(target, Symbol.iterator);
-              if (oldLength !== newLength) {
-                trigger(target, "length");
-              }
-            }
-            return result;
-          };
-          return methodCache[prop];
-        case "splice":
-          track(target, "length");
-          methodCache[prop] = function(start, deleteCount, ...items) {
-            const oldLength = target.length;
-            const actualStart = start < 0 ? Math.max(target.length + start, 0) : Math.min(start, target.length);
-            const deleteCountNum = deleteCount === undefined ? target.length - actualStart : Number(deleteCount);
-            const actualDeleteCount = Math.min(deleteCountNum, target.length - actualStart);
-            const deletedItems = target.slice(actualStart, actualStart + actualDeleteCount);
-            const result = target.splice(start, deleteCountNum, ...items);
-            const newLength = target.length;
-            if (actualDeleteCount > 0 || items.length > 0) {
-              const event = {
-                action: "array-splice",
-                path,
-                key: actualStart,
-                deleteCount: actualDeleteCount,
-                items: items.length > 0 ? items : undefined,
-                oldValues: deletedItems.length > 0 ? deletedItems : undefined
-              };
-              emit?.(event);
-              for (let i = 0;i < deletedItems.length; i++) {
-                if (isObject2(deletedItems[i]))
-                  evictDeep(deletedItems[i]);
-              }
-              trigger(target, Symbol.iterator);
-              if (oldLength !== newLength) {
-                trigger(target, "length");
-              }
-            }
-            return result;
-          };
-          return methodCache[prop];
-        case "find": {
-          track(target, Symbol.iterator);
-          if (!methodCache[prop]) {
-            methodCache[prop] = function(predicate, thisArg) {
-              const idx = Array.prototype.findIndex.call(target, predicate, thisArg);
-              if (idx === -1)
-                return;
-              const value2 = target[idx];
-              if (!isObject2(value2))
-                return value2;
-              const propKey = String(idx);
-              const pathKey = path.length > 0 ? `${path.join(".")}.${propKey}` : propKey;
-              let newPath = getPathConcat(pathKey);
-              if (newPath === undefined) {
-                newPath = path.concat(propKey);
-                setPathConcat(pathKey, newPath);
-              }
-              if (globalSeen.has(value2))
-                return globalSeen.get(value2);
-              const cachedValueProxy = wrapperCache.get(value2);
-              if (cachedValueProxy)
-                return cachedValueProxy;
-              if (Array.isArray(value2))
-                return wrapArray(value2, emit, newPath);
-              if (value2 instanceof Map)
-                return wrapMap(value2, emit, newPath);
-              if (value2 instanceof Set)
-                return wrapSet(value2, emit, newPath);
-              if (value2 instanceof Date)
-                return new Date(value2.getTime());
-              return reactive(value2, emit, newPath);
-            };
-          }
-          return methodCache[prop];
-        }
-        case "at": {
-          track(target, Symbol.iterator);
-          if (!methodCache[prop]) {
-            methodCache[prop] = function(index) {
-              let idx = Number(index);
-              if (!Number.isInteger(idx))
-                idx = Math.trunc(idx);
-              if (idx < 0)
-                idx = target.length + idx;
-              if (idx < 0 || idx >= target.length)
-                return;
-              const value2 = target[idx];
-              if (!isObject2(value2))
-                return value2;
-              const propKey = String(idx);
-              const pathKey = path.length > 0 ? `${path.join(".")}.${propKey}` : propKey;
-              let newPath = getPathConcat(pathKey);
-              if (newPath === undefined) {
-                newPath = path.concat(propKey);
-                setPathConcat(pathKey, newPath);
-              }
-              if (globalSeen.has(value2))
-                return globalSeen.get(value2);
-              const cachedValueProxy = wrapperCache.get(value2);
-              if (cachedValueProxy)
-                return cachedValueProxy;
-              if (Array.isArray(value2))
-                return wrapArray(value2, emit, newPath);
-              if (value2 instanceof Map)
-                return wrapMap(value2, emit, newPath);
-              if (value2 instanceof Set)
-                return wrapSet(value2, emit, newPath);
-              if (value2 instanceof Date)
-                return new Date(value2.getTime());
-              return reactive(value2, emit, newPath);
-            };
-          }
-          return methodCache[prop];
-        }
-        case Symbol.iterator:
-        case "values":
-        case "keys":
-        case "entries":
-        case "forEach":
-        case "map":
-        case "filter":
-        case "reduce":
-        case "reduceRight":
-        case "findIndex":
-        case "every":
-        case "some":
-        case "join":
-          track(target, Symbol.iterator);
-          break;
-        case "length":
-          track(target, "length");
-          return Reflect.get(target, prop, receiver);
-      }
-      const value = Reflect.get(target, prop, receiver);
-      const isNumericIndex = typeof prop === "number" || typeof prop === "string" && !isNaN(parseInt(prop, 10));
-      if (isNumericIndex) {
-        track(target, String(prop));
-        if (!isObject2(value))
-          return value;
-        if (globalSeen.has(value))
-          return globalSeen.get(value);
-        const cachedValueProxy = wrapperCache.get(value);
-        if (cachedValueProxy)
-          return cachedValueProxy;
-        const propKey = String(prop);
-        const pathKey = path.length > 0 ? `${path.join(".")}.${propKey}` : propKey;
-        let newPath = getPathConcat(pathKey);
-        if (newPath === undefined) {
-          newPath = path.concat(propKey);
-          setPathConcat(pathKey, newPath);
-        }
-        if (Array.isArray(value))
-          return wrapArray(value, emit, newPath);
-        if (value instanceof Map)
-          return wrapMap(value, emit, newPath);
-        if (value instanceof Set)
-          return wrapSet(value, emit, newPath);
-        if (value instanceof Date)
-          return new Date(value.getTime());
-        return reactive(value, emit, newPath);
-      }
-      if (typeof value === "function") {
-        return value.bind(target);
-      }
-      return value;
-    },
-    set(target, prop, value, receiver) {
-      if (isObject2(value))
-        value = unwrapForStore(value);
-      const oldValue = target[prop];
-      if (oldValue === value && Reflect.has(target, prop))
-        return true;
-      if (isObject2(oldValue) && isObject2(value) && deepEqual(oldValue, value, new WeakMap))
-        return true;
-      const descriptor = Reflect.getOwnPropertyDescriptor(target, prop);
-      const result = Reflect.set(target, prop, value, receiver);
-      const isNumericIndex = typeof prop === "number" || typeof prop === "string" && !isNaN(parseInt(String(prop)));
-      if (result && (!descriptor || !descriptor.set || isNumericIndex)) {
-        const resolvePath = (key) => {
-          const pathKey = path.length > 0 ? `${path.join(".")}.${key}` : key;
-          let newPath = getPathConcat(pathKey);
-          if (newPath === undefined) {
-            newPath = path.concat(key);
-            setPathConcat(pathKey, newPath);
-          }
-          return newPath;
-        };
-        if (Array.isArray(target) && prop === "length" && Number(value) > Number(oldValue)) {
-          const oldLength = Number(oldValue);
-          const newLength = Number(value);
-          for (let i = oldLength;i < newLength; i++) {
-            emit?.({ action: "set", path: resolvePath(String(i)), newValue: undefined });
-          }
-        } else {
-          const event = {
-            action: "set",
-            path: resolvePath(String(prop)),
-            oldValue,
-            newValue: isObject2(value) ? deepClone(value) : value
-          };
-          emit?.(event);
-        }
-        if (isObject2(oldValue) && oldValue !== value) {
-          evictDeep(oldValue);
-        }
-        trigger(target, prop);
-      }
-      return result;
-    }
-  });
-  globalSeen.set(arr, proxy);
-  wrapperCache.set(arr, proxy);
-  proxyStats.created++;
-  proxyStats.arrays++;
-  return proxy;
-}
-
 // src/reactive.ts
-function isObject3(v) {
+function isObject6(v) {
   return v && typeof v === "object";
 }
 function isReactive(value) {
@@ -3858,8 +4172,9 @@ function reactive(obj, emit, path = [], options) {
   if (obj["__v_skip" /* SKIP */]) {
     return obj;
   }
-  if (globalSeen.has(obj))
-    return globalSeen.get(obj);
+  const existing = globalSeen.get(obj);
+  if (existing !== undefined)
+    return existing;
   if (emit && path.length === 0 && options?.async) {
     emit = createAsyncEmit(emit);
   }
@@ -3875,30 +4190,43 @@ function reactive(obj, emit, path = [], options) {
       console.error("Failed to emit initial reactive state:", error);
     }
   }
-  if (Array.isArray(obj)) {
-    return wrapArray(obj, emit, path);
-  }
-  if (obj instanceof Map) {
-    return wrapMap(obj, emit, path);
-  }
-  if (obj instanceof Set) {
-    return wrapSet(obj, emit, path);
-  }
-  function wrapValue(val, subPath) {
-    if (!isObject3(val))
-      return val;
-    if (globalSeen.has(val))
-      return globalSeen.get(val);
-    if (Array.isArray(val))
-      return wrapArray(val, emit, subPath);
-    if (val instanceof Map)
-      return wrapMap(val, emit, subPath);
-    if (val instanceof Set)
-      return wrapSet(val, emit, subPath);
-    if (val instanceof Date)
-      return new Date(val.getTime());
-    return reactive(val, emit, subPath, options);
-  }
+  const node = ensureLocationNode(obj);
+  node.root = { emit, path };
+  node.scope = node.root;
+  return createProxy(obj, node, options);
+}
+function wrapChild(raw, parent, key, options) {
+  if (raw["__v_skip" /* SKIP */])
+    return raw;
+  if (raw instanceof Date)
+    return new Date(raw.getTime());
+  const node = ensureLocationNode(raw);
+  notePlace(node, parent, key);
+  node.scope ??= parent.scope;
+  const existing = globalSeen.get(raw);
+  if (existing !== undefined)
+    return existing;
+  return restoreEvicted(node) ?? createProxy(raw, node, options);
+}
+function wrapUnplaced(raw) {
+  if (raw["__v_skip" /* SKIP */])
+    return raw;
+  const existing = globalSeen.get(raw);
+  if (existing !== undefined)
+    return existing;
+  const node = ensureLocationNode(raw);
+  return restoreEvicted(node) ?? createProxy(raw, node);
+}
+function createProxy(raw, node, options) {
+  if (Array.isArray(raw))
+    return wrapArray(raw, node);
+  if (raw instanceof Map)
+    return wrapMap(raw, node);
+  if (raw instanceof Set)
+    return wrapSet(raw, node);
+  return wrapObject(raw, node, options);
+}
+function wrapObject(obj, node, options) {
   const proxy = new Proxy(obj, {
     get(target, prop, receiver) {
       if (prop === "__v_raw" /* RAW */) {
@@ -3909,44 +4237,36 @@ function reactive(obj, emit, path = [], options) {
       }
       const value = Reflect.get(target, prop, receiver);
       track(target, prop);
-      if (!isObject3(value))
+      if (!isObject6(value))
         return value;
-      const propKey = String(prop);
-      const pathKey = path.length > 0 ? `${path.join(".")}.${propKey}` : propKey;
-      let newPath = getPathConcat(pathKey);
-      if (newPath === undefined) {
-        newPath = path.concat(propKey);
-        setPathConcat(pathKey, newPath);
-      }
-      return wrapValue(value, newPath);
+      return wrapChild(value, node, prop, options);
     },
     set(target, prop, value, receiver) {
-      if (isObject3(value))
+      if (isObject6(value))
         value = unwrapForStore(value);
       const oldValue = target[prop];
       if (oldValue === value)
         return true;
-      if (!options?.async && isObject3(oldValue) && isObject3(value) && deepEqual(oldValue, value, new WeakMap))
+      if (!options?.async && isObject6(oldValue) && isObject6(value) && deepEqual(oldValue, value, new WeakMap))
         return true;
       const descriptor = Reflect.getOwnPropertyDescriptor(target, prop);
       const result = Reflect.set(target, prop, value, receiver);
       if (result && (!descriptor || !descriptor.set)) {
-        const propKey = String(prop);
-        const pathKey = path.length > 0 ? `${path.join(".")}.${propKey}` : propKey;
-        let newPath = getPathConcat(pathKey);
-        if (newPath === undefined) {
-          newPath = path.concat(propKey);
-          setPathConcat(pathKey, newPath);
+        if (isObject6(oldValue))
+          detachPlace(oldValue, node, prop);
+        if (isObject6(value))
+          attachValue(value, node, prop);
+        const located = locate(node, prop);
+        if (located !== undefined) {
+          dispatch(located, {
+            action: "set",
+            path: located.paths[0],
+            oldValue,
+            newValue: isObject6(value) ? cloneTree(value) : value
+          });
         }
-        const event = {
-          action: "set",
-          path: newPath,
-          oldValue,
-          newValue: isObject3(value) ? deepClone(value) : value
-        };
-        emit?.(event);
         trigger(target, prop);
-        if (isObject3(oldValue) && oldValue !== value) {
+        if (isObject6(oldValue)) {
           evictDeep(oldValue);
         }
       }
@@ -3957,21 +4277,18 @@ function reactive(obj, emit, path = [], options) {
       const hadProperty = Object.prototype.hasOwnProperty.call(target, prop);
       const result = Reflect.deleteProperty(target, prop);
       if (hadProperty && result) {
-        const propKey = String(prop);
-        const pathKey = path.length > 0 ? `${path.join(".")}.${propKey}` : propKey;
-        let newPath = getPathConcat(pathKey);
-        if (newPath === undefined) {
-          newPath = path.concat(propKey);
-          setPathConcat(pathKey, newPath);
+        if (isObject6(oldValue))
+          detachPlace(oldValue, node, prop);
+        const located = locate(node, prop);
+        if (located !== undefined) {
+          dispatch(located, {
+            action: "delete",
+            path: located.paths[0],
+            oldValue
+          });
         }
-        const event = {
-          action: "delete",
-          path: newPath,
-          oldValue
-        };
-        emit?.(event);
         trigger(target, prop);
-        if (isObject3(oldValue)) {
+        if (isObject6(oldValue)) {
           evictDeep(oldValue);
         }
       }

@@ -50,12 +50,9 @@ const MAX_CACHE_SIZE = 1000;
 export const pathCache = new WeakMap<object, Map<string, any>>();
 const pathCacheSize = new WeakMap<object, number>(); // track individual map sizes
 
-// path concatenation cache ('a.b.c' -> ['a', 'b', 'c']) with size limit
-export const pathConcatCache = new Map<string, any[]>();
-const MAX_PATH_CACHE_SIZE = 1000;
 
 // global weakmap for wrapper identity: raw object -> its reactive proxy.
-// Written only by the wrap-* modules and evictDeep; must NOT be reused as
+// Written only by the wrap-* modules and location.ts; must NOT be reused as
 // cycle-detection scratch space (deepEqual/deepClone use per-call maps),
 // because WeakMap values are strong refs and scratch entries would pin
 // whole compared state trees and could poison wrapper lookups.
@@ -77,7 +74,7 @@ export const proxyStats = {
 }
 
 export function getProxyStats() {
-  return { ...proxyStats, pathConcatCacheSize: pathConcatCache.size }
+  return { ...proxyStats }
 }
 
 export function resetProxyStats() {
@@ -87,46 +84,6 @@ export function resetProxyStats() {
   proxyStats.sets = 0
   proxyStats.objects = 0
   proxyStats.staleEvicted = 0
-}
-
-/**
- * Recursively evict an object and all its nested children from proxy caches.
- * This allows GC to collect the entire old object tree when a property is
- * replaced, not just the top-level value.
- */
-export function evictDeep(value: any): void {
-  if (value == null || typeof value !== 'object') return
-  // Unwrap so we evict the raw object, not the proxy wrapper
-  value = toRaw(value)
-  if (!globalSeen.has(value)) return // not proxied, skip entire subtree
-
-  globalSeen.delete(value)
-  wrapperCache.delete(value)
-  proxyStats.staleEvicted++
-
-  if (Array.isArray(value)) {
-    for (let i = 0; i < value.length; i++) {
-      if (value[i] != null && typeof value[i] === 'object') {
-        evictDeep(value[i])
-      }
-    }
-  } else if (value instanceof Map) {
-    for (const v of value.values()) {
-      if (v != null && typeof v === 'object') evictDeep(v)
-    }
-  } else if (value instanceof Set) {
-    for (const v of value) {
-      if (v != null && typeof v === 'object') evictDeep(v)
-    }
-  } else {
-    const keys = Object.keys(value)
-    for (let i = 0; i < keys.length; i++) {
-      const child = value[keys[i]]
-      if (child != null && typeof child === 'object') {
-        evictDeep(child)
-      }
-    }
-  }
 }
 
 // simple lru-like cleanup for individual object path caches
@@ -142,20 +99,6 @@ function cleanupPathCache(root: object) {
             count++;
         }
         pathCacheSize.set(root, MAX_CACHE_SIZE - entriesToRemove);
-    }
-}
-
-// simple lru-like cleanup for the global path concatenation cache
-function cleanupPathConcatCache() {
-    if (pathConcatCache.size > MAX_PATH_CACHE_SIZE) {
-        // remove oldest entries (first 20%)
-        const entriesToRemove = Math.floor(MAX_PATH_CACHE_SIZE * 0.2);
-        let count = 0;
-        for (const key of pathConcatCache.keys()) {
-            if (count >= entriesToRemove) break;
-            pathConcatCache.delete(key);
-            count++;
-        }
     }
 }
 
@@ -276,25 +219,6 @@ export function evictDescendantsFromPathCache(root: object, pathKey: string): vo
     }
 }
 
-export function getPathConcat(path: string): any[] | undefined {
-    const result = pathConcatCache.get(path);
-    if (result !== undefined) {
-        // simulate lru
-        pathConcatCache.delete(path);
-        pathConcatCache.set(path, result);
-    }
-    return result;
-}
-
-export function setPathConcat(path: string, value: any[]): void {
-    // delete first to ensure it's added at the end (most recent)
-    if (pathConcatCache.has(path)) {
-        pathConcatCache.delete(path);
-    }
-    pathConcatCache.set(path, value);
-    cleanupPathConcatCache(); // check size limit
-}
-
 function isObject(val: any): val is object {
   return val !== null && typeof val === 'object';
 }
@@ -337,6 +261,62 @@ export function traverse(value: any, seen: Set<any> = new Set()) {
       }
   }
   return value;
+}
+
+/**
+ * Deep clone for event payloads. Unlike `deepClone`, an object that appears
+ * at several places in `value` is copied once per place, so the result is a
+ * tree: a replica holds one copy per place, and a write through a shared
+ * object emits one event per place. Cycles are kept.
+ */
+export function cloneTree<T>(value: T, ancestors: Map<object, any> = new Map()): T {
+    if (value === null || typeof value !== 'object') {
+        return value;
+    }
+    if (value instanceof Date) {
+        return new Date(value.getTime()) as any;
+    }
+    // identity from the raw target, reads through `value` (see deepClone)
+    const identity = toRaw(value) as object;
+    const cycle = ancestors.get(identity);
+    if (cycle !== undefined) return cycle;
+
+    let copy: any;
+    if (Array.isArray(value)) {
+        copy = [];
+        ancestors.set(identity, copy);
+        for (let i = 0; i < value.length; i++) {
+            copy[i] = cloneTree(value[i], ancestors);
+        }
+    } else if (value instanceof Map) {
+        copy = new Map();
+        ancestors.set(identity, copy);
+        value.forEach((entry, key) => {
+            copy.set(cloneTree(key, ancestors), cloneTree(entry, ancestors));
+        });
+    } else if (value instanceof Set) {
+        copy = new Set();
+        ancestors.set(identity, copy);
+        value.forEach(entry => {
+            copy.add(cloneTree(entry, ancestors));
+        });
+    } else {
+        copy = Object.create(Object.getPrototypeOf(value));
+        ancestors.set(identity, copy);
+        for (const key in value) {
+            if (Object.prototype.hasOwnProperty.call(value, key)) {
+                copy[key] = cloneTree((value as any)[key], ancestors);
+            }
+        }
+        const symbolKeys = Object.getOwnPropertySymbols(value);
+        for (const symbolKey of symbolKeys) {
+            if (Object.prototype.propertyIsEnumerable.call(value, symbolKey)) {
+                copy[symbolKey] = cloneTree((value as any)[symbolKey], ancestors);
+            }
+        }
+    }
+    ancestors.delete(identity);
+    return copy;
 }
 
 /**

@@ -436,6 +436,29 @@ describe("contract edges", () => {
     expect(sync.events).toEqual([]);
   });
 
+  test("map values() and entries() give each value its own key's path", () => {
+    const sync = replicate({ byId: new Map([["a", { n: 0 }], ["b", { n: 0 }]]) });
+    for (const value of sync.state.byId.values()) value.n++;
+    for (const [, value] of sync.state.byId) value.n++;
+    expect(sync.paths()).toEqual(["set:byId.a.n", "set:byId.b.n", "set:byId.a.n", "set:byId.b.n"]);
+    expect(sync.remote).toEqual(sync.raw);
+  });
+
+  test("an object moved to another root emits there", () => {
+    const first: StateEvent[] = [];
+    const second: StateEvent[] = [];
+    const one = reactive({ item: { n: 0 } } as { item?: { n: number } }, (event) => first.push(event));
+    const two = reactive({ items: [] as { n: number }[] }, (event) => second.push(event));
+    const item = one.item!;
+    two.items.push(item);
+    delete one.item;
+    first.length = 0;
+    second.length = 0;
+    item.n = 1;
+    expect(first).toEqual([]);
+    expect(second.map((event) => event.path.join("."))).toEqual(["items.0.n"]);
+  });
+
   test("no emit function: structural changes still keep identity", () => {
     const state = reactive({ list: ["A", "B", "C"].map(item) });
     const c = state.list[2];

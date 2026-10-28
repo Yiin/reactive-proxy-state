@@ -1,18 +1,22 @@
-import { EmitFunction, Path, StateEvent } from "./types";
+import { StateEvent } from "./types";
 import {
-  deepClone,
+  cloneTree,
   deepEqual,
   unwrapForStore,
-  getPathConcat,
-  setPathConcat,
   wrapperCache,
   globalSeen,
   proxyStats,
-  evictDeep,
 } from "./utils";
-import { reactive } from "./reactive";
-import { wrapMap } from "./wrap-map";
-import { wrapSet } from "./wrap-set";
+import { wrapChild } from "./reactive";
+import {
+  LocationNode,
+  attachValue,
+  detachPlace,
+  dispatch,
+  evictDeep,
+  locate,
+  relinkArray,
+} from "./location";
 import { track, trigger } from "./watch-effect";
 import { ReactiveFlags } from "./constants";
 
@@ -21,11 +25,39 @@ function isObject(v: any): v is object {
   return v && typeof v === "object";
 }
 
-export function wrapArray<T extends any[]>(
-  arr: T,
-  emit?: EmitFunction,
-  path: Path = []
-): T {
+/** A canonical array index ("0", "17") as a number, or -1. */
+function arrayIndex(prop: string | symbol): number {
+  if (typeof prop !== "string" || prop.length === 0 || prop.length > 10) return -1;
+  const first = prop.charCodeAt(0);
+  if (first < 48 || first > 57 || (first === 48 && prop.length > 1)) return -1;
+  for (let i = 1; i < prop.length; i++) {
+    const code = prop.charCodeAt(i);
+    if (code < 48 || code > 57) return -1;
+  }
+  const index = Number(prop);
+  return index < 4294967295 ? index : -1;
+}
+
+/** Place key for an array property: the index as a number, else the name. */
+function placeKey(prop: string | symbol): unknown {
+  const index = arrayIndex(prop);
+  return index >= 0 ? index : prop;
+}
+
+/** Store raw objects, never proxies, in the raw array. */
+function unwrapItems(items: any[]): void {
+  for (let i = 0; i < items.length; i++) {
+    if (isObject(items[i])) items[i] = unwrapForStore(items[i]);
+  }
+}
+
+function evictRemoved(removed: readonly unknown[]): void {
+  for (let i = 0; i < removed.length; i++) {
+    if (isObject(removed[i])) evictDeep(removed[i]);
+  }
+}
+
+export function wrapArray<T extends any[]>(arr: T, node: LocationNode): T {
   // reuse existing proxy if available for performance
   const cachedProxy = wrapperCache.get(arr);
   if (cachedProxy) return cachedProxy as T;
@@ -34,7 +66,7 @@ export function wrapArray<T extends any[]>(
   // cache for wrapped methods to avoid re-creating them on each call
   const methodCache: { [key: string | symbol]: Function } = {};
 
-  const proxy = new Proxy(arr, {
+  const proxy: T = new Proxy(arr, {
     get(target: T, prop: string | symbol, receiver: any): any {
       if (prop === ReactiveFlags.RAW) return target;
       if (prop === ReactiveFlags.IS_REACTIVE) return true;
@@ -47,20 +79,58 @@ export function wrapArray<T extends any[]>(
 
       // handle specific array mutation methods that require custom logic and event emission
       switch (prop) {
+        case "sort":
+        case "reverse":
+        case "fill":
+        case "copyWithin": {
+          track(target, "length");
+          const method = (Array.prototype as any)[prop] as Function;
+          methodCache[prop] = function (...args: any[]): T {
+            if (prop === "fill" && isObject(args[0])) args[0] = unwrapForStore(args[0]);
+            const before = target.slice();
+            method.apply(target, args);
+            let changed = false;
+            for (let i = 0; i < before.length; i++) {
+              if (before[i] !== target[i]) {
+                changed = true;
+                break;
+              }
+            }
+            if (changed) {
+              relinkArray(node, target, 0, before, prop === "fill" ? [args[0]] : undefined);
+              const located = locate(node);
+              if (located !== undefined) {
+                dispatch(located, {
+                  action: "replace",
+                  path: located.paths[0],
+                  newValue: cloneTree(target),
+                });
+              }
+              trigger(target, Symbol.iterator);
+              evictRemoved(before);
+            }
+            return proxy;
+          };
+          return methodCache[prop];
+        }
         case "push":
           track(target, "length");
           methodCache[prop] = function (...items: any[]): number {
+            unwrapItems(items);
             const oldLength = target.length;
             const result = target.push(...items);
             const newLength = target.length;
             if (items.length > 0) {
-              const event: StateEvent = {
-                action: "array-push",
-                path: path,
-                key: oldLength, // start index was the old length
-                items: items,
-              };
-              emit?.(event);
+              relinkArray(node, target, oldLength, undefined, items);
+              const located = locate(node);
+              if (located !== undefined) {
+                dispatch(located, {
+                  action: "array-push",
+                  path: located.paths[0],
+                  key: oldLength, // start index was the old length
+                  items: items,
+                });
+              }
               trigger(target, Symbol.iterator);
               if (oldLength !== newLength) {
                 trigger(target, "length");
@@ -78,13 +148,16 @@ export function wrapArray<T extends any[]>(
             const oldValue = target[poppedIndex];
             const result = target.pop();
             const newLength = target.length;
-            const event: StateEvent = {
-              action: "array-pop",
-              path: path,
-              key: poppedIndex,
-              oldValue: oldValue,
-            };
-            emit?.(event);
+            if (isObject(oldValue)) detachPlace(oldValue, node, poppedIndex);
+            const located = locate(node);
+            if (located !== undefined) {
+              dispatch(located, {
+                action: "array-pop",
+                path: located.paths[0],
+                key: poppedIndex,
+                oldValue: oldValue,
+              });
+            }
             if (isObject(oldValue)) evictDeep(oldValue);
             trigger(target, Symbol.iterator);
             if (oldLength !== newLength) {
@@ -101,13 +174,16 @@ export function wrapArray<T extends any[]>(
             const oldValue = target[0];
             const result = target.shift();
             const newLength = target.length;
-            const event: StateEvent = {
-              action: "array-shift",
-              path: path,
-              key: 0,
-              oldValue: oldValue,
-            };
-            emit?.(event);
+            relinkArray(node, target, 0, [oldValue]);
+            const located = locate(node);
+            if (located !== undefined) {
+              dispatch(located, {
+                action: "array-shift",
+                path: located.paths[0],
+                key: 0,
+                oldValue: oldValue,
+              });
+            }
             if (isObject(oldValue)) evictDeep(oldValue);
             trigger(target, Symbol.iterator);
             if (oldLength !== newLength) {
@@ -119,17 +195,21 @@ export function wrapArray<T extends any[]>(
         case "unshift":
           track(target, "length");
           methodCache[prop] = function (...items: any[]): number {
+            unwrapItems(items);
             const oldLength = target.length;
             const result = target.unshift(...items);
             const newLength = target.length;
             if (items.length > 0) {
-              const event: StateEvent = {
-                action: "array-unshift",
-                path: path,
-                key: 0,
-                items: items,
-              };
-              emit?.(event);
+              relinkArray(node, target, 0, undefined, items);
+              const located = locate(node);
+              if (located !== undefined) {
+                dispatch(located, {
+                  action: "array-unshift",
+                  path: located.paths[0],
+                  key: 0,
+                  items: items,
+                });
+              }
               trigger(target, Symbol.iterator);
               if (oldLength !== newLength) {
                 trigger(target, "length");
@@ -145,6 +225,7 @@ export function wrapArray<T extends any[]>(
             deleteCount?: number,
             ...items: any[]
           ): any[] {
+            unwrapItems(items);
             const oldLength = target.length;
             const actualStart =
               start < 0
@@ -167,18 +248,19 @@ export function wrapArray<T extends any[]>(
             const newLength = target.length;
 
             if (actualDeleteCount > 0 || items.length > 0) {
-              const event: StateEvent = {
-                action: "array-splice",
-                path: path,
-                key: actualStart,
-                deleteCount: actualDeleteCount,
-                items: items.length > 0 ? items : undefined,
-                oldValues: deletedItems.length > 0 ? deletedItems : undefined,
-              };
-              emit?.(event);
-              for (let i = 0; i < deletedItems.length; i++) {
-                if (isObject(deletedItems[i])) evictDeep(deletedItems[i]);
+              relinkArray(node, target, actualStart, deletedItems, items);
+              const located = locate(node);
+              if (located !== undefined) {
+                dispatch(located, {
+                  action: "array-splice",
+                  path: located.paths[0],
+                  key: actualStart,
+                  deleteCount: actualDeleteCount,
+                  items: items.length > 0 ? items : undefined,
+                  oldValues: deletedItems.length > 0 ? deletedItems : undefined,
+                });
               }
+              evictRemoved(deletedItems);
               trigger(target, Symbol.iterator);
               if (oldLength !== newLength) {
                 trigger(target, "length");
@@ -199,26 +281,7 @@ export function wrapArray<T extends any[]>(
               if (idx === -1) return undefined;
               const value = target[idx];
               if (!isObject(value)) return value;
-
-              // construct path for the found index and wrap like numeric index access
-              const propKey = String(idx);
-              const pathKey =
-                path.length > 0 ? `${path.join(".")}.${propKey}` : propKey;
-              let newPath = getPathConcat(pathKey);
-              if (newPath === undefined) {
-                newPath = path.concat(propKey);
-                setPathConcat(pathKey, newPath);
-              }
-
-              if (globalSeen.has(value)) return globalSeen.get(value);
-              const cachedValueProxy = wrapperCache.get(value);
-              if (cachedValueProxy) return cachedValueProxy;
-
-              if (Array.isArray(value)) return wrapArray(value, emit, newPath);
-              if (value instanceof Map) return wrapMap(value, emit, newPath);
-              if (value instanceof Set) return wrapSet(value, emit, newPath);
-              if (value instanceof Date) return new Date(value.getTime());
-              return reactive(value, emit, newPath);
+              return wrapChild(value, node, idx);
             };
           }
           return methodCache[prop];
@@ -236,25 +299,7 @@ export function wrapArray<T extends any[]>(
 
               const value = target[idx];
               if (!isObject(value)) return value;
-
-              const propKey = String(idx);
-              const pathKey =
-                path.length > 0 ? `${path.join(".")}.${propKey}` : propKey;
-              let newPath = getPathConcat(pathKey);
-              if (newPath === undefined) {
-                newPath = path.concat(propKey);
-                setPathConcat(pathKey, newPath);
-              }
-
-              if (globalSeen.has(value)) return globalSeen.get(value);
-              const cachedValueProxy = wrapperCache.get(value);
-              if (cachedValueProxy) return cachedValueProxy;
-
-              if (Array.isArray(value)) return wrapArray(value, emit, newPath);
-              if (value instanceof Map) return wrapMap(value, emit, newPath);
-              if (value instanceof Set) return wrapSet(value, emit, newPath);
-              if (value instanceof Date) return new Date(value.getTime());
-              return reactive(value, emit, newPath);
+              return wrapChild(value, node, idx);
             };
           }
           return methodCache[prop];
@@ -291,29 +336,8 @@ export function wrapArray<T extends any[]>(
       if (isNumericIndex) {
         track(target, String(prop));
         if (!isObject(value)) return value;
-        if (globalSeen.has(value)) return globalSeen.get(value);
-
-        // reuse existing proxy for nested object/array if available
-        const cachedValueProxy = wrapperCache.get(value);
-        if (cachedValueProxy) return cachedValueProxy;
-
-        // calculate the nested path for the element, optimizing with caching
-        const propKey = String(prop);
-        const pathKey =
-          path.length > 0 ? `${path.join(".")}.${propKey}` : propKey;
-        let newPath = getPathConcat(pathKey);
-
-        if (newPath === undefined) {
-          newPath = path.concat(propKey);
-          setPathConcat(pathKey, newPath);
-        }
-
         // recursively wrap nested structures
-        if (Array.isArray(value)) return wrapArray(value, emit, newPath);
-        if (value instanceof Map) return wrapMap(value, emit, newPath);
-        if (value instanceof Set) return wrapSet(value, emit, newPath);
-        if (value instanceof Date) return new Date(value.getTime()); // dates are not proxied, return a copy
-        return reactive(value, emit, newPath);
+        return wrapChild(value, node, placeKey(prop));
       }
 
       // ensure functions accessed directly are bound to the original target
@@ -339,6 +363,12 @@ export function wrapArray<T extends any[]>(
       )
         return true;
 
+      // a shorter length removes the items past it
+      const truncated =
+        prop === "length" && Number(value) < target.length
+          ? target.slice(Number(value))
+          : undefined;
+
       const descriptor = Reflect.getOwnPropertyDescriptor(target, prop);
       const result = Reflect.set(target, prop, value, receiver);
 
@@ -349,16 +379,14 @@ export function wrapArray<T extends any[]>(
       // emit event and trigger effects only if the set was successful and wasn't intercepted by a setter
       // (unless it's a direct numeric index set, which doesn't have a descriptor.set)
       if (result && (!descriptor || !descriptor.set || isNumericIndex)) {
-        const resolvePath = (key: string) => {
-          const pathKey = path.length > 0 ? `${path.join(".")}.${key}` : key;
-          let newPath = getPathConcat(pathKey);
-
-          if (newPath === undefined) {
-            newPath = path.concat(key);
-            setPathConcat(pathKey, newPath);
-          }
-          return newPath;
-        };
+        // move places before anything can write again (emit may throw)
+        if (truncated !== undefined) {
+          relinkArray(node, target, target.length, truncated);
+        } else if (prop !== "length") {
+          const key = placeKey(prop);
+          if (isObject(oldValue)) detachPlace(oldValue, node, key);
+          if (isObject(value)) attachValue(value, node, key);
+        }
 
         if (
           Array.isArray(target) &&
@@ -371,22 +399,44 @@ export function wrapArray<T extends any[]>(
           const oldLength = Number(oldValue);
           const newLength = Number(value);
           for (let i = oldLength; i < newLength; i++) {
-            emit?.({ action: "set", path: resolvePath(String(i)), newValue: undefined });
+            const located = locate(node, String(i));
+            if (located !== undefined) {
+              dispatch(located, { action: "set", path: located.paths[0], newValue: undefined });
+            }
           }
         } else {
-          const event: StateEvent = {
-            action: "set",
-            path: resolvePath(String(prop)),
-            oldValue,
-            newValue: isObject(value) ? deepClone(value) : value,
-          };
-          emit?.(event);
+          const located = locate(node, prop);
+          if (located !== undefined) {
+            dispatch(located, {
+              action: "set",
+              path: located.paths[0],
+              oldValue,
+              newValue: isObject(value) ? cloneTree(value) : value,
+            });
+          }
         }
 
         if (isObject(oldValue) && oldValue !== value) {
           evictDeep(oldValue);
         }
+        if (truncated !== undefined) evictRemoved(truncated);
         trigger(target, prop);
+      }
+      return result;
+    },
+    deleteProperty(target: T, prop: string | symbol): boolean {
+      const oldValue = (target as any)[prop];
+      const hadProperty = Object.prototype.hasOwnProperty.call(target, prop);
+      const result = Reflect.deleteProperty(target, prop);
+
+      if (hadProperty && result) {
+        if (isObject(oldValue)) detachPlace(oldValue, node, placeKey(prop));
+        const located = locate(node, prop);
+        if (located !== undefined) {
+          dispatch(located, { action: "delete", path: located.paths[0], oldValue });
+        }
+        trigger(target, prop);
+        if (isObject(oldValue)) evictDeep(oldValue);
       }
       return result;
     },

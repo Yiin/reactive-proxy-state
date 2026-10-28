@@ -1,23 +1,21 @@
-import { EmitFunction, Path, StateEvent } from "./types";
+import { unwrapForStore, wrapperCache, globalSeen, proxyStats } from "./utils";
+import { wrapChild } from "./reactive";
 import {
-  unwrapForStore,
-  getPathConcat,
-  setPathConcat,
-  wrapperCache,
-  globalSeen,
-  proxyStats,
-} from "./utils";
-import { reactive } from "./reactive";
-import { wrapArray } from "./wrap-array";
-import { wrapMap } from "./wrap-map";
+  LocationNode,
+  attachValue,
+  detachPlace,
+  dispatch,
+  evictDeep,
+  locate,
+} from "./location";
 import { track, trigger } from "./watch-effect";
 import { ReactiveFlags } from "./constants";
 
-export function wrapSet<T>(
-  set: Set<T>,
-  emit?: EmitFunction,
-  path: Path = []
-): Set<T> {
+function isObject(value: unknown): value is object {
+  return value !== null && typeof value === "object";
+}
+
+export function wrapSet<T>(set: Set<T>, node: LocationNode): Set<T> {
   const cachedProxy = wrapperCache.get(set);
   if (cachedProxy) return cachedProxy as Set<T>;
   if (globalSeen.has(set)) return globalSeen.get(set);
@@ -55,12 +53,15 @@ export function wrapSet<T>(
             target.add(value);
             const newSize = target.size;
 
-            const event: StateEvent = {
-              action: "set-add",
-              path: path,
-              value: value,
-            };
-            emit?.(event);
+            if (isObject(value)) attachValue(value, node, undefined);
+            const located = locate(node);
+            if (located !== undefined) {
+              dispatch(located, {
+                action: "set-add",
+                path: located.paths[0],
+                value: value,
+              });
+            }
             trigger(target, Symbol.iterator);
             if (oldSize !== newSize) {
               trigger(target, "size");
@@ -81,17 +82,21 @@ export function wrapSet<T>(
             const newSize = target.size;
 
             if (result) {
-              const event: StateEvent = {
-                action: "set-delete",
-                path: path,
-                value: value,
-                oldValue: oldValue,
-              };
-              emit?.(event);
+              if (isObject(value)) detachPlace(value, node, undefined);
+              const located = locate(node);
+              if (located !== undefined) {
+                dispatch(located, {
+                  action: "set-delete",
+                  path: located.paths[0],
+                  value: value,
+                  oldValue: oldValue,
+                });
+              }
               trigger(target, Symbol.iterator);
               if (oldSize !== newSize) {
                 trigger(target, "size");
               }
+              if (isObject(value)) evictDeep(value);
             }
             return result;
           }
@@ -104,18 +109,27 @@ export function wrapSet<T>(
           const oldSize = target.size;
           if (oldSize === 0) return;
 
+          const removed = [...target];
           target.clear();
           const newSize = target.size;
 
-          const event: StateEvent = {
-            action: "set-clear",
-            path: path,
-            value: null,
-          };
-          emit?.(event);
+          for (const member of removed) {
+            if (isObject(member)) detachPlace(member, node, undefined);
+          }
+          const located = locate(node);
+          if (located !== undefined) {
+            dispatch(located, {
+              action: "set-clear",
+              path: located.paths[0],
+              value: null,
+            });
+          }
           trigger(target, Symbol.iterator);
           if (oldSize !== newSize) {
             trigger(target, "size");
+          }
+          for (const member of removed) {
+            if (isObject(member)) evictDeep(member);
           }
         };
         return methodCache[prop];
@@ -168,38 +182,9 @@ export function wrapSet<T>(
 
             track(target, String(index));
 
-            let wrappedValue = valueToWrap;
-            if (valueToWrap && typeof valueToWrap === "object") {
-              if (globalSeen.has(valueToWrap)) {
-                wrappedValue = globalSeen.get(valueToWrap);
-              } else {
-                const cachedValueProxy = wrapperCache.get(valueToWrap);
-                if (cachedValueProxy) {
-                  wrappedValue = cachedValueProxy;
-                } else {
-                  const keyForPath = String(index);
-                  const pathKey =
-                    path.length > 0
-                      ? `${path.join(".")}.${keyForPath}`
-                      : keyForPath;
-                  let newPath = getPathConcat(pathKey);
-                  if (newPath === undefined) {
-                    newPath = path.concat(keyForPath);
-                    setPathConcat(pathKey, newPath);
-                  }
-
-                  if (valueToWrap instanceof Map)
-                    wrappedValue = wrapMap(valueToWrap, emit, newPath);
-                  else if (valueToWrap instanceof Set)
-                    wrappedValue = wrapSet(valueToWrap, emit, newPath);
-                  else if (Array.isArray(valueToWrap))
-                    wrappedValue = wrapArray(valueToWrap, emit, newPath);
-                  else if (valueToWrap instanceof Date)
-                    wrappedValue = new Date(valueToWrap.getTime());
-                  else wrappedValue = reactive(valueToWrap, emit, newPath);
-                }
-              }
-            }
+            const wrappedValue = isObject(valueToWrap)
+              ? wrapChild(valueToWrap, node, undefined)
+              : valueToWrap;
 
             if (prop === "entries") {
               yield [wrappedValue, wrappedValue];

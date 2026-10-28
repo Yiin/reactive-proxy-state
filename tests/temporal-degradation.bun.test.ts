@@ -254,7 +254,6 @@ describe('temporal degradation', () => {
 
     const stats = getProxyStats()
     console.log(`  Proxies created: ${stats.created}, evicted: ${stats.staleEvicted}`)
-    console.log(`  pathConcatCache: ${stats.pathConcatCacheSize}`)
 
     // Should not degrade more than 3x
     expect(ratio).toBeLessThan(3)
