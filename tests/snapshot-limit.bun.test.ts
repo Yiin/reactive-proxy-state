@@ -168,15 +168,17 @@ describe("a refused write changes nothing", () => {
 
     // the object a new value points back to is over the limit before the
     // write and under it after: the write is accepted
-    const shared = dag(15);
-    const holder = reactive({ obj: { a: shared, b: shared } as any }, (event) => events.push(event));
+    const shared = dag(15); // one place is under the limit, two are over it
+    const holder = reactive({ obj: { b: shared } as any }, (event) => events.push(event));
     events.length = 0;
     const obj = toRaw(holder.obj);
-    holder.obj.a = { parent: obj };
-    expect(obj.a.parent).toBe(obj);
+    obj.c = shared;
+    holder.obj.c = { parent: obj };
+    expect(obj.c.parent).toBe(obj);
     expect(events.length).toBe(1);
     const payload = (events[0] as any).newValue;
-    expect(payload.parent.a).toBe(payload);
+    expect(payload.parent.c).toBe(payload);
+    expect(payload.parent.b.a.a).toEqual(shared.a.a);
     expect(payload.parent.b).not.toBe(shared);
   });
 
@@ -222,7 +224,22 @@ describe("cycles are counted with their ancestors", () => {
     const copy = cloneTree(raw);
     expect(copy.items[1].a.b).toBe(copy.items[1]);
     expect(copy.items[1]).not.toBe(copy.items[2]);
-    expect(() => reactive(raw, () => {})).not.toThrow();
+  });
+
+  test("a long cycle repeated beside distinct objects: a root below the limit is accepted", () => {
+    // a ring of 800 objects; the list holds the first once and the second
+    // 100 times: 80,000 extra copies, and a count that reuses the first
+    // object's count at the other places (ancestors there) made 159,900
+    const ring = Array.from({ length: 800 }, (_, i) => ({ i }) as any);
+    for (let i = 0; i < ring.length; i++) ring[i].next = ring[(i + 1) % ring.length];
+    const raw = { padding: Array.from({ length: 30_000 }, () => ({})), items: [ring[0], ...new Array(100).fill(ring[1])] };
+    let payload: any;
+    reactive(raw, (event) => (payload = event.newValue));
+    expect(payload.items[1].i).toBe(1);
+    expect(payload.items[1]).not.toBe(payload.items[2]);
+    let last = payload.items[1];
+    for (let i = 0; i < 799; i++) last = last.next;
+    expect(last.next).toBe(payload.items[1]);
   });
 
   test("the same cycle repeated past the limit is refused", () => {
