@@ -47,6 +47,11 @@ export interface LocationRoot {
   emit: EmitFunction | undefined;
   path: Path;
   /**
+   * The root emits on a later microtask (`{ async: true }`): its events
+   * wait, so they also copy what a write removes (see `copyPayload`).
+   */
+  async: boolean;
+  /**
    * Events made under this root and not delivered yet, oldest first, while
    * a write that made several is delivering them (see `deliver`).
    */
@@ -392,6 +397,8 @@ function attachedBefore(node: LocationNode, former: LocationNode | undefined): b
  * further path gets copies of those copies, all made before the first emit,
  * so a listener that changes a payload cannot change another, and two
  * remote places never share one object. The first path gets `event` itself.
+ * What the write removed is copied per path only where `copyPayload` copied
+ * it (an async root); otherwise every path carries the removed value itself.
  */
 export function dispatch(target: Target, event: StateEvent): void {
   const { root, paths } = target;
@@ -405,10 +412,12 @@ export function dispatch(target: Target, event: StateEvent): void {
     // copies of copies: a tree with cycles only, so they cannot pass the limit
     const copy = { ...event, path: paths[i] };
     if (isObject(event.newValue)) copy.newValue = cloneTree(event.newValue);
-    if (isObject(event.oldValue)) copy.oldValue = cloneTree(event.oldValue);
     if (isObject(event.value)) copy.value = cloneTree(event.value);
     if (event.items !== undefined) copy.items = cloneTree(event.items);
-    if (event.oldValues !== undefined) copy.oldValues = cloneTree(event.oldValues);
+    if (root.async) {
+      if (isObject(event.oldValue)) copy.oldValue = cloneTree(event.oldValue);
+      if (event.oldValues !== undefined) copy.oldValues = cloneTree(event.oldValues);
+    }
     events.push(copy);
   }
   deliver(root, events);
@@ -477,6 +486,13 @@ export const enum Copied {
  * holds no object. A payload too large to copy throws a `SnapshotLimitError`
  * and leaves `event` as it was, so the write is never made.
  *
+ * What the write stores (`newValue`, `value`, `items`) is always copied: it
+ * stays in the tree, where later writes change it, and a replica needs it
+ * as it was. What the write removes (`oldValue`, `oldValues`) is copied only
+ * for an async root (`target.root.async`), whose events wait for a
+ * microtask. A synchronous root delivers the event before the write
+ * returns, and sends the removed value itself, as 1.0.44 did.
+ *
  * A payload that reaches `container` would be copied as `container` is
  * before the write. Then nothing is copied and the result is
  * `Copied.Reaches`: the caller makes the write on `shallowCopy(container)`
@@ -485,8 +501,14 @@ export const enum Copied {
  * `held` comes from `heldItems` for the store of `newValue`: the place walk
  * of that store skips those items, so the copy does not check freshness.
  */
-export function copyPayload(event: StateEvent | undefined, container: object, held?: Set<object>): Copied {
+export function copyPayload(
+  event: StateEvent | undefined,
+  target: Target | undefined,
+  container: object,
+  held?: Set<object>
+): Copied {
   if (event === undefined) return Copied.Done;
+  const removed = target!.root.async;
   const { newValue, oldValue, value, items, oldValues } = event;
   let fresh = true;
   let newCopy = newValue;
@@ -509,16 +531,18 @@ export function copyPayload(event: StateEvent | undefined, container: object, he
     if (itemsCopy === REACHES) return Copied.Reaches;
     fresh &&= copiedFresh;
   }
-  const oldCopy = isObject(oldValue) ? cloneTreeUnless(oldValue, container) : oldValue;
-  if (oldCopy === REACHES) return Copied.Reaches;
-  const oldValuesCopy =
-    oldValues !== undefined && holdsObject(oldValues) ? cloneTreeUnless(oldValues, container) : oldValues;
-  if (oldValuesCopy === REACHES) return Copied.Reaches;
+  if (removed) {
+    const oldCopy = isObject(oldValue) ? cloneTreeUnless(oldValue, container) : oldValue;
+    if (oldCopy === REACHES) return Copied.Reaches;
+    const oldValuesCopy =
+      oldValues !== undefined && holdsObject(oldValues) ? cloneTreeUnless(oldValues, container) : oldValues;
+    if (oldValuesCopy === REACHES) return Copied.Reaches;
+    if (isObject(oldValue)) event.oldValue = oldCopy;
+    if (oldValues !== undefined) event.oldValues = oldValuesCopy as any[];
+  }
   if (isObject(newValue)) event.newValue = newCopy;
-  if (isObject(oldValue)) event.oldValue = oldCopy;
   if (isObject(value)) event.value = valueCopy;
   if (items !== undefined) event.items = itemsCopy as any[];
-  if (oldValues !== undefined) event.oldValues = oldValuesCopy as any[];
   return fresh ? Copied.Fresh : Copied.Done;
 }
 
@@ -529,9 +553,9 @@ export function copyPayload(event: StateEvent | undefined, container: object, he
  * property in it is refused (an `UnsupportedStateError`) without being
  * read. `after` comes from `shallowCopy`, which refuses the container's own.
  */
-export function copyPayloadReaching(event: StateEvent, container: object, after: object): void {
-  refuseAccessors(event, container, after);
-  copyPayloadAfter(event, container, after);
+export function copyPayloadReaching(event: StateEvent, target: Target, container: object, after: object): void {
+  refuseAccessors(event, target.root.async, container, after);
+  copyPayloadAfter(event, target, container, after);
 }
 
 /**
@@ -541,14 +565,17 @@ export function copyPayloadReaching(event: StateEvent, container: object, after:
  * before the write. Throws a `SnapshotLimitError` when it is too large to
  * copy; the write is then never made, and nothing needs to be put back.
  */
-export function copyPayloadAfter(event: StateEvent, container: object, after: object): void {
+export function copyPayloadAfter(event: StateEvent, target: Target, container: object, after: object): void {
   const { newValue, oldValue, value, items, oldValues } = event;
+  const removed = target.root.async;
   const newCopy = isObject(newValue) ? cloneTreeAfter(newValue, container, after) : newValue;
-  const oldCopy = isObject(oldValue) ? cloneTreeAfter(oldValue, container, after) : oldValue;
+  const oldCopy = removed && isObject(oldValue) ? cloneTreeAfter(oldValue, container, after) : oldValue;
   const valueCopy = isObject(value) ? cloneTreeAfter(value, container, after) : value;
   const itemsCopy = items !== undefined && holdsObject(items) ? cloneTreeAfter(items, container, after) : items;
   const oldValuesCopy =
-    oldValues !== undefined && holdsObject(oldValues) ? cloneTreeAfter(oldValues, container, after) : oldValues;
+    removed && oldValues !== undefined && holdsObject(oldValues)
+      ? cloneTreeAfter(oldValues, container, after)
+      : oldValues;
   if (isObject(newValue)) event.newValue = newCopy;
   if (isObject(oldValue)) event.oldValue = oldCopy;
   if (isObject(value)) event.value = valueCopy;
@@ -599,14 +626,17 @@ function enumerableData(object: object, key: PropertyKey): unknown {
 
 /**
  * Refuse (see `copyPayloadReaching`) an own enumerable accessor anywhere in
- * the payload of `event`, reading `after` for `container`, without calling
- * it. Array indexes are not checked: an accessor index is a descriptor
+ * the payload of `event` that is copied (what the write removes only when
+ * `removed`), reading `after` for `container`, without calling it. Array indexes are not checked: an accessor index is a descriptor
  * change, outside the supported input.
  */
-function refuseAccessors(event: StateEvent, container: object, after: object): void {
-  const pending: unknown[] = [event.newValue, event.oldValue, event.value];
+function refuseAccessors(event: StateEvent, removed: boolean, container: object, after: object): void {
+  const pending: unknown[] = [event.newValue, event.value];
   if (event.items !== undefined) pending.push(event.items);
-  if (event.oldValues !== undefined) pending.push(event.oldValues);
+  if (removed) {
+    pending.push(event.oldValue);
+    if (event.oldValues !== undefined) pending.push(event.oldValues);
+  }
   const seen = new Set<object>();
   while (pending.length > 0) {
     const entry = pending.pop();
@@ -924,6 +954,8 @@ function heldBefore(value: object, replaced: unknown): Set<object> | undefined {
     const item = value[i];
     if (!isObject(item) || nodes.get(item) !== undefined) continue;
     if (before === undefined) {
+      // a value of new items fails at its first one, without a set
+      if (replaced.indexOf(item) === -1) return undefined;
       before = new Set();
       for (let j = 0; j < replaced.length; j++) if (isObject(replaced[j])) before.add(replaced[j]);
     }

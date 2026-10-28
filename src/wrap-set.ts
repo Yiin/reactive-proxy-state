@@ -63,9 +63,9 @@ export function wrapSet<T>(set: Set<T>, node: LocationNode): Set<T> {
               value: value,
             };
             // copies the payload, or throws, before the write
-            const copied = copyPayload(event, target);
+            const copied = copyPayload(event, located, target);
             if (copied === Copied.Reaches) {
-              copyPayloadReaching(event!, target, shallowCopy(target).add(value));
+              copyPayloadReaching(event!, located!, target, shallowCopy(target).add(value));
             }
             target.add(value);
             const newSize = target.size;
@@ -95,10 +95,10 @@ export function wrapSet<T>(set: Set<T>, node: LocationNode): Set<T> {
               value: value,
               oldValue: oldValue,
             };
-            if (copyPayload(event, target) === Copied.Reaches) {
+            if (copyPayload(event, located, target) === Copied.Reaches) {
               const after = shallowCopy(target);
               after.delete(value);
-              copyPayloadReaching(event!, target, after);
+              copyPayloadReaching(event!, located!, target, after);
             }
             const result = target.delete(value);
             const newSize = target.size;

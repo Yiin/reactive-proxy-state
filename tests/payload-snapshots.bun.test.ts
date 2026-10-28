@@ -5,8 +5,11 @@ import type { StateEvent } from "../src/types";
 import { replicate } from "./replica";
 
 /**
- * An event's payload is a deep copy made when the event is made. A later
- * write, before or after the event is delivered, cannot change it.
+ * What a write stores (`newValue`, `value`, `items`) is a deep copy made
+ * when the event is made: a later write, before or after the event is
+ * delivered, cannot change it. What a write removes (`oldValue`,
+ * `oldValues`) is a copy for an async root, whose events wait; a
+ * synchronous root sends the removed value itself, as 1.0.44 did.
  */
 
 function recorder<T extends object>(raw: T) {
@@ -33,10 +36,37 @@ function expectFrozen<T extends object>(raw: T, act: (state: T) => void, later: 
   expect(JSON.stringify(events.slice(0, count), mapReplacer)).toBe(before);
 }
 
+const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+/**
+ * The events `act` makes on an async root, delivered after `later` wrote
+ * more, read as the events a synchronous root delivers at once.
+ */
+async function expectFrozenAsync<T extends object>(
+  make: () => T,
+  act: (state: T) => void,
+  later: (state: T) => void
+) {
+  const delivered: string[] = [];
+  const now = reactive(make(), (event) => delivered.push(JSON.stringify(event, mapReplacer)));
+  delivered.length = 0;
+  act(now);
+  expect(delivered.length).toBeGreaterThan(0);
+
+  const events: StateEvent[] = [];
+  const state = reactive(make(), (event) => events.push(event), [], { async: true });
+  await flush();
+  events.length = 0;
+  act(state);
+  later(state);
+  await flush();
+  expect(events.slice(0, delivered.length).map((event) => JSON.stringify(event, mapReplacer))).toEqual(delivered);
+}
+
 describe("event payloads are snapshots", () => {
-  test("reorder oldValue keeps the items as they were", () => {
-    expectFrozen(
-      { list: [{ n: 0 }, { n: 1 }] },
+  test("reorder oldValue keeps the items as they were (async root)", async () => {
+    await expectFrozenAsync(
+      () => ({ list: [{ n: 0 }, { n: 1 }] }),
       (state) => state.list.reverse(),
       (state) => {
         state.list[0].n = 5;
@@ -45,15 +75,30 @@ describe("event payloads are snapshots", () => {
     );
   });
 
-  test("sort, fill and copyWithin oldValue and newValue", () => {
+  test("sort, fill and copyWithin oldValue and newValue (async root)", async () => {
     for (const act of [
       (state: any) => state.list.sort((left: any, right: any) => right.n - left.n),
       (state: any) => state.list.fill({ n: 9 }, 1),
       (state: any) => state.list.copyWithin(0, 1),
     ]) {
-      expectFrozen({ list: [{ n: 0 }, { n: 1 }, { n: 2 }] }, act, (state: any) => {
+      await expectFrozenAsync(() => ({ list: [{ n: 0 }, { n: 1 }, { n: 2 }] }), act, (state: any) => {
         for (let i = 0; i < state.list.length; i++) state.list[i].n += 10;
       });
+    }
+  });
+
+  test("sort, fill and copyWithin newValue", () => {
+    for (const act of [
+      (state: any) => state.list.sort((left: any, right: any) => right.n - left.n),
+      (state: any) => state.list.fill({ n: 9 }, 1),
+      (state: any) => state.list.copyWithin(0, 1),
+    ]) {
+      const { state, events } = recorder({ list: [{ n: 0 }, { n: 1 }, { n: 2 }] });
+      act(state);
+      const count = events.length;
+      const before = JSON.stringify(events.map((event) => event.newValue));
+      for (let i = 0; i < state.list.length; i++) state.list[i].n += 10;
+      expect(JSON.stringify(events.slice(0, count).map((event) => event.newValue))).toBe(before);
     }
   });
 
@@ -80,9 +125,9 @@ describe("event payloads are snapshots", () => {
     );
   });
 
-  test("set and delete oldValue", () => {
-    expectFrozen(
-      { a: { n: 0 }, b: { n: 0 } } as any,
+  test("set and delete oldValue (async root)", async () => {
+    await expectFrozenAsync(
+      () => ({ a: { n: 0 }, b: { n: 0 } }) as any,
       (state) => {
         const a = state.a;
         const b = state.b;
@@ -100,9 +145,9 @@ describe("event payloads are snapshots", () => {
     );
   });
 
-  test("pop, shift and splice removed values", () => {
-    expectFrozen(
-      { list: [{ n: 0 }, { n: 1 }, { n: 2 }, { n: 3 }], back: [] as any[] },
+  test("pop, shift and splice removed values (async root)", async () => {
+    await expectFrozenAsync(
+      () => ({ list: [{ n: 0 }, { n: 1 }, { n: 2 }, { n: 3 }], back: [] as any[] }),
       (state) => {
         const first = state.list[0];
         const last = state.list[3];
@@ -118,9 +163,9 @@ describe("event payloads are snapshots", () => {
     );
   });
 
-  test("map set, map delete, set add and set delete", () => {
-    expectFrozen(
-      { map: new Map<string, any>([["a", { n: 0 }]]), set: new Set<any>(), back: [] as any[] },
+  test("map set, map delete, set add and set delete (async root)", async () => {
+    await expectFrozenAsync(
+      () => ({ map: new Map<string, any>([["a", { n: 0 }]]), set: new Set<any>(), back: [] as any[] }),
       (state) => {
         const old = state.map.get("a");
         state.map.set("a", { n: 1 });
@@ -137,17 +182,42 @@ describe("event payloads are snapshots", () => {
   });
 
   test("an object at two places: each event has its own copy", () => {
-    const { state, events } = recorder({ list: [{ n: 0 }, null as any] });
+    const { state, events } = recorder({ list: [{ box: { n: 0 } }, null as any] });
     state.list[1] = state.list[0];
     events.length = 0;
-    state.list[0].n = 1;
-    expect(events.length).toBe(2);
-    state.list[0] = { box: { n: 0 } } as any;
-    state.list[1] = state.list[0];
+    state.list[0].box = { n: 1 };
     const pair = events.slice(-2);
-    expect(pair.map((event) => event.path.join("."))).toEqual(["list.0", "list.1"]);
+    expect(pair.map((event) => event.path.join("."))).toEqual(["list.0.box", "list.1.box"]);
     // the two events of one write do not share payload objects
-    expect(pair[0].oldValue).not.toBe(pair[1].oldValue);
+    expect(pair[0].newValue).not.toBe(pair[1].newValue);
+    expect(pair[0].newValue).toEqual(pair[1].newValue);
+  });
+
+  test("an object at two places: each event of an async root has its own removed copy", async () => {
+    const events: StateEvent[] = [];
+    const state = reactive({ list: [{ box: { n: 0 } }, null as any] }, (event) => events.push(event), [], {
+      async: true,
+    });
+    state.list[1] = state.list[0];
+    await flush();
+    events.length = 0;
+    state.list[0].box = { n: 1 };
+    await flush();
+    expect(events.map((event) => event.path.join("."))).toEqual(["list.0.box", "list.1.box"]);
+    expect(events[0].oldValue).not.toBe(events[1].oldValue);
+    expect(events[0].oldValue).toEqual({ n: 0 });
+  });
+
+  test("a synchronous root sends what a write removes as it is, as 1.0.44 did", () => {
+    const { state, events } = recorder({ a: { n: 0 }, list: [{ n: 1 }, { n: 2 }] } as any);
+    const a = toRaw(state).a;
+    const second = toRaw(state).list[1];
+    state.a = { n: 5 };
+    state.list.pop();
+    expect(events[0].oldValue).toBe(a);
+    expect(events[1].oldValue).toBe(second);
+    // what it stores is a copy
+    expect(events[0].newValue).not.toBe(toRaw(state).a);
   });
 });
 

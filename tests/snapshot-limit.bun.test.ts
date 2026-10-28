@@ -6,7 +6,9 @@ import { replicate, treeText } from "./replica";
 /**
  * The copy limit (`SNAPSHOT_SHARED_COPY_LIMIT`): a write whose payload is
  * too large to copy is refused before anything changes, one payload has
- * one budget, and a graph below the limit is never refused.
+ * one budget, and a graph below the limit is never refused. What a write
+ * removes is copied only for an async root, so only there is a removal
+ * refused; a synchronous root removes it and sends it as it is.
  */
 
 /** `depth + 1` objects, each level holding the one below twice: 2^(depth+1) - 1 copies. */
@@ -17,8 +19,8 @@ function dag(depth: number): any {
 }
 
 /** A replica of `raw`, an effect on every top-level key, and a check that nothing moved. */
-function guarded<T extends object>(raw: T) {
-  const sync = replicate(raw);
+function guarded<T extends object>(raw: T, async = false) {
+  const sync = replicate(raw, async ? { async: true } : undefined);
   let effectRuns = 0;
   watchEffect(() => {
     effectRuns++;
@@ -66,8 +68,11 @@ describe("a refused write changes nothing", () => {
     held.n = 2;
     expect(sync.paths()).toEqual(["set:box.items.0.n"]);
     expect(sync.inSync()).toBe(true);
+  });
 
-    // a value too large to copy as oldValue, stored raw
+  test("an async root refuses to remove a value too large to copy as oldValue", () => {
+    const sync = guarded({ other: 0 } as any, true);
+    // stored raw
     (toRaw(sync.state) as any).big = dag(17);
     const raw = toRaw(sync.state) as any;
     expect(() => {
@@ -78,6 +83,19 @@ describe("a refused write changes nothing", () => {
       (sync.state as any).big = null;
     }).toThrow(SnapshotLimitError);
     expect(raw.big.a).toBeDefined();
+  });
+
+  test("a synchronous root removes a value too large to copy and sends it as it is", () => {
+    const events: any[] = [];
+    const state: any = reactive({ other: 0 } as any, (event) => events.push(event));
+    const big = dag(17);
+    toRaw(state).big = big;
+    toRaw(state).list = [{ id: 1 }, big];
+    events.length = 0;
+    state.big = null;
+    expect(state.list.pop()).toBe(big);
+    expect(events[0].oldValue).toBe(big);
+    expect(events[1].oldValue).toBe(big);
   });
 
   test("whole-array replacement whose items share one graph", () => {
@@ -106,8 +124,8 @@ describe("a refused write changes nothing", () => {
     expect(sync.inSync()).toBe(true);
   });
 
-  test("pop, shift and splice of an item too large to copy", () => {
-    const sync = guarded({ list: [{ id: 1 }, { id: 2 }] as any[] });
+  test("pop, shift and splice of an item too large to copy (async root)", () => {
+    const sync = guarded({ list: [{ id: 1 }, { id: 2 }] as any[] }, true);
     const raw = toRaw(sync.state.list) as any[];
     raw.unshift(dag(17));
     raw.push(dag(17));
@@ -145,14 +163,17 @@ describe("a refused write changes nothing", () => {
     expect(sync.state.map.size).toBe(1);
     expect(sync.state.set.size).toBe(1);
 
+    // set-delete names the member it removes in `value`, which is always copied
     const big = dag(17);
-    (toRaw(sync.state.map) as Map<string, any>).set("big", big);
     (toRaw(sync.state.set) as Set<any>).add(big);
-    expect(() => sync.state.map.delete("big")).toThrow(SnapshotLimitError);
     expect(() => sync.state.set.delete(big)).toThrow(SnapshotLimitError);
-    expect((toRaw(sync.state.map) as Map<string, any>).get("big")).toBe(big);
     expect((toRaw(sync.state.set) as Set<any>).has(big)).toBe(true);
     expect(sync.events.length).toBe(0);
+
+    const later = guarded({ map: new Map<string, any>([["a", { n: 1 }]]) }, true);
+    (toRaw(later.state.map) as Map<string, any>).set("big", big);
+    expect(() => later.state.map.delete("big")).toThrow(SnapshotLimitError);
+    expect((toRaw(later.state.map) as Map<string, any>).get("big")).toBe(big);
   });
 
   test("a payload that reaches back into the written container is measured after the write", () => {
@@ -334,6 +355,8 @@ describe("a refusal needs no rollback", () => {
 
   type WritePath = {
     name: string;
+    /** It removes the value (an `oldValue` or `oldValues` payload), which only an async root copies. */
+    removes?: boolean;
     make: () => any;
     /** Stores a value through the raw object, before the proxies are made. */
     setup?: (raw: any) => unknown;
@@ -344,12 +367,14 @@ describe("a refusal needs no rollback", () => {
     { name: "object set", make: () => ({ a: 1 }), write: (state, raw) => (state.b = reaching(raw)) },
     {
       name: "object set over an old value that reaches back",
+      removes: true,
       make: () => ({ a: 1 }),
       setup: (raw) => (raw.b = reaching(raw)),
       write: (state) => (state.b = 2),
     },
     {
       name: "object delete",
+      removes: true,
       make: () => ({ a: 1 }),
       setup: (raw) => (raw.b = reaching(raw)),
       write: (state) => delete state.b,
@@ -358,6 +383,7 @@ describe("a refusal needs no rollback", () => {
     { name: "array index write past the end", make: () => [1, 2], write: (state, raw) => (state[4] = reaching(raw)) },
     {
       name: "array delete",
+      removes: true,
       make: () => [1, 2],
       setup: (raw) => raw.push(reaching(raw)),
       write: (state) => delete state[2],
@@ -367,12 +393,19 @@ describe("a refusal needs no rollback", () => {
     { name: "splice insertion", make: () => [1, 2], write: (state, raw) => state.splice(1, 0, reaching(raw)) },
     {
       name: "splice removal",
+      removes: true,
       make: () => [1, 2],
       setup: (raw) => raw.push(reaching(raw)),
       write: (state) => state.splice(2, 1),
     },
-    { name: "pop", make: () => [1, 2], setup: (raw) => raw.push(reaching(raw)), write: (state) => state.pop() },
-    { name: "shift", make: () => [1, 2], setup: (raw) => raw.unshift(reaching(raw)), write: (state) => state.shift() },
+    { name: "pop", removes: true, make: () => [1, 2], setup: (raw) => raw.push(reaching(raw)), write: (state) => state.pop() },
+    {
+      name: "shift",
+      removes: true,
+      make: () => [1, 2],
+      setup: (raw) => raw.unshift(reaching(raw)),
+      write: (state) => state.shift(),
+    },
     {
       name: "map set",
       make: () => new Map<any, any>([["a", 1]]),
@@ -380,6 +413,7 @@ describe("a refusal needs no rollback", () => {
     },
     {
       name: "map delete",
+      removes: true,
       make: () => new Map<any, any>([["a", 1]]),
       setup: (raw) => raw.set("b", reaching(raw)),
       write: (state) => state.delete("b"),
@@ -396,21 +430,23 @@ describe("a refusal needs no rollback", () => {
   /** A value that points back into `container` and is too large to copy. */
   const tooLarge = (container: object) => ({ back: container, data: dag(17) });
 
-  for (const { name, make, setup, write } of writePaths(tooLarge)) {
-    test(`${name}: a refused payload that reaches back into its container writes nothing`, () => {
+  for (const { name, removes, make, setup, write } of writePaths(tooLarge)) {
+    const async = removes === true;
+    test(`${name}: a refused payload that reaches back into its container writes nothing${async ? " (async root)" : ""}`, async () => {
       const child = { n: 1 };
       const raw = make();
       const collection = raw instanceof Map || raw instanceof Set;
       // a non-configurable property, which a delete-and-redefine rollback cannot restore
       if (!collection) Object.defineProperty(raw, "0", { configurable: false });
       const events: any[] = [];
-      const state: any = reactive({ child, box: raw }, (event) => events.push(event));
+      const state: any = reactive({ child, box: raw }, (event) => events.push(event), [], { async });
       // stored raw, after the root: a root over the limit is refused
       setup?.(raw);
       const box = state.box;
       const held = state.child;
       const iterator = collection ? box.values() : undefined;
       iterator?.next();
+      await Promise.resolve();
       events.length = 0;
       const before = contents(raw);
       let error: unknown;
@@ -426,8 +462,22 @@ describe("a refusal needs no rollback", () => {
       expect(events.length).toBe(0);
       if (iterator !== undefined) expect([...iterator].length).toBe(raw.size - 1);
       held.n = 2;
+      await Promise.resolve();
       expect(events.map((event) => event.path)).toEqual([["child", "n"]]);
     });
+    if (removes) {
+      test(`${name}: a synchronous root makes the removal and sends the value as it is`, () => {
+        const raw = make();
+        const events: any[] = [];
+        const state: any = reactive({ box: raw }, (event) => events.push(event));
+        setup?.(raw);
+        events.length = 0;
+        write(state.box, raw);
+        expect(events.length).toBe(1);
+        const removed = events[0].oldValue ?? events[0].oldValues?.[0];
+        expect(removed.back).toBe(raw);
+      });
+    }
   }
 
   /**
@@ -523,8 +573,9 @@ describe("a refusal needs no rollback", () => {
 });
 
 describe("a cyclic graph too large to remove in parts", () => {
-  test("every removal is refused; a new root from new objects resets the replica", () => {
-    const sync = replicate({ keep: { n: 1 }, graph: null as any });
+  test("every removal is refused by an async root; a new root from new objects resets the replica", async () => {
+    const sync = replicate({ keep: { n: 1 }, graph: null as any }, { async: true });
+    await Promise.resolve();
     // ten objects, each holding the nine others, stored raw: every part reaches the whole graph
     const nodes = Array.from({ length: 10 }, (_, i) => ({ i }) as any);
     for (const node of nodes) for (const other of nodes) if (other !== node) node["to" + other.i] = other;

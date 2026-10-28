@@ -83,9 +83,9 @@ export function wrapMap<K, V>(map: Map<K, V>, node: LocationNode): Map<K, V> {
           };
           const held = located && heldItems(value, oldValue);
           // copies the payload, or throws, before the write
-          const copied = copyPayload(event, target, held);
+          const copied = copyPayload(event, located, target, held);
           if (copied === Copied.Reaches) {
-            copyPayloadReaching(event!, target, shallowCopy(target).set(key, value));
+            copyPayloadReaching(event!, located!, target, shallowCopy(target).set(key, value));
           }
           target.set(key, value);
           const newSize = target.size;
@@ -125,10 +125,10 @@ export function wrapMap<K, V>(map: Map<K, V>, node: LocationNode): Map<K, V> {
             key,
             oldValue,
           };
-          if (copyPayload(event, target) === Copied.Reaches) {
+          if (copyPayload(event, located, target) === Copied.Reaches) {
             const after = shallowCopy(target);
             after.delete(key);
-            copyPayloadReaching(event!, target, after);
+            copyPayloadReaching(event!, located!, target, after);
           }
           const result = target.delete(key);
           const newSize = target.size;

@@ -71,7 +71,8 @@ describe("the initial replace", () => {
     expect(payload.a).not.toBe(payload.b);
     expect(payload).toEqual({ a: { n: 0 }, b: { n: 0 } });
     // the alias was found: a write through it reaches both places
-    const sync = replicate({ a: shared, b: shared });
+    const alias = { n: 0 };
+    const sync = replicate({ a: alias, b: alias });
     sync.state.a.n = 1;
     expect(sync.paths()).toEqual(["set:a.n", "set:b.n"]);
   });

@@ -126,7 +126,7 @@ export function reactive<T extends object>(
   }
 
   const node = ensureLocationNode(obj);
-  node.root = { emit, path, undelivered: undefined };
+  node.root = { emit, path, async: emit !== undefined && options?.async === true, undelivered: undefined };
   node.scope = node.root;
   // an object at two places in the initial value emits to both from the
   // start; a fresh value has no such object (see `cloneStored`)
@@ -235,14 +235,14 @@ function wrapObject<T extends object>(obj: T, node: LocationNode, options?: Reac
       };
       const held = located && heldItems(value, oldValue);
       // copies the payload, or throws, before the write
-      const copied = copyPayload(event, target, held);
+      const copied = copyPayload(event, located, target, held);
       if (copied === Copied.Reaches) {
         // the payload reaches `target`: copy it with the write made on a copy of `target`
         const after = shallowCopy(target);
         // a non-enumerable property stays out of copies, written or not
         const descriptor = Reflect.getOwnPropertyDescriptor(target, prop);
         if (descriptor === undefined || descriptor.enumerable) setData(after, prop, value);
-        copyPayloadReaching(event!, target, after);
+        copyPayloadReaching(event!, located!, target, after);
       }
       const result = Reflect.set(target, prop, value, receiver);
 
@@ -275,10 +275,10 @@ function wrapObject<T extends object>(obj: T, node: LocationNode, options?: Reac
         path: located.paths[0],
         oldValue,
       };
-      if (copyPayload(event, target) === Copied.Reaches) {
+      if (copyPayload(event, located, target) === Copied.Reaches) {
         const after = shallowCopy(target);
         delete after[prop];
-        copyPayloadReaching(event!, target, after);
+        copyPayloadReaching(event!, located!, target, after);
       }
       const result = Reflect.deleteProperty(target, prop);
 
