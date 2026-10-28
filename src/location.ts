@@ -46,6 +46,17 @@ export const enum ContainerKind {
 export interface LocationRoot {
   emit: EmitFunction | undefined;
   path: Path;
+  /**
+   * Events made under this root and not delivered yet, oldest first, while
+   * a write that made several is delivering them (see `deliver`).
+   */
+  undelivered: Undelivered | undefined;
+}
+
+/** A root's queue: `events[next]` is the oldest event not delivered yet. */
+interface Undelivered {
+  events: StateEvent[];
+  next: number;
 }
 
 export class Place {
@@ -384,9 +395,9 @@ function attachedBefore(node: LocationNode, former: LocationNode | undefined): b
  */
 export function dispatch(target: Target, event: StateEvent): void {
   const { root, paths } = target;
-  const emit = root.emit!;
   if (paths.length === 1) {
-    emit(event);
+    if (root.undelivered === undefined) root.emit!(event);
+    else deliver(root, [event]);
     return;
   }
   const events: StateEvent[] = [event];
@@ -400,7 +411,46 @@ export function dispatch(target: Target, event: StateEvent): void {
     if (event.oldValues !== undefined) copy.oldValues = cloneTree(event.oldValues);
     events.push(copy);
   }
-  for (let i = 0; i < events.length; i++) emit(events[i]);
+  deliver(root, events);
+}
+
+/**
+ * Deliver the `events` of one write to `root.emit`, in order, after the
+ * events earlier writes left undelivered under this root.
+ *
+ * A listener can write while it receives an event. That write changed the
+ * state after the events still waiting (the other places of an alias), so
+ * its own events go after them: it adds them to the root's queue, then
+ * delivers the queue from the oldest event, before it returns. So events
+ * reach `emit` in the order the state changed, every write is delivered
+ * before it returns, and a write made while nothing waits is delivered at
+ * once, inside the listener call that made it.
+ *
+ * An `emit` that throws drops the events of this root not delivered yet; the
+ * error reaches the write that was delivering them.
+ */
+export function deliver(root: LocationRoot, events: StateEvent[]): void {
+  const emit = root.emit!;
+  let queue = root.undelivered;
+  if (queue === undefined) {
+    if (events.length === 1) {
+      emit(events[0]);
+      return;
+    }
+    queue = root.undelivered = { events, next: 0 };
+  } else {
+    for (let i = 0; i < events.length; i++) queue.events.push(events[i]);
+  }
+  try {
+    while (queue.next < queue.events.length) emit(queue.events[queue.next++]);
+  } catch (error) {
+    // a listener that called this write may catch the error: its own loop ends too
+    queue.events.length = 0;
+    queue.next = 0;
+    throw error;
+  } finally {
+    if (root.undelivered === queue && queue.next === queue.events.length) root.undelivered = undefined;
+  }
 }
 
 /** What `copyPayload` did. */

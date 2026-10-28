@@ -107,7 +107,7 @@ export function reactive<T extends object>(
   }
 
   const node = ensureLocationNode(obj);
-  node.root = { emit, path };
+  node.root = { emit, path, undelivered: undefined };
   node.scope = node.root;
   // an object at two places in the initial value emits to both from the
   // start; a fresh value has no such object (see `cloneStored`)

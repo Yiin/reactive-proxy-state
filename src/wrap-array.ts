@@ -12,6 +12,7 @@ import {
   LocationNode,
   attachValue,
   copyPayload,
+  deliver,
   detachPlace,
   dispatch,
   evictDeep,
@@ -566,13 +567,17 @@ export function wrapArray<T extends any[]>(arr: T, node: LocationNode): T {
 
         if (grows) {
           if (located !== undefined) {
+            // one event per new index and place, delivered as one write
             const oldLength = Number(oldValue);
             const newLength = Number(value);
+            const events: StateEvent[] = [];
             for (let i = oldLength; i < newLength; i++) {
               const index = String(i);
-              const paths = located.paths.map((path) => [...path, index]);
-              dispatch({ root: located.root, paths }, { action: "set", path: paths[0], newValue: undefined });
+              for (let j = 0; j < located.paths.length; j++) {
+                events.push({ action: "set", path: [...located.paths[j], index], newValue: undefined });
+              }
             }
+            if (events.length > 0) deliver(located.root, events);
           }
         } else if (event !== undefined) {
           dispatch(located!, event);
