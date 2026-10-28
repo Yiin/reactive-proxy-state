@@ -376,8 +376,8 @@ export const enum Copied {
   /**
    * Copied the payload, and the values it stores (`newValue`, `value`,
    * `items`) are fresh (see `cloneStored`): the store's place walk would
-   * find nothing in them, so `attachValue` and the inserted-items walk of
-   * `relinkArray` are skipped.
+   * find nothing in them, so `attachValue` and `relinkArray` record them in
+   * `freshStored` instead of walking them.
    */
   Fresh,
 }
