@@ -271,6 +271,30 @@ state.tags.add("urgent"); // Output: Tags: important, urgent
 
 ## Synchronization Limits
 
+### Supported inputs
+
+A replica fed every event always equals the state when the state is made of:
+
+- plain objects, arrays, Maps and Sets, with data properties (no getters or setters);
+- `sort` comparators and array callbacks that do not change the array or object they work on;
+- numeric or numeric-string bounds for `splice`, `fill` and `copyWithin`.
+
+Other input stays correct or is refused before anything changes:
+
+- **Comparator writes.** A comparator that writes through the proxy gets the native result: `sort` writes back the items it read before comparing, sorted, and keeps a tail the comparator appended. The comparator's own writes send their own events first.
+- **Bounds with side effects.** `fill` and `copyWithin` convert each bound once, in native order, and use the same numbers for the event and the write. A `BigInt` or `Symbol` bound throws a `TypeError` before any change, like native code.
+- **Read-only and frozen arrays.** `sort`, `reverse`, `fill` and `copyWithin` check every index native code would write before the first write. A read-only index, a hole in a non-extensible array, or a non-configurable index to delete throws a `TypeError` with the array unchanged and no event. A one-item `sort` writes nothing, so it works on a frozen array, as natively.
+- **Getters on a back-reference.** A payload that reaches back into the object it is written to (a cycle) is copied as it will be after the write. An accessor property in that object or in the payload throws an `UnsupportedStateError` (a `TypeError`) before the write. The written object's getter is not called. (The set trap reads the new value's own properties to unwrap stored proxies, so a getter on the new value itself runs once.)
+- **Payloads too large to copy** throw a `SnapshotLimitError` (see the copy limit below).
+
+A refused write sends no event and runs no effect: the state and every replica stay as they were. Keep the same root and retry with supported input.
+
+These cases are not synchronized, and are not refused:
+
+- **Getters elsewhere.** A getter is copied as the value it returns when the event is made. The replica keeps that value; a later change of what the getter returns sends no event.
+- **Raw writes.** A write through `toRaw()`, through the raw items that iteration callbacks receive (`forEach`, `map`, `filter`, `for...of`), or on raw objects inside a `valueOf` bypasses the proxies and sends nothing.
+- **Descriptor and prototype changes** after the state is made (`Object.defineProperty`, freezing part of the state, a setter on a prototype). Only the reorders above check the array first; `push`, `pop`, `shift`, `unshift`, `splice` and index writes on an array with a read-only index can fail part way, like native code, and send no event for the part they wrote.
+
 Events carry paths, and `updateState` applies them on a replica. Some shapes cannot travel that way:
 
 - **Map keys are path segments, written as strings.** A map with both `1` and `"1"` as keys gives the same path for both, so a write inside one value can land on the other on the replica. Object keys have no path at all: a write inside an object used as a key emits nothing. Use string keys, or one key type per map, in synced state.

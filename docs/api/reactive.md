@@ -129,7 +129,10 @@ b.xp = 12; // emits { action: 'set', path: ['list', '0', 'xp'], ... }
 - `splice` normalizes its arguments like `Array.prototype.splice` (fractions, `NaN`, negatives, omitted or `undefined` arguments); the event's `key` and `deleteCount` are the normalized numbers. A `BigInt` or `Symbol` start or count throws a `TypeError` and leaves the array unchanged, like native `splice`.
 - A write through a proxy whose object left the tree emits nothing and adds one to `getProxyStats().detachedWrites`.
 
-Map and set limits for synchronization are listed in the README under "Synchronization Limits".
+- `sort`, `reverse`, `fill` and `copyWithin` check every index they would write (read-only, a hole in a non-extensible array, a non-configurable delete) before the first write, and throw a `TypeError` with the array unchanged. `fill` and `copyWithin` convert each bound once.
+- A payload that reaches back into the object it is written to is copied as it will be after the write; an accessor property there throws an `UnsupportedStateError`, a `TypeError`, before the write.
+
+The supported inputs (data properties, callbacks that do not change their target, numeric bounds), what is refused, and the map and set limits for synchronization are listed in the README under "Synchronization Limits".
 
 When forwarding events across workers or other structured-clone boundaries, convert them first:
 
