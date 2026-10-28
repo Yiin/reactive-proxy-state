@@ -375,9 +375,10 @@ export const enum Copied {
   Done,
   /**
    * Copied the payload, and the values it stores (`newValue`, `value`,
-   * `items`) are fresh (see `cloneStored`): the store's place walk would
-   * find nothing in them, so `attachValue` and `relinkArray` record them in
-   * `freshStored` instead of walking them.
+   * `items`) are fresh (see `cloneStored`): the place walk of this store
+   * would find nothing in them, so `attachValue` and `relinkArray` skip it.
+   * The finding holds for this store only; a later store of the same
+   * values walks them again.
    */
   Fresh,
 }
@@ -669,22 +670,10 @@ function adopt(raw: object, walk: Walk): LocationNode | undefined {
   }
   if ((raw as any)[ReactiveFlags.SKIP] || (raw as any)[ReactiveFlags.IS_REACTIVE]) return undefined;
   if (walk.aliases?.has(raw)) node = ensureLocationNode(raw);
-  // nothing below a value stored fresh needs a place (see `freshStored`)
-  if (freshStored.has(raw)) return node;
   node = adoptChildren(raw, node, walk);
   if (node !== undefined && walk.aliases === undefined) (walk.created ??= new Set()).add(raw);
   return node;
 }
-
-/**
- * Values stored fresh (see `cloneStored`): no object in them had a location
- * node, and none sat at two places. An object below such a value can get a
- * node only by a read through the value's proxy, which gives the value a
- * node too; so while the value has no node, nothing below it needs a place,
- * and a place walk that meets it again (the value moved, or was kept by a
- * filter) does not go into it.
- */
-const freshStored = new WeakSet<object>();
 
 /** Walk the children of `raw` (whose node, if any, is `node`); returns its node afterwards. */
 function adoptChildren(raw: object, node: LocationNode | undefined, walk: Walk): LocationNode | undefined {
@@ -798,14 +787,11 @@ function insertedNeedWalk(inserted: readonly unknown[]): boolean {
 }
 
 /**
- * `parent[key]` now holds `value` (a raw object). A `fresh` value (its copy
- * found it fresh, see `cloneStored`) has nothing to place.
+ * `parent[key]` now holds `value` (a raw object). A `fresh` value (the copy
+ * this store made found it fresh, see `cloneStored`) has nothing to place.
  */
 export function attachValue(value: object, parent: LocationNode, key: unknown, fresh: boolean): void {
-  if (fresh) {
-    freshStored.add(value);
-    return;
-  }
+  if (fresh) return;
   const existing = nodes.get(value);
   if (existing !== undefined && !existing.lostLink) {
     // a known object moved or got a second place; its children keep theirs
@@ -848,13 +834,8 @@ export function relinkArray(
   inserted?: readonly unknown[],
   insertedFresh = false
 ): void {
-  if (inserted !== undefined && insertedFresh) {
-    // the items' copy found them fresh: nothing in them needs a place
-    for (let i = 0; i < inserted.length; i++) {
-      if (isObject(inserted[i])) freshStored.add(inserted[i] as object);
-    }
-    inserted = undefined;
-  }
+  // the copy this insertion made found the items fresh: nothing in them needs a place
+  if (insertedFresh) inserted = undefined;
   relink(arrayNode, array, from, removed, inserted, false);
 }
 
