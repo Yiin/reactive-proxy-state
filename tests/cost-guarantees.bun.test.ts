@@ -1,13 +1,13 @@
 import { describe, expect, test } from "bun:test";
-import { reactive, toRaw } from "../src/index";
+import { reactive, toRaw, updateState } from "../src/index";
 import type { StateEvent } from "../src/types";
 import { replicate } from "./replica";
 
 /**
  * What the remaining costs buy, against 1.0.44: an equal assignment compares
  * the values every time (1.0.44 remembered answers that went stale), and the
- * initial replace is copied only when a later write could reach a listener
- * through it.
+ * initial replace is a copy (1.0.44 sent the state object itself), so a
+ * listener may keep it as its replica.
  */
 
 describe("an equal assignment", () => {
@@ -48,9 +48,19 @@ describe("the initial replace", () => {
     return { state, payload };
   }
 
-  test("carries a plain tree itself with a synchronous listener, as 1.0.44 did", () => {
-    const raw = { list: [{ n: 0 }], map: new Map([["a", { n: 1 }]]) };
-    expect(first(raw).payload).toBe(raw);
+  test("is a copy a synchronous listener may keep as its replica", () => {
+    const raw = { list: [{ n: 0 }] as any[] };
+    let remote: any;
+    const state = reactive(raw, (event) => {
+      if (remote === undefined) remote = event.newValue;
+      else updateState(remote, event);
+    });
+    expect(remote).not.toBe(raw);
+    state.list.push({ n: 1 });
+    state.list[0].n = 5;
+    // 1.0.44 sent `raw` itself: the push reached the state twice
+    expect(toRaw(state)).toEqual({ list: [{ n: 5 }, { n: 1 }] });
+    expect(remote).toEqual(toRaw(state));
   });
 
   test("is a copy with an async listener", async () => {
