@@ -38,6 +38,8 @@ export interface LocationNode {
     scope: LocationRoot | undefined;
     /** The proxy this object had before it was evicted, to reuse it if the object comes back. */
     evicted: WeakRef<object> | undefined;
+    /** The last `relinkArray` call that placed this object (tells repeats apart). */
+    relinked: number;
 }
 export declare function getLocationNode(raw: object): LocationNode | undefined;
 export declare function ensureLocationNode(raw: object): LocationNode;

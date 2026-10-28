@@ -2488,7 +2488,10 @@ function traverse(value, seen = new Set) {
   }
   return value;
 }
-function cloneTree(value, ancestors = new Map) {
+function cloneTree(value) {
+  return cloneTreeInto(value, [], []);
+}
+function cloneTreeInto(value, ancestors, copies) {
   if (value === null || typeof value !== "object") {
     return value;
   }
@@ -2496,44 +2499,49 @@ function cloneTree(value, ancestors = new Map) {
     return new Date(value.getTime());
   }
   const identity = toRaw(value);
-  const cycle = ancestors.get(identity);
-  if (cycle !== undefined)
-    return cycle;
+  const cycle = ancestors.lastIndexOf(identity);
+  if (cycle !== -1)
+    return copies[cycle];
   let copy;
   if (Array.isArray(value)) {
-    copy = [];
-    ancestors.set(identity, copy);
+    copy = new Array(value.length);
+    ancestors.push(identity);
+    copies.push(copy);
     for (let i = 0;i < value.length; i++) {
-      copy[i] = cloneTree(value[i], ancestors);
+      copy[i] = cloneTreeInto(value[i], ancestors, copies);
     }
   } else if (value instanceof Map) {
     copy = new Map;
-    ancestors.set(identity, copy);
+    ancestors.push(identity);
+    copies.push(copy);
     value.forEach((entry, key) => {
-      copy.set(cloneTree(key, ancestors), cloneTree(entry, ancestors));
+      copy.set(cloneTreeInto(key, ancestors, copies), cloneTreeInto(entry, ancestors, copies));
     });
   } else if (value instanceof Set) {
     copy = new Set;
-    ancestors.set(identity, copy);
+    ancestors.push(identity);
+    copies.push(copy);
     value.forEach((entry) => {
-      copy.add(cloneTree(entry, ancestors));
+      copy.add(cloneTreeInto(entry, ancestors, copies));
     });
   } else {
     copy = Object.create(Object.getPrototypeOf(value));
-    ancestors.set(identity, copy);
+    ancestors.push(identity);
+    copies.push(copy);
     for (const key in value) {
       if (Object.prototype.hasOwnProperty.call(value, key)) {
-        copy[key] = cloneTree(value[key], ancestors);
+        copy[key] = cloneTreeInto(value[key], ancestors, copies);
       }
     }
     const symbolKeys = Object.getOwnPropertySymbols(value);
     for (const symbolKey of symbolKeys) {
       if (Object.prototype.propertyIsEnumerable.call(value, symbolKey)) {
-        copy[symbolKey] = cloneTree(value[symbolKey], ancestors);
+        copy[symbolKey] = cloneTreeInto(value[symbolKey], ancestors, copies);
       }
     }
   }
-  ancestors.delete(identity);
+  ancestors.pop();
+  copies.pop();
   return copy;
 }
 function deepClone(value, seen = new WeakMap) {
@@ -2843,7 +2851,8 @@ function ensureLocationNode(raw) {
       places: [],
       root: undefined,
       scope: undefined,
-      evicted: undefined
+      evicted: undefined,
+      relinked: 0
     };
     nodes.set(raw, node);
   }
@@ -3020,41 +3029,56 @@ function detachPlace(value, parent, key) {
   }
 }
 function adopt(raw, touched, seen) {
-  let node = nodes.get(raw);
-  if (node !== undefined)
-    return node;
+  const existing = nodes.get(raw);
+  if (existing !== undefined)
+    return existing;
   if (seen.has(raw))
     return;
   seen.add(raw);
   if (raw["__v_skip" /* SKIP */] || raw["__v_isReactive" /* IS_REACTIVE */])
     return;
+  let node;
+  if (Array.isArray(raw)) {
+    for (let i = 0;i < raw.length; i++) {
+      const child = raw[i];
+      if (child !== null && typeof child === "object")
+        node = adoptChild(raw, node, i, child, touched, seen);
+    }
+    return node;
+  }
+  if (raw instanceof Map) {
+    for (const [key, child] of raw) {
+      if (child !== null && typeof child === "object")
+        node = adoptChild(raw, node, key, child, touched, seen);
+    }
+    return node;
+  }
+  if (raw instanceof Set) {
+    for (const child of raw) {
+      if (child !== null && typeof child === "object")
+        node = adoptChild(raw, node, undefined, child, touched, seen);
+    }
+    return node;
+  }
   if (raw instanceof Date || ArrayBuffer.isView(raw))
     return;
-  const link = (key, child) => {
-    if (!isObject2(child))
-      return;
-    const childNode = adopt(child, touched, seen);
-    if (childNode === undefined)
-      return;
-    node ??= ensureLocationNode(raw);
-    if (addPlace(childNode, node, key))
-      touched.push(childNode);
-  };
-  if (Array.isArray(raw)) {
-    for (let i = 0;i < raw.length; i++)
-      link(i, raw[i]);
-  } else if (raw instanceof Map) {
-    for (const [key, value] of raw)
-      link(key, value);
-  } else if (raw instanceof Set) {
-    for (const member of raw)
-      link(undefined, member);
-  } else {
-    const keys = Object.keys(raw);
-    for (let i = 0;i < keys.length; i++)
-      link(keys[i], raw[keys[i]]);
+  for (const key in raw) {
+    if (!Object.prototype.hasOwnProperty.call(raw, key))
+      continue;
+    const child = raw[key];
+    if (child !== null && typeof child === "object")
+      node = adoptChild(raw, node, key, child, touched, seen);
   }
   return node;
+}
+function adoptChild(container, containerNode, key, child, touched, seen) {
+  const childNode = adopt(child, touched, seen);
+  if (childNode === undefined)
+    return containerNode;
+  containerNode ??= ensureLocationNode(container);
+  if (addPlace(childNode, containerNode, key))
+    touched.push(childNode);
+  return containerNode;
 }
 function pruneTouched(touched) {
   for (let i = 0;i < touched.length; i++) {
@@ -3082,15 +3106,14 @@ function relinkArray(arrayNode, array, from, removed, inserted) {
   if (removed !== undefined) {
     for (let i = 0;i < removed.length; i++) {
       const value = removed[i];
-      if (isObject2(value))
-        stripIndexes(value, arrayNode, from);
+      if (isObject2(value)) {
+        const node = nodes.get(value);
+        if (node !== undefined)
+          stripIndexes(node, arrayNode, from);
+      }
     }
   }
-  for (let i = from;i < array.length; i++) {
-    const value = array[i];
-    if (isObject2(value))
-      stripIndexes(value, arrayNode, from);
-  }
+  const call = ++relinkCalls;
   for (let i = from;i < array.length; i++) {
     const value = array[i];
     if (!isObject2(value))
@@ -3098,16 +3121,23 @@ function relinkArray(arrayNode, array, from, removed, inserted) {
     const node = nodes.get(value);
     if (node === undefined)
       continue;
+    if (node.relinked !== call) {
+      node.relinked = call;
+      const places = node.places;
+      if (places.length === 1 && places[0].parent === arrayNode && typeof places[0].key === "number" && places[0].key >= from) {
+        places[0].key = i;
+        continue;
+      }
+      stripIndexes(node, arrayNode, from);
+    }
     node.places.push({ parent: arrayNode, key: i });
     if (node.places.length > 1)
       touched.push(node);
   }
   pruneTouched(touched);
 }
-function stripIndexes(value, arrayNode, from) {
-  const node = nodes.get(value);
-  if (node === undefined)
-    return;
+var relinkCalls = 0;
+function stripIndexes(node, arrayNode, from) {
   const places = node.places;
   for (let i = places.length - 1;i >= 0; i--) {
     const place = places[i];

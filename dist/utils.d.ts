@@ -51,7 +51,7 @@ export declare function traverse(value: any, seen?: Set<any>): any;
  * tree: a replica holds one copy per place, and a write through a shared
  * object emits one event per place. Cycles are kept.
  */
-export declare function cloneTree<T>(value: T, ancestors?: Map<object, any>): T;
+export declare function cloneTree<T>(value: T): T;
 /**
  * creates a deep clone of a value.
  * includes cycle detection using a weakmap.

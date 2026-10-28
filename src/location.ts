@@ -45,6 +45,8 @@ export interface LocationNode {
   scope: LocationRoot | undefined;
   /** The proxy this object had before it was evicted, to reuse it if the object comes back. */
   evicted: WeakRef<object> | undefined;
+  /** The last `relinkArray` call that placed this object (tells repeats apart). */
+  relinked: number;
 }
 
 const nodes = new WeakMap<object, LocationNode>();
@@ -75,6 +77,7 @@ export function ensureLocationNode(raw: object): LocationNode {
       root: undefined,
       scope: undefined,
       evicted: undefined,
+      relinked: 0,
     };
     nodes.set(raw, node);
   }
@@ -307,32 +310,54 @@ export function detachPlace(value: object, parent: LocationNode, key: unknown): 
  * if any.
  */
 function adopt(raw: object, touched: LocationNode[], seen: Set<object>): LocationNode | undefined {
-  let node = nodes.get(raw);
-  if (node !== undefined) return node;
+  const existing = nodes.get(raw);
+  if (existing !== undefined) return existing;
   if (seen.has(raw)) return undefined;
   seen.add(raw);
   if ((raw as any)[ReactiveFlags.SKIP] || (raw as any)[ReactiveFlags.IS_REACTIVE]) return undefined;
-  if (raw instanceof Date || ArrayBuffer.isView(raw)) return undefined;
-
-  const link = (key: unknown, child: unknown) => {
-    if (!isObject(child)) return;
-    const childNode = adopt(child, touched, seen);
-    if (childNode === undefined) return;
-    node ??= ensureLocationNode(raw);
-    if (addPlace(childNode, node, key)) touched.push(childNode);
-  };
-
+  let node: LocationNode | undefined;
   if (Array.isArray(raw)) {
-    for (let i = 0; i < raw.length; i++) link(i, raw[i]);
-  } else if (raw instanceof Map) {
-    for (const [key, value] of raw) link(key, value);
-  } else if (raw instanceof Set) {
-    for (const member of raw) link(undefined, member);
-  } else {
-    const keys = Object.keys(raw);
-    for (let i = 0; i < keys.length; i++) link(keys[i], (raw as any)[keys[i]]);
+    for (let i = 0; i < raw.length; i++) {
+      const child = raw[i];
+      if (child !== null && typeof child === "object") node = adoptChild(raw, node, i, child, touched, seen);
+    }
+    return node;
+  }
+  if (raw instanceof Map) {
+    for (const [key, child] of raw) {
+      if (child !== null && typeof child === "object") node = adoptChild(raw, node, key, child, touched, seen);
+    }
+    return node;
+  }
+  if (raw instanceof Set) {
+    for (const child of raw) {
+      if (child !== null && typeof child === "object") node = adoptChild(raw, node, undefined, child, touched, seen);
+    }
+    return node;
+  }
+  if (raw instanceof Date || ArrayBuffer.isView(raw)) return undefined;
+  for (const key in raw) {
+    if (!Object.prototype.hasOwnProperty.call(raw, key)) continue;
+    const child = (raw as any)[key];
+    if (child !== null && typeof child === "object") node = adoptChild(raw, node, key, child, touched, seen);
   }
   return node;
+}
+
+/** Adopt `child` at `container[key]`; returns the container's node (made when needed). */
+function adoptChild(
+  container: object,
+  containerNode: LocationNode | undefined,
+  key: unknown,
+  child: object,
+  touched: LocationNode[],
+  seen: Set<object>
+): LocationNode | undefined {
+  const childNode = adopt(child, touched, seen);
+  if (childNode === undefined) return containerNode;
+  containerNode ??= ensureLocationNode(container);
+  if (addPlace(childNode, containerNode, key)) touched.push(childNode);
+  return containerNode;
 }
 
 function pruneTouched(touched: LocationNode[]): void {
@@ -372,27 +397,42 @@ export function relinkArray(
   if (removed !== undefined) {
     for (let i = 0; i < removed.length; i++) {
       const value = removed[i];
-      if (isObject(value)) stripIndexes(value, arrayNode, from);
+      if (isObject(value)) {
+        const node = nodes.get(value);
+        if (node !== undefined) stripIndexes(node, arrayNode, from);
+      }
     }
   }
-  for (let i = from; i < array.length; i++) {
-    const value = array[i];
-    if (isObject(value)) stripIndexes(value, arrayNode, from);
-  }
+  const call = ++relinkCalls;
   for (let i = from; i < array.length; i++) {
     const value = array[i];
     if (!isObject(value)) continue;
     const node = nodes.get(value);
     if (node === undefined) continue;
+    if (node.relinked !== call) {
+      // first time this call meets the object: move its place here
+      node.relinked = call;
+      const places = node.places;
+      if (
+        places.length === 1 &&
+        places[0].parent === arrayNode &&
+        typeof places[0].key === "number" &&
+        places[0].key >= from
+      ) {
+        places[0].key = i;
+        continue;
+      }
+      stripIndexes(node, arrayNode, from);
+    }
     node.places.push({ parent: arrayNode, key: i });
     if (node.places.length > 1) touched.push(node);
   }
   pruneTouched(touched);
 }
 
-function stripIndexes(value: object, arrayNode: LocationNode, from: number): void {
-  const node = nodes.get(value);
-  if (node === undefined) return;
+let relinkCalls = 0;
+
+function stripIndexes(node: LocationNode, arrayNode: LocationNode, from: number): void {
   const places = node.places;
   for (let i = places.length - 1; i >= 0; i--) {
     const place = places[i];

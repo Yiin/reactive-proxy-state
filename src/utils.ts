@@ -269,53 +269,64 @@ export function traverse(value: any, seen: Set<any> = new Set()) {
  * tree: a replica holds one copy per place, and a write through a shared
  * object emits one event per place. Cycles are kept.
  */
-export function cloneTree<T>(value: T, ancestors: Map<object, any> = new Map()): T {
+export function cloneTree<T>(value: T): T {
+    return cloneTreeInto(value, [], []);
+}
+
+// `ancestors` holds the raw objects on the path from the top to here and
+// `copies` their copies, so only a cycle (not a shared object) is reused.
+function cloneTreeInto(value: any, ancestors: object[], copies: any[]): any {
     if (value === null || typeof value !== 'object') {
         return value;
     }
     if (value instanceof Date) {
-        return new Date(value.getTime()) as any;
+        return new Date(value.getTime());
     }
     // identity from the raw target, reads through `value` (see deepClone)
     const identity = toRaw(value) as object;
-    const cycle = ancestors.get(identity);
-    if (cycle !== undefined) return cycle;
+    const cycle = ancestors.lastIndexOf(identity);
+    if (cycle !== -1) return copies[cycle];
 
     let copy: any;
     if (Array.isArray(value)) {
-        copy = [];
-        ancestors.set(identity, copy);
+        copy = new Array(value.length);
+        ancestors.push(identity);
+        copies.push(copy);
         for (let i = 0; i < value.length; i++) {
-            copy[i] = cloneTree(value[i], ancestors);
+            copy[i] = cloneTreeInto(value[i], ancestors, copies);
         }
     } else if (value instanceof Map) {
         copy = new Map();
-        ancestors.set(identity, copy);
+        ancestors.push(identity);
+        copies.push(copy);
         value.forEach((entry, key) => {
-            copy.set(cloneTree(key, ancestors), cloneTree(entry, ancestors));
+            copy.set(cloneTreeInto(key, ancestors, copies), cloneTreeInto(entry, ancestors, copies));
         });
     } else if (value instanceof Set) {
         copy = new Set();
-        ancestors.set(identity, copy);
+        ancestors.push(identity);
+        copies.push(copy);
         value.forEach(entry => {
-            copy.add(cloneTree(entry, ancestors));
+            copy.add(cloneTreeInto(entry, ancestors, copies));
         });
     } else {
         copy = Object.create(Object.getPrototypeOf(value));
-        ancestors.set(identity, copy);
+        ancestors.push(identity);
+        copies.push(copy);
         for (const key in value) {
             if (Object.prototype.hasOwnProperty.call(value, key)) {
-                copy[key] = cloneTree((value as any)[key], ancestors);
+                copy[key] = cloneTreeInto(value[key], ancestors, copies);
             }
         }
         const symbolKeys = Object.getOwnPropertySymbols(value);
         for (const symbolKey of symbolKeys) {
             if (Object.prototype.propertyIsEnumerable.call(value, symbolKey)) {
-                copy[symbolKey] = cloneTree((value as any)[symbolKey], ancestors);
+                copy[symbolKey] = cloneTreeInto(value[symbolKey], ancestors, copies);
             }
         }
     }
-    ancestors.delete(identity);
+    ancestors.pop();
+    copies.pop();
     return copy;
 }
 
