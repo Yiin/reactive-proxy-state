@@ -401,8 +401,6 @@ interface CopyRun {
     /** The copied value (raw), measured against the limit when `countdown` reaches 0. */
     top: object;
     countdown: number;
-    /** Where this copy's entries start in `cloneAncestors` and `cloneCopies`. */
-    base: number;
     /** The container the copy stops at (`cloneTreeUnless`) or reads `contents` for (`cloneTreeAfter`). */
     container: object | undefined;
     contents: object | undefined;
@@ -432,18 +430,17 @@ function copyTree(
     // the idle run is reused; a copy made during another (from a getter) makes its own
     let run = idleRun;
     if (run === undefined) {
-        run = { top, countdown: 0, base, container, contents, fresh: false, first: undefined, seen: undefined };
+        run = { top, countdown: 0, container, contents, fresh: false, first: undefined, seen: undefined };
     } else {
         idleRun = undefined;
         run.top = top;
-        run.base = base;
         run.container = container;
         run.contents = contents;
     }
     run.countdown = SNAPSHOT_CHECK_AFTER;
     run.fresh = checkFresh && locationNodes.get(top) === undefined;
     try {
-        const copy = cloneInto(value, top, run);
+        const copy = run.fresh ? cloneFreshInto(value, run, base) : cloneInto(value, run, base);
         if (checkFresh) copiedFresh = run.fresh;
         return copy;
     } finally {
@@ -665,22 +662,17 @@ const cloneCopies: any[] = [];
 const hasOwn = Object.prototype.hasOwnProperty;
 const isEnumerable = Object.prototype.propertyIsEnumerable;
 
-function cloneChild(value: any, run: CopyRun): any {
-    if (value === null || typeof value !== 'object') return value;
-    // identity from the raw target, reads through `value` (see deepClone)
-    const identity = toRaw(value) as object;
-    if (run.fresh) noteFresh(identity, run);
-    return cloneInto(value, identity, run);
+function cloneChild(value: any, run: CopyRun, base: number): any {
+    return value === null || typeof value !== 'object' ? value : cloneInto(value, run, base);
 }
 
-/** The copy of `value`, whose raw object is `identity`. */
-function cloneInto(value: any, identity: object, run: CopyRun): any {
+/** The copy of `value`; `base` is where this copy's entries start in `cloneAncestors`. */
+function cloneInto(value: any, run: CopyRun, base: number): any {
+    // identity from the raw target, reads through `value` (see deepClone)
+    const identity = toRaw(value) as object;
     if (identity === run.container) value = readsOf(identity, run);
-    // while the copy is fresh, no object came twice, so none is an ancestor
-    if (!run.fresh) {
-        for (let i = cloneAncestors.length - 1; i >= run.base; i--) {
-            if (cloneAncestors[i] === identity) return cloneCopies[i];
-        }
+    for (let i = cloneAncestors.length - 1; i >= base; i--) {
+        if (cloneAncestors[i] === identity) return cloneCopies[i];
     }
 
     if (--run.countdown === 0) countdownDone(run);
@@ -690,7 +682,7 @@ function cloneInto(value: any, identity: object, run: CopyRun): any {
         copy = new Array(length);
         cloneAncestors.push(identity);
         cloneCopies.push(copy);
-        for (let i = 0; i < length; i++) copy[i] = cloneChild(value[i], run);
+        for (let i = 0; i < length; i++) copy[i] = cloneChild(value[i], run, base);
     } else {
         const prototype = Object.getPrototypeOf(value);
         if (prototype === Object.prototype) {
@@ -702,7 +694,7 @@ function cloneInto(value: any, identity: object, run: CopyRun): any {
             cloneAncestors.push(identity);
             cloneCopies.push(copy);
             value.forEach((entry, key) => {
-                copy.set(cloneChild(key, run), cloneChild(entry, run));
+                copy.set(cloneChild(key, run, base), cloneChild(entry, run, base));
             });
             cloneAncestors.pop();
             cloneCopies.pop();
@@ -712,7 +704,7 @@ function cloneInto(value: any, identity: object, run: CopyRun): any {
             cloneAncestors.push(identity);
             cloneCopies.push(copy);
             value.forEach(entry => {
-                copy.add(cloneChild(entry, run));
+                copy.add(cloneChild(entry, run, base));
             });
             cloneAncestors.pop();
             cloneCopies.pop();
@@ -723,12 +715,63 @@ function cloneInto(value: any, identity: object, run: CopyRun): any {
         cloneAncestors.push(identity);
         cloneCopies.push(copy);
         for (const key in value) {
-            if (hasOwn.call(value, key)) copy[key] = cloneChild(value[key], run);
+            if (hasOwn.call(value, key)) copy[key] = cloneChild(value[key], run, base);
         }
         const symbolKeys = Object.getOwnPropertySymbols(value);
         for (let i = 0; i < symbolKeys.length; i++) {
             const symbolKey = symbolKeys[i];
-            if (isEnumerable.call(value, symbolKey)) copy[symbolKey] = cloneChild(value[symbolKey], run);
+            if (isEnumerable.call(value, symbolKey)) copy[symbolKey] = cloneChild(value[symbolKey], run, base);
+        }
+    }
+    cloneAncestors.pop();
+    cloneCopies.pop();
+    return copy;
+}
+
+/**
+ * `cloneChild` while the copy is fresh (`cloneStored`): it notes each object
+ * it meets, and hands the rest of the copy to `cloneInto` once the copy is
+ * not fresh. Kept apart so a plain copy pays nothing for the check.
+ */
+function cloneFreshChild(value: any, run: CopyRun, base: number): any {
+    if (value === null || typeof value !== 'object') return value;
+    if (run.fresh) noteFresh(toRaw(value) as object, run);
+    return run.fresh ? cloneFreshInto(value, run, base) : cloneInto(value, run, base);
+}
+
+/**
+ * `cloneInto` for a fresh object: it is not the container (which has a
+ * location node) and not an ancestor (it was not met before). A map or a
+ * set ends the check: its entries are copied by `cloneInto`.
+ */
+function cloneFreshInto(value: any, run: CopyRun, base: number): any {
+    if (value instanceof Map || value instanceof Set) {
+        run.fresh = false;
+        return cloneInto(value, run, base);
+    }
+    if (--run.countdown === 0) countdownDone(run);
+    let copy: any;
+    const identity = toRaw(value) as object;
+    if (Array.isArray(value)) {
+        const length = value.length;
+        copy = new Array(length);
+        cloneAncestors.push(identity);
+        cloneCopies.push(copy);
+        for (let i = 0; i < length; i++) copy[i] = cloneFreshChild(value[i], run, base);
+    } else {
+        const prototype = Object.getPrototypeOf(value);
+        if (prototype === Object.prototype) copy = {};
+        else if (value instanceof Date) return new Date(value.getTime());
+        else copy = Object.create(prototype);
+        cloneAncestors.push(identity);
+        cloneCopies.push(copy);
+        for (const key in value) {
+            if (hasOwn.call(value, key)) copy[key] = cloneFreshChild(value[key], run, base);
+        }
+        const symbolKeys = Object.getOwnPropertySymbols(value);
+        for (let i = 0; i < symbolKeys.length; i++) {
+            const symbolKey = symbolKeys[i];
+            if (isEnumerable.call(value, symbolKey)) copy[symbolKey] = cloneFreshChild(value[symbolKey], run, base);
         }
     }
     cloneAncestors.pop();
