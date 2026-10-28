@@ -8,6 +8,7 @@ import {
   dispatch,
   ensureLocationNode,
   evictDeep,
+  getLocationNode,
   locate,
   notePlace,
   restoreEvicted,
@@ -116,13 +117,18 @@ export function wrapChild(
   key: unknown,
   options?: ReactiveOptions
 ): any {
+  let node = getLocationNode(raw);
+  if (node !== undefined && node.proxy !== undefined) {
+    // proxied before, so it passed the checks below then: one map lookup
+    notePlace(node, parent, key);
+    node.scope ??= parent.scope;
+    return node.proxy;
+  }
   if (raw[ReactiveFlags.SKIP]) return raw;
   if (raw instanceof Date) return new Date(raw.getTime()); // dates are not proxied, return copy
-  const node = ensureLocationNode(raw);
+  node ??= ensureLocationNode(raw);
   notePlace(node, parent, key);
   node.scope ??= parent.scope;
-  const existing = globalSeen.get(raw);
-  if (existing !== undefined) return existing;
   return restoreEvicted(node) ?? createProxy(raw, node, options);
 }
 
@@ -136,10 +142,15 @@ export function wrapUnplaced(raw: any): any {
 }
 
 function createProxy(raw: any, node: LocationNode, options?: ReactiveOptions): any {
-  if (Array.isArray(raw)) return wrapArray(raw, node);
-  if (raw instanceof Map) return wrapMap(raw, node);
-  if (raw instanceof Set) return wrapSet(raw, node);
-  return wrapObject(raw, node, options);
+  const proxy = Array.isArray(raw)
+    ? wrapArray(raw, node)
+    : raw instanceof Map
+      ? wrapMap(raw, node)
+      : raw instanceof Set
+        ? wrapSet(raw, node)
+        : wrapObject(raw, node, options);
+  node.proxy = proxy;
+  return proxy;
 }
 
 function wrapObject<T extends object>(obj: T, node: LocationNode, options?: ReactiveOptions): T {

@@ -63,6 +63,8 @@ export interface LocationNode {
   root: LocationRoot | undefined;
   /** The root this object was first read under; it wins when two roots hold the object. */
   scope: LocationRoot | undefined;
+  /** The object's live proxy (its `globalSeen` entry), read without a second map lookup. */
+  proxy: object | undefined;
   /** The proxy this object had before it was evicted, to reuse it if the object comes back. */
   evicted: WeakRef<object> | undefined;
   /** The last `relinkArray` call that placed this object (tells repeats apart). */
@@ -104,6 +106,7 @@ export function ensureLocationNode(raw: object): LocationNode {
       places: [],
       root: undefined,
       scope: undefined,
+      proxy: undefined,
       evicted: undefined,
       relinked: 0,
       lostLink: false,
@@ -699,6 +702,7 @@ export function evictDeep(value: any, parent?: LocationNode): void {
       node.places.length === 1 &&
       node.places[0].parentId === parent.id;
     if (!onlyUnderParent && isAttached(node)) return;
+    node.proxy = undefined;
     node.evicted = new WeakRef(proxy);
   }
 
@@ -732,6 +736,7 @@ export function restoreEvicted(node: LocationNode): object | undefined {
   const proxy = node.evicted?.deref();
   node.evicted = undefined;
   if (proxy === undefined) return undefined;
+  node.proxy = proxy;
   globalSeen.set(node.raw, proxy);
   wrapperCache.set(node.raw, proxy);
   proxyStats.staleEvicted--;

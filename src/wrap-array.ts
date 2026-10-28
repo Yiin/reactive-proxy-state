@@ -331,15 +331,21 @@ export function wrapArray<T extends any[]>(arr: T, node: LocationNode): T {
 
       const value = Reflect.get(target, prop, receiver);
 
-      // determine if the property access is numeric array index access
-      const isNumericIndex =
-        typeof prop === "number" ||
-        (typeof prop === "string" && !isNaN(parseInt(prop, 10)));
-
-      if (isNumericIndex) {
-        track(target, String(prop));
+      // an array index ("0", "17"), parsed once
+      const index = arrayIndex(prop);
+      if (index >= 0) {
+        track(target, prop);
         if (!isObject(value)) return value;
         // recursively wrap nested structures
+        return wrapChild(value, node, index);
+      }
+
+      // other numeric-looking keys ("1.5", "01") are tracked like indexes
+      const isNumericIndex = typeof prop === "string" && !isNaN(parseInt(prop, 10));
+
+      if (isNumericIndex) {
+        track(target, prop);
+        if (!isObject(value)) return value;
         return wrapChild(value, node, placeKey(prop));
       }
 
