@@ -2973,6 +2973,9 @@ var FAST_CHAIN_LIMIT = 256;
 function isObject2(value) {
   return value !== null && typeof value === "object";
 }
+function getLocationNode(raw) {
+  return nodes.get(raw);
+}
 function ensureLocationNode(raw) {
   let node = nodes.get(raw);
   if (node === undefined) {
@@ -2983,6 +2986,7 @@ function ensureLocationNode(raw) {
       places: [],
       root: undefined,
       scope: undefined,
+      proxy: undefined,
       evicted: undefined,
       relinked: 0,
       lostLink: false
@@ -3442,6 +3446,7 @@ function evictDeep(value, parent) {
     const onlyUnderParent = parent !== undefined && node.root === undefined && node.places.length === 1 && node.places[0].parentId === parent.id;
     if (!onlyUnderParent && isAttached(node))
       return;
+    node.proxy = undefined;
     node.evicted = new WeakRef(proxy);
   }
   globalSeen.delete(value);
@@ -3476,6 +3481,7 @@ function restoreEvicted(node) {
   node.evicted = undefined;
   if (proxy === undefined)
     return;
+  node.proxy = proxy;
   globalSeen.set(node.raw, proxy);
   wrapperCache.set(node.raw, proxy);
   proxyStats.staleEvicted--;
@@ -3905,8 +3911,8 @@ function wrapArray(arr, node) {
         case "at": {
           track(target, Symbol.iterator);
           if (!methodCache[prop]) {
-            methodCache[prop] = function(index) {
-              let idx = Number(index);
+            methodCache[prop] = function(index2) {
+              let idx = Number(index2);
               if (!Number.isInteger(idx))
                 idx = Math.trunc(idx);
               if (idx < 0)
@@ -3941,9 +3947,16 @@ function wrapArray(arr, node) {
           return Reflect.get(target, prop, receiver);
       }
       const value = Reflect.get(target, prop, receiver);
-      const isNumericIndex = typeof prop === "number" || typeof prop === "string" && !isNaN(parseInt(prop, 10));
+      const index = arrayIndex(prop);
+      if (index >= 0) {
+        track(target, prop);
+        if (!isObject3(value))
+          return value;
+        return wrapChild(value, node, index);
+      }
+      const isNumericIndex = typeof prop === "string" && !isNaN(parseInt(prop, 10));
       if (isNumericIndex) {
-        track(target, String(prop));
+        track(target, prop);
         if (!isObject3(value))
           return value;
         return wrapChild(value, node, placeKey(prop));
@@ -4459,16 +4472,19 @@ function reactive(obj, emit, path = [], options) {
   return createProxy(obj, node, options);
 }
 function wrapChild(raw, parent, key, options) {
+  let node = getLocationNode(raw);
+  if (node !== undefined && node.proxy !== undefined) {
+    notePlace(node, parent, key);
+    node.scope ??= parent.scope;
+    return node.proxy;
+  }
   if (raw["__v_skip" /* SKIP */])
     return raw;
   if (raw instanceof Date)
     return new Date(raw.getTime());
-  const node = ensureLocationNode(raw);
+  node ??= ensureLocationNode(raw);
   notePlace(node, parent, key);
   node.scope ??= parent.scope;
-  const existing = globalSeen.get(raw);
-  if (existing !== undefined)
-    return existing;
   return restoreEvicted(node) ?? createProxy(raw, node, options);
 }
 function wrapUnplaced(raw) {
@@ -4481,13 +4497,9 @@ function wrapUnplaced(raw) {
   return restoreEvicted(node) ?? createProxy(raw, node);
 }
 function createProxy(raw, node, options) {
-  if (Array.isArray(raw))
-    return wrapArray(raw, node);
-  if (raw instanceof Map)
-    return wrapMap(raw, node);
-  if (raw instanceof Set)
-    return wrapSet(raw, node);
-  return wrapObject(raw, node, options);
+  const proxy = Array.isArray(raw) ? wrapArray(raw, node) : raw instanceof Map ? wrapMap(raw, node) : raw instanceof Set ? wrapSet(raw, node) : wrapObject(raw, node, options);
+  node.proxy = proxy;
+  return proxy;
 }
 function wrapObject(obj, node, options) {
   const proxy = new Proxy(obj, {

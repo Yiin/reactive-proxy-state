@@ -48,6 +48,8 @@ export interface LocationNode {
     root: LocationRoot | undefined;
     /** The root this object was first read under; it wins when two roots hold the object. */
     scope: LocationRoot | undefined;
+    /** The object's live proxy (its `globalSeen` entry), read without a second map lookup. */
+    proxy: object | undefined;
     /** The proxy this object had before it was evicted, to reuse it if the object comes back. */
     evicted: WeakRef<object> | undefined;
     /** The last `relinkArray` call that placed this object (tells repeats apart). */
