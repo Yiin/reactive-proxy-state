@@ -393,24 +393,6 @@ export function cloneTreeAfter<T>(value: T, container: object, contents: object)
 
 const reachedContainer = new Error('reactive-proxy-state: internal, a copy reached its container');
 
-/**
- * One tree copy in progress. Each `copyTree` call has its own, so a copy
- * made from a getter during another copy does not disturb it.
- */
-interface CopyRun {
-    /** The copied value (raw), measured against the limit when `countdown` reaches 0. */
-    top: object;
-    countdown: number;
-    /** The container the copy stops at (`cloneTreeUnless`) or reads `contents` for (`cloneTreeAfter`). */
-    container: object | undefined;
-    contents: object | undefined;
-    /** For `cloneStored`: true while every object met so far is fresh. */
-    fresh: boolean;
-    /** While `fresh`: the first object met below `top`, then a set of all of them. */
-    first: object | undefined;
-    seen: Set<object> | undefined;
-}
-
 function copyTree(
     value: unknown,
     container: object | undefined,
@@ -426,35 +408,56 @@ function copyTree(
         const small = copySmall(value, checkFresh);
         if (small !== undefined) return small;
     }
+    // a copy made from a getter during another copy keeps the outer copy's state
     const base = cloneAncestors.length;
-    // the idle run is reused; a copy made during another (from a getter) makes its own
-    let run = idleRun;
-    if (run === undefined) {
-        run = { top, countdown: 0, container, contents, fresh: false, first: undefined, seen: undefined };
-    } else {
-        idleRun = undefined;
-        run.top = top;
-        run.container = container;
-        run.contents = contents;
-    }
-    run.countdown = SNAPSHOT_CHECK_AFTER;
-    run.fresh = checkFresh && locationNodes.get(top) === undefined;
+    const outerTop = cloneTop;
+    const outerCountdown = cloneCountdown;
+    const outerContainer = cloneContainer;
+    const outerContents = cloneContents;
+    const outerFresh = cloneFresh;
+    const outerFirst = cloneFirst;
+    const outerSeen = cloneSeen;
+    cloneTop = top;
+    cloneCountdown = SNAPSHOT_CHECK_AFTER;
+    cloneContainer = container;
+    cloneContents = contents;
+    cloneFresh = checkFresh && locationNodes.get(top) === undefined;
+    cloneFirst = undefined;
+    cloneSeen = undefined;
     try {
-        const copy = run.fresh ? cloneFreshInto(value, top, run, base) : cloneInto(value, run, base);
-        if (checkFresh) copiedFresh = run.fresh;
+        const copy = cloneFresh ? cloneFreshInto(value, top, base) : cloneTreeInto(value, base);
+        if (checkFresh) copiedFresh = cloneFresh;
         return copy;
     } finally {
         cloneAncestors.length = base;
         cloneCopies.length = base;
-        run.top = run.container = run.contents = run.first = run.seen = undefined as any;
-        idleRun = run;
+        cloneTop = outerTop;
+        cloneCountdown = outerCountdown;
+        cloneContainer = outerContainer;
+        cloneContents = outerContents;
+        cloneFresh = outerFresh;
+        cloneFirst = outerFirst;
+        cloneSeen = outerSeen;
     }
 }
 
+// The current copy: its value (raw), how many copies it may still make
+// before it measures that value (see `checkSharedCopies`), the container it
+// stops at (see `cloneTreeUnless`) or reads `cloneContents` for (see
+// `cloneTreeAfter`), and, for `cloneStored`, whether every object met so far
+// is fresh, with the first object met below the top, then all of them.
+let cloneTop: object | undefined;
+let cloneCountdown = 0;
+let cloneContainer: object | undefined;
+let cloneContents: object | undefined;
+let cloneFresh = false;
+let cloneFirst: object | undefined;
+let cloneSeen: Set<object> | undefined;
+
 /**
- * The copy of a small raw value, made without the stack, the counter and the
- * run of a tree copy: a leaf (a plain object of primitives), or an array of
- * at most 8 entries that are primitives or leaves. Such a value holds no
+ * The copy of a small raw value, made without the stack and the counter of
+ * a tree copy: a leaf (a plain object of primitives), or an array of at
+ * most 8 entries that are primitives or leaves. Such a value holds no
  * cycle, only the repeats checked here, and is far below the copy limit.
  * Undefined for any other value, which takes the full copy. With
  * `checkFresh` (see `cloneStored`), sets `copiedFresh`.
@@ -499,54 +502,52 @@ function copyLeaf(value: object): object | undefined {
     return copy;
 }
 
-/** A `CopyRun` no copy uses now, kept to save an allocation per copy. */
-let idleRun: CopyRun | undefined;
-
-/** What the copy reads for `identity` (a raw object): `run.contents` in place of `run.container`. */
-function readsOf(identity: object, run: CopyRun): object {
-    if (identity !== run.container) return identity;
-    if (run.contents === undefined) throw reachedContainer;
-    return run.contents;
+/** What the copy reads for `identity` (a raw object): `cloneContents` in place of `cloneContainer`. */
+function readsOf(identity: object): object {
+    if (identity !== cloneContainer) return identity;
+    if (cloneContents === undefined) throw reachedContainer;
+    return cloneContents;
 }
 
 /**
- * The countdown of `run` reached 0. While the copy is fresh, every copy so
- * far was the first copy of its object, so none was extra: count again.
- * Otherwise measure the whole value, once.
+ * Count one copy. At `SNAPSHOT_CHECK_AFTER` copies: while the copy is fresh,
+ * every copy so far was the first copy of its object, so none was extra,
+ * and it counts again; otherwise it measures the whole value, once.
  */
-function countdownDone(run: CopyRun): void {
-    if (run.fresh) run.countdown = SNAPSHOT_CHECK_AFTER;
-    else checkSharedCopies(run);
+function countCopy(): void {
+    if (--cloneCountdown === 0) {
+        if (cloneFresh) cloneCountdown = SNAPSHOT_CHECK_AFTER;
+        else checkSharedCopies(cloneTop!);
+    }
 }
 
-/** `run` stays fresh unless `identity` (raw), met below its top, has a location node or was met before. */
-function noteFresh(identity: object, run: CopyRun): void {
-    if (identity === run.top || locationNodes.get(identity) !== undefined) {
-        run.fresh = false;
+/** The copy stays fresh unless `identity` (raw), met below its top, has a location node or was met before. */
+function noteFresh(identity: object): void {
+    if (identity === cloneTop || locationNodes.get(identity) !== undefined) {
+        cloneFresh = false;
         return;
     }
-    const first = run.first;
+    const first = cloneFirst;
     if (first === undefined) {
-        run.first = identity;
+        cloneFirst = identity;
         return;
     }
     if (identity === first) {
-        run.fresh = false;
+        cloneFresh = false;
         return;
     }
-    let seen = run.seen;
+    let seen = cloneSeen;
     if (seen === undefined) {
-        seen = run.seen = new Set();
+        seen = cloneSeen = new Set();
         seen.add(first);
     }
     const size = seen.size;
     seen.add(identity);
-    if (seen.size === size) run.fresh = false;
+    if (seen.size === size) cloneFresh = false;
 }
 
 /** One `checkSharedCopies` walk. */
 interface CopyWalk {
-    run: CopyRun;
     /** Copies beyond the first copy of each object, so far. */
     extra: number;
     /** After `walkCopies`: the depth of the highest ancestor a cycle below returned to. */
@@ -560,16 +561,16 @@ interface CopyWalk {
 }
 
 /**
- * Throws when a tree copy of `run.top` (made like `cloneInto`) would make
+ * Throws when a tree copy of `value` (made like `cloneTreeInto`) would make
  * more than `SNAPSHOT_SHARED_COPY_LIMIT` copies beyond the first copy of each
  * object. The copies of a shared subtree are counted once and remembered, so
  * the walk is linear in the distinct objects. An object on a cycle is counted
  * again at each place, with the ancestors it has there; every such visit is
  * an extra copy, and the walk stops as soon as the limit is passed.
  */
-function checkSharedCopies(run: CopyRun): void {
-    const walk: CopyWalk = { run, extra: 0, low: Infinity, marks: new Map() };
-    walkCopies(run.top, 0, walk);
+function checkSharedCopies(value: object): void {
+    const walk: CopyWalk = { extra: 0, low: Infinity, marks: new Map() };
+    walkCopies(value, 0, walk);
     if (walk.extra > SNAPSHOT_SHARED_COPY_LIMIT) throw new SnapshotLimitError(walk.extra);
 }
 
@@ -585,7 +586,7 @@ function walkEntry(entry: unknown, depth: number, walk: CopyWalk): number {
 /** The copies a tree copy of `value` makes; sets `walk.low`. */
 function walkCopies(value: object, depth: number, walk: CopyWalk): number {
     const identity = toRaw(value) as object;
-    const source: any = readsOf(identity, walk.run);
+    const source: any = identity === cloneContainer ? readsOf(identity) : identity;
     const marks = walk.marks;
     const mark = marks.get(identity);
     if (mark !== undefined) {
@@ -662,27 +663,26 @@ const cloneCopies: any[] = [];
 const hasOwn = Object.prototype.hasOwnProperty;
 const isEnumerable = Object.prototype.propertyIsEnumerable;
 
-function cloneChild(value: any, run: CopyRun, base: number): any {
-    return value === null || typeof value !== 'object' ? value : cloneInto(value, run, base);
+function cloneChild(value: any, base: number): any {
+    return value === null || typeof value !== 'object' ? value : cloneTreeInto(value, base);
 }
 
-/** The copy of `value`; `base` is where this copy's entries start in `cloneAncestors`. */
-function cloneInto(value: any, run: CopyRun, base: number): any {
+function cloneTreeInto(value: any, base: number): any {
     // identity from the raw target, reads through `value` (see deepClone)
     const identity = toRaw(value) as object;
-    if (identity === run.container) value = readsOf(identity, run);
+    if (identity === cloneContainer) value = readsOf(identity);
     for (let i = cloneAncestors.length - 1; i >= base; i--) {
         if (cloneAncestors[i] === identity) return cloneCopies[i];
     }
 
-    if (--run.countdown === 0) countdownDone(run);
+    countCopy();
     let copy: any;
     if (Array.isArray(value)) {
         const length = value.length;
         copy = new Array(length);
         cloneAncestors.push(identity);
         cloneCopies.push(copy);
-        for (let i = 0; i < length; i++) copy[i] = cloneChild(value[i], run, base);
+        for (let i = 0; i < length; i++) copy[i] = cloneChild(value[i], base);
     } else {
         const prototype = Object.getPrototypeOf(value);
         if (prototype === Object.prototype) {
@@ -694,7 +694,7 @@ function cloneInto(value: any, run: CopyRun, base: number): any {
             cloneAncestors.push(identity);
             cloneCopies.push(copy);
             value.forEach((entry, key) => {
-                copy.set(cloneChild(key, run, base), cloneChild(entry, run, base));
+                copy.set(cloneChild(key, base), cloneChild(entry, base));
             });
             cloneAncestors.pop();
             cloneCopies.pop();
@@ -704,7 +704,7 @@ function cloneInto(value: any, run: CopyRun, base: number): any {
             cloneAncestors.push(identity);
             cloneCopies.push(copy);
             value.forEach(entry => {
-                copy.add(cloneChild(entry, run, base));
+                copy.add(cloneChild(entry, base));
             });
             cloneAncestors.pop();
             cloneCopies.pop();
@@ -715,12 +715,12 @@ function cloneInto(value: any, run: CopyRun, base: number): any {
         cloneAncestors.push(identity);
         cloneCopies.push(copy);
         for (const key in value) {
-            if (hasOwn.call(value, key)) copy[key] = cloneChild(value[key], run, base);
+            if (hasOwn.call(value, key)) copy[key] = cloneChild(value[key], base);
         }
         const symbolKeys = Object.getOwnPropertySymbols(value);
         for (let i = 0; i < symbolKeys.length; i++) {
             const symbolKey = symbolKeys[i];
-            if (isEnumerable.call(value, symbolKey)) copy[symbolKey] = cloneChild(value[symbolKey], run, base);
+            if (isEnumerable.call(value, symbolKey)) copy[symbolKey] = cloneChild(value[symbolKey], base);
         }
     }
     cloneAncestors.pop();
@@ -730,55 +730,54 @@ function cloneInto(value: any, run: CopyRun, base: number): any {
 
 /**
  * `cloneChild` while the copy is fresh (`cloneStored`): it notes each object
- * it meets, and hands the rest of the copy to `cloneInto` once the copy is
- * not fresh. Kept apart so a plain copy pays nothing for the check.
+ * it meets, and hands the rest of the copy to `cloneTreeInto` once the copy
+ * is not fresh. Kept apart so a plain copy pays nothing for the check.
  */
-function cloneFreshChild(value: any, run: CopyRun, base: number): any {
+function cloneFreshChild(value: any, base: number): any {
     if (value === null || typeof value !== 'object') return value;
-    if (!run.fresh) return cloneInto(value, run, base);
+    if (!cloneFresh) return cloneTreeInto(value, base);
     const identity = toRaw(value) as object;
-    noteFresh(identity, run);
-    return run.fresh ? cloneFreshInto(value, identity, run, base) : cloneInto(value, run, base);
+    noteFresh(identity);
+    return cloneFresh ? cloneFreshInto(value, identity, base) : cloneTreeInto(value, base);
 }
 
 /**
- * `cloneInto` for a fresh object (`identity` is `value`, raw): it is not the
- * container (which has a location node) and not an ancestor (it was not met
- * before). A map or a set ends the check: its entries are copied by
- * `cloneInto`.
+ * `cloneTreeInto` for a fresh object (`identity` is `value`, raw): it is not
+ * the container (which has a location node) and not an ancestor (it was not
+ * met before). A map or a set ends the check: `cloneTreeInto` copies it.
  */
-function cloneFreshInto(value: any, identity: object, run: CopyRun, base: number): any {
+function cloneFreshInto(value: any, identity: object, base: number): any {
     let copy: any;
     if (Array.isArray(value)) {
-        if (--run.countdown === 0) countdownDone(run);
+        countCopy();
         const length = value.length;
         copy = new Array(length);
         cloneAncestors.push(identity);
         cloneCopies.push(copy);
-        for (let i = 0; i < length; i++) copy[i] = cloneFreshChild(value[i], run, base);
+        for (let i = 0; i < length; i++) copy[i] = cloneFreshChild(value[i], base);
     } else {
         const prototype = Object.getPrototypeOf(value);
         if (prototype !== Object.prototype) {
             if (value instanceof Map || value instanceof Set) {
-                run.fresh = false;
-                return cloneInto(value, run, base);
+                cloneFresh = false;
+                return cloneTreeInto(value, base);
             }
             if (value instanceof Date) {
-                if (--run.countdown === 0) countdownDone(run);
+                countCopy();
                 return new Date(value.getTime());
             }
         }
-        if (--run.countdown === 0) countdownDone(run);
+        countCopy();
         copy = prototype === Object.prototype ? {} : Object.create(prototype);
         cloneAncestors.push(identity);
         cloneCopies.push(copy);
         for (const key in value) {
-            if (hasOwn.call(value, key)) copy[key] = cloneFreshChild(value[key], run, base);
+            if (hasOwn.call(value, key)) copy[key] = cloneFreshChild(value[key], base);
         }
         const symbolKeys = Object.getOwnPropertySymbols(value);
         for (let i = 0; i < symbolKeys.length; i++) {
             const symbolKey = symbolKeys[i];
-            if (isEnumerable.call(value, symbolKey)) copy[symbolKey] = cloneFreshChild(value[symbolKey], run, base);
+            if (isEnumerable.call(value, symbolKey)) copy[symbolKey] = cloneFreshChild(value[symbolKey], base);
         }
     }
     cloneAncestors.pop();
