@@ -425,25 +425,33 @@ function copyTree(
     }
     const top = toRaw(value) as object;
     const base = cloneAncestors.length;
-    const run: CopyRun = {
-        top,
-        countdown: SNAPSHOT_CHECK_AFTER,
-        base,
-        container,
-        contents,
-        fresh: checkFresh && locationNodes.get(top) === undefined,
-        first: undefined,
-        seen: undefined,
-    };
+    // the idle run is reused; a copy made during another (from a getter) makes its own
+    let run = idleRun;
+    if (run === undefined) {
+        run = { top, countdown: 0, base, container, contents, fresh: false, first: undefined, seen: undefined };
+    } else {
+        idleRun = undefined;
+        run.top = top;
+        run.base = base;
+        run.container = container;
+        run.contents = contents;
+    }
+    run.countdown = SNAPSHOT_CHECK_AFTER;
+    run.fresh = checkFresh && locationNodes.get(top) === undefined;
     try {
-        const copy = cloneTreeInto(value, run);
+        const copy = cloneInto(value, top, run);
         if (checkFresh) copiedFresh = run.fresh;
         return copy;
     } finally {
         cloneAncestors.length = base;
         cloneCopies.length = base;
+        run.top = run.container = run.contents = run.first = run.seen = undefined as any;
+        idleRun = run;
     }
 }
+
+/** A `CopyRun` no copy uses now, kept to save an allocation per copy. */
+let idleRun: CopyRun | undefined;
 
 /** What the copy reads for `identity` (a raw object): `run.contents` in place of `run.container`. */
 function readsOf(identity: object, run: CopyRun): object {
@@ -462,9 +470,8 @@ function countdownDone(run: CopyRun): void {
     else checkSharedCopies(run);
 }
 
-/** `run` stays fresh unless `value`, met below its top, has a location node or was met before. */
-function noteFresh(value: object, run: CopyRun): void {
-    const identity = toRaw(value) as object;
+/** `run` stays fresh unless `identity` (raw), met below its top, has a location node or was met before. */
+function noteFresh(identity: object, run: CopyRun): void {
     if (identity === run.top || locationNodes.get(identity) !== undefined) {
         run.fresh = false;
         return;
@@ -504,7 +511,7 @@ interface CopyWalk {
 }
 
 /**
- * Throws when a tree copy of `run.top` (made like `cloneTreeInto`) would make
+ * Throws when a tree copy of `run.top` (made like `cloneInto`) would make
  * more than `SNAPSHOT_SHARED_COPY_LIMIT` copies beyond the first copy of each
  * object. The copies of a shared subtree are counted once and remembered, so
  * the walk is linear in the distinct objects. An object on a cycle is counted
@@ -608,16 +615,20 @@ const isEnumerable = Object.prototype.propertyIsEnumerable;
 
 function cloneChild(value: any, run: CopyRun): any {
     if (value === null || typeof value !== 'object') return value;
-    if (run.fresh) noteFresh(value, run);
-    return cloneTreeInto(value, run);
-}
-
-function cloneTreeInto(value: any, run: CopyRun): any {
     // identity from the raw target, reads through `value` (see deepClone)
     const identity = toRaw(value) as object;
+    if (run.fresh) noteFresh(identity, run);
+    return cloneInto(value, identity, run);
+}
+
+/** The copy of `value`, whose raw object is `identity`. */
+function cloneInto(value: any, identity: object, run: CopyRun): any {
     if (identity === run.container) value = readsOf(identity, run);
-    for (let i = cloneAncestors.length - 1; i >= run.base; i--) {
-        if (cloneAncestors[i] === identity) return cloneCopies[i];
+    // while the copy is fresh, no object came twice, so none is an ancestor
+    if (!run.fresh) {
+        for (let i = cloneAncestors.length - 1; i >= run.base; i--) {
+            if (cloneAncestors[i] === identity) return cloneCopies[i];
+        }
     }
 
     if (--run.countdown === 0) countdownDone(run);

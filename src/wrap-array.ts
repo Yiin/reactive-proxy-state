@@ -71,8 +71,6 @@ function unwrapItems(items: any[]): void {
   }
 }
 
-const hasOwn = Object.prototype.hasOwnProperty;
-
 /**
  * A reorder (`sort`, `reverse`, `fill`, `copyWithin`) planned on a copy:
  * `after` is the array as the reorder leaves it, and the reorder writes or
@@ -118,7 +116,7 @@ function planReorder(target: unknown[], prop: string | symbol, method: Function,
   // sort: an array shorter than two is not written, as the engine does
   const sorted = length < 2 ? 0 : length;
   for (let i = length; i < target.length; i++) {
-    if (hasOwn.call(target, i)) after[i] = target[i];
+    if (i in target) after[i] = target[i];
     else after.length = i + 1;
   }
   return { after, first: 0, last: sorted, skip: -1 };
@@ -127,21 +125,21 @@ function planReorder(target: unknown[], prop: string | symbol, method: Function,
 /**
  * Throw a TypeError, before any write, when `target` would refuse a write
  * of `reorder`: a read-only index, a hole in a non-extensible array, or a
- * non-configurable index to delete. A write of the value an index holds
- * changes nothing and fails exactly when the index is read-only.
+ * non-configurable index to delete. Writing an index the value it holds
+ * changes nothing, and in this strict-mode module throws a TypeError
+ * exactly when the index is read-only.
  */
 function checkReorder(target: unknown[], reorder: Reorder): void {
   const { after, first, last, skip } = reorder;
   let extensible: boolean | undefined;
   for (let i = first; i < last; i++) {
     if (i === skip) continue;
-    if (hasOwn.call(after, i)) {
-      if (hasOwn.call(target, i)) {
-        if (!Reflect.set(target, i, target[i])) throw new TypeError(`Cannot assign to read only property '${i}' of array`);
-      } else if (!(extensible ??= Object.isExtensible(target))) {
+    if (i in after) {
+      if (i in target) target[i] = target[i];
+      else if (!(extensible ??= Object.isExtensible(target))) {
         throw new TypeError(`Cannot add property ${i}, array is not extensible`);
       }
-    } else if (hasOwn.call(target, i) && !Reflect.getOwnPropertyDescriptor(target, i)!.configurable) {
+    } else if (i in target && !Reflect.getOwnPropertyDescriptor(target, i)!.configurable) {
       throw new TypeError(`Cannot delete property '${i}' of array`);
     }
   }
@@ -153,7 +151,7 @@ function reorderChanges(target: unknown[], after: unknown[]): boolean {
   for (let i = 0; i < after.length; i++) {
     const value = after[i];
     if (!Object.is(value, target[i])) return true;
-    if (value === undefined && hasOwn.call(after, i) !== hasOwn.call(target, i)) return true;
+    if (value === undefined && i in after !== i in target) return true;
   }
   return false;
 }
@@ -163,7 +161,7 @@ function writeReorder(target: unknown[], reorder: Reorder): void {
   const { after, first, last, skip } = reorder;
   for (let i = first; i < last; i++) {
     if (i === skip) continue;
-    if (hasOwn.call(after, i)) target[i] = after[i];
+    if (i in after) target[i] = after[i];
     else delete target[i];
   }
 }
