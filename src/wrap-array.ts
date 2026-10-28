@@ -16,6 +16,7 @@ import {
   detachPlace,
   dispatch,
   evictDeep,
+  heldItems,
   locate,
   relinkArray,
   relinkReorder,
@@ -546,8 +547,9 @@ export function wrapArray<T extends any[]>(arr: T, node: LocationNode): T {
         located === undefined || grows
           ? undefined
           : { action: "set", path: located.paths[0], oldValue, newValue: value };
+      const held = event !== undefined ? heldItems(value, oldValue) : undefined;
       // copies the payload, or throws, before the write
-      const copied = copyPayload(event, target);
+      const copied = copyPayload(event, target, held);
       if (copied === Copied.Reaches) {
         const after = target.slice();
         Reflect.set(after, prop, value);
@@ -562,7 +564,7 @@ export function wrapArray<T extends any[]>(arr: T, node: LocationNode): T {
         } else if (prop !== "length") {
           const key = placeKey(prop);
           if (isObject(oldValue)) detachPlace(oldValue, node, key);
-          if (isObject(value)) attachValue(value, node, key, copied === Copied.Fresh, located && oldValue);
+          if (isObject(value)) attachValue(value, node, key, copied === Copied.Fresh, located && oldValue, held);
         }
 
         if (grows) {

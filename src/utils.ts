@@ -368,6 +368,53 @@ export function cloneStored<T>(value: T, container: object | undefined): T | typ
 /** Whether the value the last `cloneStored` call copied is fresh; set when it returns. */
 export let copiedFresh = false;
 
+/**
+ * Is `value` (raw) fresh, as `cloneStored` finds it, without copying it?
+ * The walk visits what a copy visits and stops at the first object that is
+ * not fresh: one with a location node (a proxy has one), or one met twice.
+ */
+export function isFresh(value: object): boolean {
+    if (toRaw(value) !== value || locationNodes.get(value) !== undefined) return false;
+    const seen = new Set<object>();
+    seen.add(value);
+    return freshChildren(value, seen);
+}
+
+function freshEntry(entry: unknown, seen: Set<object>): boolean {
+    if (entry === null || typeof entry !== 'object') return true;
+    if (toRaw(entry) !== entry || locationNodes.get(entry) !== undefined) return false;
+    const size = seen.size;
+    seen.add(entry);
+    if (seen.size === size) return false;
+    return freshChildren(entry, seen);
+}
+
+function freshChildren(value: any, seen: Set<object>): boolean {
+    if (Array.isArray(value)) {
+        for (let i = 0; i < value.length; i++) if (!freshEntry(value[i], seen)) return false;
+        return true;
+    }
+    if (Object.getPrototypeOf(value) !== Object.prototype) {
+        if (value instanceof Date) return true;
+        if (value instanceof Map) {
+            for (const [key, entry] of value) if (!freshEntry(key, seen) || !freshEntry(entry, seen)) return false;
+            return true;
+        }
+        if (value instanceof Set) {
+            for (const entry of value) if (!freshEntry(entry, seen)) return false;
+            return true;
+        }
+    }
+    for (const key in value) {
+        if (hasOwn.call(value, key) && !freshEntry(value[key], seen)) return false;
+    }
+    const symbolKeys = Object.getOwnPropertySymbols(value);
+    for (let i = 0; i < symbolKeys.length; i++) {
+        if (isEnumerable.call(value, symbolKeys[i]) && !freshEntry(value[symbolKeys[i]], seen)) return false;
+    }
+    return true;
+}
+
 function copyUnless(value: unknown, container: object | undefined, checkFresh: boolean): unknown {
     try {
         return copyTree(value, container, undefined, checkFresh);

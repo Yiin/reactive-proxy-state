@@ -14,6 +14,7 @@ import {
   detachPlace,
   dispatch,
   evictDeep,
+  heldItems,
   locate,
   copyPayloadReaching,
   shallowCopy,
@@ -80,8 +81,9 @@ export function wrapMap<K, V>(map: Map<K, V>, node: LocationNode): Map<K, V> {
             oldValue,
             newValue: value,
           };
+          const held = located && heldItems(value, oldValue);
           // copies the payload, or throws, before the write
-          const copied = copyPayload(event, target);
+          const copied = copyPayload(event, target, held);
           if (copied === Copied.Reaches) {
             copyPayloadReaching(event!, target, shallowCopy(target).set(key, value));
           }
@@ -90,7 +92,7 @@ export function wrapMap<K, V>(map: Map<K, V>, node: LocationNode): Map<K, V> {
 
           // move places before anything can write again (emit may throw)
           if (isObject(oldValue)) detachPlace(oldValue, node, key);
-          if (isObject(value)) attachValue(value, node, key, copied === Copied.Fresh, located && oldValue);
+          if (isObject(value)) attachValue(value, node, key, copied === Copied.Fresh, located && oldValue, held);
 
           if (event !== undefined) dispatch(located!, event);
 

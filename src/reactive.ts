@@ -1,5 +1,14 @@
 import { EmitFunction, Path, ReactiveOptions, StateEvent } from "./types";
-import { SnapshotLimitError, cloneStored, copiedFresh, deepEqual, globalSeen, proxyStats, unwrapForStore } from "./utils";
+import {
+  SnapshotLimitError,
+  cloneStored,
+  copiedFresh,
+  deepEqual,
+  globalSeen,
+  isFresh,
+  proxyStats,
+  unwrapForStore,
+} from "./utils";
 import {
   Copied,
   LocationNode,
@@ -11,6 +20,7 @@ import {
   ensureLocationNode,
   evictDeep,
   getLocationNode,
+  heldItems,
   locate,
   notePlace,
   restoreEvicted,
@@ -91,14 +101,23 @@ export function reactive<T extends object>(
   }
 
   // if this is the root call (path is empty) and an emit function is provided,
-  // emit the initial state event, with a copy like every other event. A
-  // value too large to copy (see SNAPSHOT_SHARED_COPY_LIMIT) throws here,
-  // before the root has a proxy.
+  // emit the initial state event. Its payload is a copy when a later write
+  // could reach the listener through it: the event waits for a microtask
+  // (`async`), or the value holds an object at two places (the remote needs
+  // one copy per place) or objects another root knows. Otherwise the event
+  // carries `obj` itself, as 1.0.44 did: a synchronous listener reads it
+  // before the first write. A value too large to copy (see
+  // SNAPSHOT_SHARED_COPY_LIMIT) throws here, before the root has a proxy.
   let fresh = false;
   if (emit && path.length === 0) {
     try {
-      const newValue = cloneStored(obj, undefined);
-      fresh = copiedFresh;
+      let newValue: T = obj;
+      if (!options?.async && isFresh(obj)) {
+        fresh = true;
+      } else {
+        newValue = cloneStored(obj, undefined) as T;
+        fresh = copiedFresh;
+      }
       emit({ action: "replace", path: [], newValue });
     } catch (error) {
       if (error instanceof SnapshotLimitError) throw error;
@@ -214,8 +233,9 @@ function wrapObject<T extends object>(obj: T, node: LocationNode, options?: Reac
         oldValue,
         newValue: value,
       };
+      const held = located && heldItems(value, oldValue);
       // copies the payload, or throws, before the write
-      const copied = copyPayload(event, target);
+      const copied = copyPayload(event, target, held);
       if (copied === Copied.Reaches) {
         // the payload reaches `target`: copy it with the write made on a copy of `target`
         const after = shallowCopy(target);
@@ -230,7 +250,7 @@ function wrapObject<T extends object>(obj: T, node: LocationNode, options?: Reac
       if (result && emits) {
         // move places before anything can write again (emit may throw)
         if (isObject(oldValue)) detachPlace(oldValue, node, prop);
-        if (isObject(value)) attachValue(value, node, prop, copied === Copied.Fresh, located && oldValue);
+        if (isObject(value)) attachValue(value, node, prop, copied === Copied.Fresh, located && oldValue, held);
 
         if (event !== undefined) dispatch(located!, event);
 

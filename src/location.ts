@@ -481,16 +481,21 @@ export const enum Copied {
  * before the write. Then nothing is copied and the result is
  * `Copied.Reaches`: the caller makes the write on `shallowCopy(container)`
  * and copies with `copyPayloadReaching`, still before the write.
+ *
+ * `held` comes from `heldItems` for the store of `newValue`: the place walk
+ * of that store skips those items, so the copy does not check freshness.
  */
-export function copyPayload(event: StateEvent | undefined, container: object): Copied {
+export function copyPayload(event: StateEvent | undefined, container: object, held?: Set<object>): Copied {
   if (event === undefined) return Copied.Done;
   const { newValue, oldValue, value, items, oldValues } = event;
   let fresh = true;
   let newCopy = newValue;
   if (isObject(newValue)) {
-    newCopy = cloneStored(newValue, container);
+    // a store with held items walks only those items, which costs less than
+    // finding the copy fresh (see `heldItems`)
+    newCopy = held === undefined ? cloneStored(newValue, container) : cloneTreeUnless(newValue, container);
     if (newCopy === REACHES) return Copied.Reaches;
-    fresh = copiedFresh;
+    fresh = held === undefined && copiedFresh;
   }
   let valueCopy = value;
   if (isObject(value)) {
@@ -928,17 +933,30 @@ function heldBefore(value: object, replaced: unknown): Set<object> | undefined {
 }
 
 /**
+ * `heldBefore` for a store of `value` over `replaced`, the value it writes
+ * over when its container was in the tree (see `attachedBefore`); undefined
+ * when `replaced` has no node. Made before the write, for `copyPayload` and
+ * `attachValue`.
+ */
+export function heldItems(value: unknown, replaced: unknown): Set<object> | undefined {
+  if (!isObject(value) || !isObject(replaced) || nodes.get(replaced) === undefined) return undefined;
+  return heldBefore(value, replaced);
+}
+
+/**
  * `parent[key]` now holds `value` (a raw object). A `fresh` value (the copy
  * this store made found it fresh, see `cloneStored`) has nothing to place.
  * `replaced` is the value the store wrote over, when `parent` was in the
- * tree before the store (see `attachedBefore`).
+ * tree before the store (see `attachedBefore`), and `held` is
+ * `heldItems(value, replaced)`.
  */
 export function attachValue(
   value: object,
   parent: LocationNode,
   key: unknown,
   fresh: boolean,
-  replaced?: unknown
+  replaced?: unknown,
+  held?: Set<object>
 ): void {
   if (fresh) return;
   const former = isObject(replaced) ? nodes.get(replaced) : undefined;
@@ -949,7 +967,6 @@ export function attachValue(
     return;
   }
   if (existing === undefined && !hasObjectChild(value)) return;
-  const held = former === undefined ? undefined : heldBefore(value, replaced);
   const touched: LocationNode[] = [];
   adoptAll(touched, former, held, (walk) => {
     const node = adopt(value, walk);
