@@ -502,4 +502,23 @@ describe("a refusal needs no rollback", () => {
       expect([shape(events[0].newValue), shape(events[0].oldValue)]).toEqual(expected);
     });
   }
+
+  test("a reorder keeps the native checks: a frozen array or item throws a TypeError and sends nothing", () => {
+    const events: unknown[] = [];
+    const state: any = reactive(
+      { frozen: Object.freeze([{ n: 2 }, { n: 1 }]), sorted: Object.freeze([1, 2]), item: [3, 1, 2] },
+      (event) => events.push(event)
+    );
+    events.length = 0;
+    Object.defineProperty(toRaw(state.item), "0", { writable: false });
+    for (const method of ["sort", "reverse"] as const) {
+      expect(() => state.frozen[method]((left: any, right: any) => left.n - right.n)).toThrow(TypeError);
+      // native sort writes every index back, also when nothing moves
+      expect(() => state.sorted[method]()).toThrow(TypeError);
+      expect(() => state.item[method]()).toThrow(TypeError);
+    }
+    expect(toRaw(state.item)[0]).toBe(3);
+    expect(events.length).toBe(0);
+  });
 });
+

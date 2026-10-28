@@ -70,18 +70,16 @@ function unwrapItems(items: any[]): void {
 }
 
 /**
- * Make `target` hold what `after` holds, index by index (a reorder keeps the
- * length): writes only the indexes that differ, holes included.
+ * Write `sorted` (a copy of `target` that `sort` sorted) into `target` the
+ * way native `sort` writes its result: every index in order, the holes at
+ * the end deleted, and a TypeError for a write or delete that fails.
  */
-function writeItems(target: unknown[], after: readonly unknown[]): void {
-  for (let i = 0; i < after.length; i++) {
-    const value = after[i];
-    if (value !== undefined) {
-      if (target[i] !== value) target[i] = value;
-    } else if (i in after) {
-      if (target[i] !== undefined || !(i in target)) target[i] = undefined;
-    } else if (i in target) {
-      delete target[i];
+function writeSorted(target: unknown[], sorted: readonly unknown[]): void {
+  for (let i = 0; i < sorted.length; i++) {
+    if (i in sorted) {
+      if (!Reflect.set(target, i, sorted[i])) throw new TypeError(`Cannot assign to read only property '${i}'`);
+    } else if (!Reflect.deleteProperty(target, i)) {
+      throw new TypeError(`Cannot delete property '${i}'`);
     }
   }
 }
@@ -134,12 +132,8 @@ export function wrapArray<T extends any[]>(arr: T, node: LocationNode): T {
                 break;
               }
             }
-            if (!changed) {
-              writeItems(target, after);
-              return proxy;
-            }
             // the reorder does not move `target`, so its paths are known before it
-            const located = locate(node);
+            const located = changed ? locate(node) : undefined;
             const event: StateEvent | undefined = located && {
               action: "replace",
               path: located.paths[0],
@@ -147,7 +141,11 @@ export function wrapArray<T extends any[]>(arr: T, node: LocationNode): T {
               newValue: target,
             };
             if (event !== undefined) copyPayloadAfter(event, target, after);
-            writeItems(target, after);
+            // the same change on the array, with the native checks (a frozen
+            // item throws); only `sort` runs user code, so it is not run twice
+            if (prop === "sort") writeSorted(target, after);
+            else method.apply(target, args);
+            if (!changed) return proxy;
             relinkReorder(node, target, before, prop === "fill" ? [args[0]] : undefined);
             if (event !== undefined) dispatch(located!, event);
             trigger(target, Symbol.iterator);
