@@ -69,6 +69,8 @@ export interface LocationNode {
     evicted: WeakRef<object> | undefined;
     /** The last `relinkArray` call that placed this object (tells repeats apart). */
     relinked: number;
+    /** In that call: how many of its old places in the array it has not met again yet. */
+    relinkedPlaces: number;
     /**
      * A child's place under this object, or under an object below it, was
      * dropped while this object was detached. Storing it again walks its
@@ -80,6 +82,13 @@ export interface LocationNode {
      * it (see `writesThroughSetter`); undefined before that write.
      */
     dataOnly: boolean | undefined;
+    /**
+     * How many places name this node as their container: every `Place` made
+     * with it counts, and each place dropped from its object's `places` stops
+     * counting. A place whose object was collected still counts, so the
+     * number is never below the places there are (see `relink`).
+     */
+    childPlaces: number;
 }
 export declare function getLocationNode(raw: object): LocationNode | undefined;
 export declare function ensureLocationNode(raw: object): LocationNode;

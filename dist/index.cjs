@@ -3313,10 +3313,16 @@ class Place {
     this.parentRef = new WeakRef(parent);
     this.parentId = parent.id;
     this.key = key;
+    parent.childPlaces++;
   }
   get parent() {
     return this.parentRef.deref();
   }
+}
+function dropped(place) {
+  const parent = place.parent;
+  if (parent !== undefined)
+    parent.childPlaces--;
 }
 var nodes = locationNodes;
 var nodeCount = 0;
@@ -3340,8 +3346,10 @@ function ensureLocationNode(raw) {
       proxy: undefined,
       evicted: undefined,
       relinked: 0,
+      relinkedPlaces: 0,
       lostLink: false,
-      dataOnly: undefined
+      dataOnly: undefined,
+      childPlaces: 0
     };
     nodes.set(raw, node);
   }
@@ -3414,6 +3422,7 @@ function chain(node, tail) {
     const place = places[0];
     const parent = place.parent;
     if (!holdsIn(parent, place.key, current.raw)) {
+      dropped(place);
       places.length = 0;
       return null;
     }
@@ -3459,7 +3468,7 @@ function collect(node, suffix, visiting, out, firstOnly) {
     collect(parent, [segment(parent, place.key, node.raw), ...suffix], visiting, out, firstOnly);
   }
   if (stale)
-    node.places = places.filter((place) => holds(place, node.raw));
+    node.places = keepPlaces(places, (place) => holds(place, node.raw));
   visiting.delete(node);
 }
 function locate(node, tail) {
@@ -3738,18 +3747,30 @@ function addPlace(node, parent, key) {
   return true;
 }
 function prunePlaces(node) {
-  let places = node.places.filter((place) => holds(place, node.raw));
+  let places = keepPlaces(node.places, (place) => holds(place, node.raw));
   if (places.length > 1) {
     const live = places.filter((place) => isAttached(place.parent));
     if (live.length > 0 && live.length < places.length) {
       for (let i = 0;i < places.length; i++) {
-        if (!live.includes(places[i]))
+        if (!live.includes(places[i])) {
           markLostLink(places[i].parent);
+          dropped(places[i]);
+        }
       }
       places = live;
     }
   }
   node.places = places;
+}
+function keepPlaces(places, keep) {
+  const kept = [];
+  for (let i = 0;i < places.length; i++) {
+    if (keep(places[i]))
+      kept.push(places[i]);
+    else
+      dropped(places[i]);
+  }
+  return kept;
 }
 function markLostLink(node) {
   if (node.lostLink)
@@ -3776,6 +3797,7 @@ function detachPlace(value, parent, key) {
   const places = node.places;
   for (let i = 0;i < places.length; i++) {
     if (samePlace(places[i], parent, key)) {
+      dropped(places[i]);
       places.splice(i, 1);
       return;
     }
@@ -4008,19 +4030,23 @@ function relink(arrayNode, array, from, removed, inserted, findAliases) {
       }
     });
   }
+  let removedNode = false;
   if (removed !== undefined) {
     for (let i = 0;i < removed.length; i++) {
       const value = removed[i];
       if (isObject2(value)) {
         const node = nodes.get(value);
-        if (node !== undefined)
+        if (node !== undefined) {
           stripIndexes(node, arrayNode, from);
+          removedNode = true;
+        }
       }
     }
   }
   const call = ++relinkCalls;
   let firstIndex;
-  for (let i = from;i < array.length; i++) {
+  let left = findAliases || removedNode || holdsNode(inserted) ? Infinity : arrayNode.childPlaces;
+  for (let i = from;i < array.length && left > 0; i++) {
     const value = array[i];
     if (!isObject2(value))
       continue;
@@ -4037,15 +4063,22 @@ function relink(arrayNode, array, from, removed, inserted, findAliases) {
         continue;
       node = ensureLocationNode(value);
       node.relinked = call;
+      node.relinkedPlaces = 0;
       node.places.push(new Place(arrayNode, first));
     } else if (node.relinked !== call) {
       node.relinked = call;
       const places = node.places;
       if (places.length === 1 && places[0].parentId === arrayNode.id && typeof places[0].key === "number" && places[0].key >= from) {
         places[0].key = i;
+        node.relinkedPlaces = 0;
+        left--;
         continue;
       }
-      stripIndexes(node, arrayNode, from);
+      node.relinkedPlaces = stripIndexes(node, arrayNode, from);
+    }
+    if (node.relinkedPlaces > 0) {
+      node.relinkedPlaces--;
+      left--;
     }
     node.places.push(new Place(arrayNode, i));
     if (node.places.length > 1)
@@ -4054,14 +4087,28 @@ function relink(arrayNode, array, from, removed, inserted, findAliases) {
   pruneTouched(touched);
 }
 var relinkCalls = 0;
+function holdsNode(values) {
+  if (values === undefined)
+    return false;
+  for (let i = 0;i < values.length; i++) {
+    const value = values[i];
+    if (isObject2(value) && nodes.get(value) !== undefined)
+      return true;
+  }
+  return false;
+}
 function stripIndexes(node, arrayNode, from) {
   const places = node.places;
+  let count = 0;
   for (let i = places.length - 1;i >= 0; i--) {
     const place = places[i];
     if (place.parentId === arrayNode.id && typeof place.key === "number" && place.key >= from) {
+      arrayNode.childPlaces--;
       places.splice(i, 1);
+      count++;
     }
   }
+  return count;
 }
 function evictDeep(value, parent) {
   if (value == null || typeof value !== "object")
