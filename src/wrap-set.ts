@@ -8,7 +8,8 @@ import {
   dispatch,
   evictDeep,
   locate,
-  writeThenCopy,
+  contentsRestorer,
+  copyAfterWrite,
 } from "./location";
 import type { StateEvent } from "./types";
 import { track, trigger } from "./watch-effect";
@@ -61,8 +62,9 @@ export function wrapSet<T>(set: Set<T>, node: LocationNode): Set<T> {
               value: value,
             };
             // copies the payload, or throws, before the write
-            if (copyPayload(event, target)) target.add(value);
-            else writeThenCopy(target, event!, () => target.add(value));
+            const restore = copyPayload(event, target) ? undefined : contentsRestorer(target);
+            target.add(value);
+            if (restore !== undefined) copyAfterWrite(event!, restore);
             const newSize = target.size;
 
             if (isObject(value)) attachValue(value, node, undefined);
@@ -90,9 +92,9 @@ export function wrapSet<T>(set: Set<T>, node: LocationNode): Set<T> {
               value: value,
               oldValue: oldValue,
             };
-            const result = copyPayload(event, target)
-              ? target.delete(value)
-              : writeThenCopy(target, event!, () => target.delete(value));
+            const restore = copyPayload(event, target) ? undefined : contentsRestorer(target);
+            const result = target.delete(value);
+            if (restore !== undefined) copyAfterWrite(event!, restore);
             const newSize = target.size;
 
             if (result) {

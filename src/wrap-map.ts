@@ -14,7 +14,8 @@ import {
   dispatch,
   evictDeep,
   locate,
-  writeThenCopy,
+  contentsRestorer,
+  copyAfterWrite,
 } from "./location";
 import type { StateEvent } from "./types";
 import { track, trigger } from "./watch-effect";
@@ -79,8 +80,9 @@ export function wrapMap<K, V>(map: Map<K, V>, node: LocationNode): Map<K, V> {
             newValue: value,
           };
           // copies the payload, or throws, before the write
-          if (copyPayload(event, target)) target.set(key, value);
-          else writeThenCopy(target, event!, () => target.set(key, value));
+          const restore = copyPayload(event, target) ? undefined : contentsRestorer(target);
+          target.set(key, value);
+          if (restore !== undefined) copyAfterWrite(event!, restore);
           const newSize = target.size;
 
           // move places before anything can write again (emit may throw)
@@ -118,9 +120,9 @@ export function wrapMap<K, V>(map: Map<K, V>, node: LocationNode): Map<K, V> {
             key,
             oldValue,
           };
-          const result = copyPayload(event, target)
-            ? target.delete(key)
-            : writeThenCopy(target, event!, () => target.delete(key));
+          const restore = copyPayload(event, target) ? undefined : contentsRestorer(target);
+          const result = target.delete(key);
+          if (restore !== undefined) copyAfterWrite(event!, restore);
           const newSize = target.size;
 
           if (result) {

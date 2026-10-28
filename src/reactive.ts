@@ -13,7 +13,8 @@ import {
   locate,
   notePlace,
   restoreEvicted,
-  writeThenCopy,
+  contentsRestorer,
+  copyAfterWrite,
 } from "./location";
 import { wrapArray } from "./wrap-array";
 import { wrapMap } from "./wrap-map";
@@ -213,9 +214,9 @@ function wrapObject<T extends object>(obj: T, node: LocationNode, options?: Reac
         newValue: value,
       };
       // copies the payload, or throws, before the write
-      const result = copyPayload(event, target)
-        ? Reflect.set(target, prop, value, receiver)
-        : writeThenCopy(target, event!, () => Reflect.set(target, prop, value, receiver));
+      const restore = copyPayload(event, target) ? undefined : contentsRestorer(target);
+      const result = Reflect.set(target, prop, value, receiver);
+      if (restore !== undefined) copyAfterWrite(event!, restore);
 
       // only emit and trigger if the set was successful and wasn't intercepted by a setter
       if (result && emits) {
@@ -246,9 +247,9 @@ function wrapObject<T extends object>(obj: T, node: LocationNode, options?: Reac
         path: located.paths[0],
         oldValue,
       };
-      const result = copyPayload(event, target)
-        ? Reflect.deleteProperty(target, prop)
-        : writeThenCopy(target, event!, () => Reflect.deleteProperty(target, prop));
+      const restore = copyPayload(event, target) ? undefined : contentsRestorer(target);
+      const result = Reflect.deleteProperty(target, prop);
+      if (restore !== undefined) copyAfterWrite(event!, restore);
 
       // only emit and trigger if the property existed and deletion was successful
       if (hadProperty && result) {

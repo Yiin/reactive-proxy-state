@@ -17,7 +17,8 @@ import {
   locate,
   relinkArray,
   relinkReorder,
-  writeThenCopy,
+  contentsRestorer,
+  copyAfterWrite,
 } from "./location";
 import { track, trigger } from "./watch-effect";
 import { ReactiveFlags } from "./constants";
@@ -159,9 +160,9 @@ export function wrapArray<T extends any[]>(arr: T, node: LocationNode): T {
               key: oldLength, // start index was the old length
               items: items,
             };
-            const result = copyPayload(event, target)
-              ? target.push(...items)
-              : writeThenCopy(target, event!, () => target.push(...items));
+            const restore = copyPayload(event, target) ? undefined : contentsRestorer(target);
+            const result = target.push(...items);
+            if (restore !== undefined) copyAfterWrite(event!, restore);
             const newLength = target.length;
             if (items.length > 0) {
               relinkArray(node, target, oldLength, undefined, items);
@@ -188,9 +189,9 @@ export function wrapArray<T extends any[]>(arr: T, node: LocationNode): T {
               key: poppedIndex,
               oldValue: oldValue,
             };
-            const result = copyPayload(event, target)
-              ? target.pop()
-              : writeThenCopy(target, event!, () => target.pop());
+            const restore = copyPayload(event, target) ? undefined : contentsRestorer(target);
+            const result = target.pop();
+            if (restore !== undefined) copyAfterWrite(event!, restore);
             const newLength = target.length;
             if (isObject(oldValue)) detachPlace(oldValue, node, poppedIndex);
             if (event !== undefined) dispatch(located!, event);
@@ -215,9 +216,9 @@ export function wrapArray<T extends any[]>(arr: T, node: LocationNode): T {
               key: 0,
               oldValue: oldValue,
             };
-            const result = copyPayload(event, target)
-              ? target.shift()
-              : writeThenCopy(target, event!, () => target.shift());
+            const restore = copyPayload(event, target) ? undefined : contentsRestorer(target);
+            const result = target.shift();
+            if (restore !== undefined) copyAfterWrite(event!, restore);
             const newLength = target.length;
             relinkArray(node, target, 0, [oldValue]);
             if (event !== undefined) dispatch(located!, event);
@@ -241,9 +242,9 @@ export function wrapArray<T extends any[]>(arr: T, node: LocationNode): T {
               key: 0,
               items: items,
             };
-            const result = copyPayload(event, target)
-              ? target.unshift(...items)
-              : writeThenCopy(target, event!, () => target.unshift(...items));
+            const restore = copyPayload(event, target) ? undefined : contentsRestorer(target);
+            const result = target.unshift(...items);
+            if (restore !== undefined) copyAfterWrite(event!, restore);
             const newLength = target.length;
             if (items.length > 0) {
               relinkArray(node, target, 0, undefined, items);
@@ -283,9 +284,9 @@ export function wrapArray<T extends any[]>(arr: T, node: LocationNode): T {
               oldValues:
                 actualDeleteCount > 0 ? target.slice(actualStart, actualStart + actualDeleteCount) : undefined,
             };
-            const deletedItems = copyPayload(event, target)
-              ? target.splice(actualStart, actualDeleteCount, ...items)
-              : writeThenCopy(target, event!, () => target.splice(actualStart, actualDeleteCount, ...items));
+            const restore = copyPayload(event, target) ? undefined : contentsRestorer(target);
+            const deletedItems = target.splice(actualStart, actualDeleteCount, ...items);
+            if (restore !== undefined) copyAfterWrite(event!, restore);
             const newLength = target.length;
 
             if (changes) {
@@ -425,9 +426,9 @@ export function wrapArray<T extends any[]>(arr: T, node: LocationNode): T {
           ? undefined
           : { action: "set", path: located.paths[0], oldValue, newValue: value };
       // copies the payload, or throws, before the write
-      const result = copyPayload(event, target)
-        ? Reflect.set(target, prop, value, receiver)
-        : writeThenCopy(target, event!, () => Reflect.set(target, prop, value, receiver));
+      const restore = copyPayload(event, target) ? undefined : contentsRestorer(target);
+      const result = Reflect.set(target, prop, value, receiver);
+      if (restore !== undefined) copyAfterWrite(event!, restore);
 
       if (result && emits) {
         // move places before anything can write again (emit may throw)
@@ -466,9 +467,9 @@ export function wrapArray<T extends any[]>(arr: T, node: LocationNode): T {
       const hadProperty = Object.prototype.hasOwnProperty.call(target, prop);
       const located = hadProperty ? locate(node, prop) : undefined;
       const event: StateEvent | undefined = located && { action: "delete", path: located.paths[0], oldValue };
-      const result = copyPayload(event, target)
-        ? Reflect.deleteProperty(target, prop)
-        : writeThenCopy(target, event!, () => Reflect.deleteProperty(target, prop));
+      const restore = copyPayload(event, target) ? undefined : contentsRestorer(target);
+      const result = Reflect.deleteProperty(target, prop);
+      if (restore !== undefined) copyAfterWrite(event!, restore);
 
       if (hadProperty && result) {
         if (isObject(oldValue)) detachPlace(oldValue, node, placeKey(prop));
