@@ -1,5 +1,5 @@
 import { EmitFunction, Path, ReactiveOptions, StateEvent } from "./types";
-import { cloneTree, deepEqual, globalSeen, proxyStats, unwrapForStore } from "./utils";
+import { SnapshotLimitError, cloneTree, deepEqual, globalSeen, proxyStats, unwrapForStore } from "./utils";
 import {
   LocationNode,
   adoptRoot,
@@ -85,7 +85,9 @@ export function reactive<T extends object>(
   }
 
   // if this is the root call (path is empty) and an emit function is provided,
-  // emit the initial state event, with a copy like every other event.
+  // emit the initial state event, with a copy like every other event. A
+  // value too large to copy (see SNAPSHOT_SHARED_COPY_LIMIT) throws here,
+  // before the root has a proxy.
   if (emit && path.length === 0) {
     try {
       const initialEvent: StateEvent = {
@@ -95,6 +97,7 @@ export function reactive<T extends object>(
       };
       emit(initialEvent);
     } catch (error) {
+      if (error instanceof SnapshotLimitError) throw error;
       console.error("Failed to emit initial reactive state:", error);
     }
   }

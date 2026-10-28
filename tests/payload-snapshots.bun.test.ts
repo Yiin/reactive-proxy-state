@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { reactive, toRaw, updateState } from "../src/index";
+import { SnapshotLimitError, reactive, toRaw, updateState } from "../src/index";
 import { SNAPSHOT_SHARED_COPY_LIMIT, cloneTree } from "../src/utils";
 import type { StateEvent } from "../src/types";
 import { replicate } from "./replica";
@@ -251,7 +251,7 @@ describe("objects shared inside one snapshot", () => {
     const raw = doubling(21); // 22 objects, 4,194,303 places
     const events: StateEvent[] = [];
     const started = performance.now();
-    expect(() => reactive(raw, (event) => events.push(event))).toThrow(RangeError);
+    expect(() => reactive(raw, (event) => events.push(event))).toThrow(SnapshotLimitError);
     expect(performance.now() - started).toBeLessThan(1000);
     expect(events).toEqual([]);
     // no proxy was cached for the refused root

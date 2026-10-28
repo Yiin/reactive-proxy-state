@@ -406,7 +406,10 @@ export function detachPlace(value: object, parent: LocationNode, key: unknown): 
  *
  * An object met twice is an alias (or a cycle). The first walk only notes
  * it; a second walk then gives each such object a node at its first visit,
- * so every later visit records its place.
+ * so every later visit records its place. The second walk also goes into
+ * the containers the first walk gave a node (they hold a known object), as
+ * an alias below them needs its place there too. Each walk keeps its own
+ * set of visited objects.
  */
 interface Walk {
   touched: LocationNode[];
@@ -415,29 +418,43 @@ interface Walk {
   repeated: Set<object> | undefined;
   /** Objects that get a node at their first visit (the repeats of the first walk). */
   aliases: Set<object> | undefined;
+  /** Objects this walk gave a node to, as containers of a known object. */
+  created: Set<object> | undefined;
+  /** Objects with a node the walk goes into anyway (the `created` of the first walk). */
+  revisit: Set<object> | undefined;
   /** Nodes with `lostLink` the walk went into; cleared when the store is done. */
   relinked: LocationNode[];
 }
 
-function newWalk(touched: LocationNode[], aliases?: Set<object>): Walk {
-  return { touched, seen: new Set(), repeated: undefined, aliases, relinked: [] };
+function newWalk(touched: LocationNode[], first?: Walk): Walk {
+  return {
+    touched,
+    seen: new Set(),
+    repeated: undefined,
+    aliases: first?.repeated,
+    created: undefined,
+    revisit: first?.created,
+    relinked: [],
+  };
 }
 
 function adopt(raw: object, walk: Walk): LocationNode | undefined {
   let node = nodes.get(raw);
-  if (node !== undefined && !node.lostLink) return node;
+  if (node !== undefined && !node.lostLink && walk.revisit?.has(raw) !== true) return node;
   if (walk.seen.has(raw)) {
     if (node === undefined) (walk.repeated ??= new Set()).add(raw);
     return node;
   }
   walk.seen.add(raw);
   if (node !== undefined) {
-    walk.relinked.push(node);
-  } else {
-    if ((raw as any)[ReactiveFlags.SKIP] || (raw as any)[ReactiveFlags.IS_REACTIVE]) return undefined;
-    if (walk.aliases?.has(raw)) node = ensureLocationNode(raw);
+    if (node.lostLink) walk.relinked.push(node);
+    return adoptChildren(raw, node, walk);
   }
-  return adoptChildren(raw, node, walk);
+  if ((raw as any)[ReactiveFlags.SKIP] || (raw as any)[ReactiveFlags.IS_REACTIVE]) return undefined;
+  if (walk.aliases?.has(raw)) node = ensureLocationNode(raw);
+  node = adoptChildren(raw, node, walk);
+  if (node !== undefined && walk.aliases === undefined) (walk.created ??= new Set()).add(raw);
+  return node;
 }
 
 /** Walk the children of `raw` (whose node, if any, is `node`); returns its node afterwards. */
@@ -494,7 +511,7 @@ function adoptAll(touched: LocationNode[], visit: (walk: Walk) => void): void {
   visit(walk);
   if (walk.repeated !== undefined) {
     const first = walk;
-    walk = newWalk(touched, first.repeated);
+    walk = newWalk(touched, first);
     visit(walk);
     for (let i = 0; i < first.relinked.length; i++) first.relinked[i].lostLink = false;
   }
@@ -531,6 +548,8 @@ function hasObjectChild(raw: object): boolean {
 
 /** Must the values `relink` inserts be walked? Not when each is a new leaf, met once. */
 function insertedNeedWalk(inserted: readonly unknown[]): boolean {
+  // fresh leaves met so far, to find one inserted twice
+  let fresh: Set<object> | undefined;
   for (let i = 0; i < inserted.length; i++) {
     const value = inserted[i];
     if (!isObject(value)) continue;
@@ -539,7 +558,12 @@ function insertedNeedWalk(inserted: readonly unknown[]): boolean {
       if (node.lostLink) return true;
       continue;
     }
-    if (hasObjectChild(value) || inserted.indexOf(value, i + 1) !== -1) return true;
+    if (hasObjectChild(value)) return true;
+    if (inserted.length > 1) {
+      if (fresh === undefined) fresh = new Set();
+      else if (fresh.has(value)) return true;
+      fresh.add(value);
+    }
   }
   return false;
 }

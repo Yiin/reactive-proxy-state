@@ -275,20 +275,148 @@ export function traverse(value: any, seen: Set<any> = new Set()) {
 }
 
 /**
+ * The most copies one snapshot may make beyond the first copy of each
+ * object. A snapshot copies a shared object once per place, so a graph
+ * that shares objects at many places (each level holding the one below
+ * twice) grows exponentially: 22 objects become 4,194,303 copies. Such a
+ * snapshot throws a `RangeError` instead. A tree, however large, makes no
+ * extra copies and is never refused.
+ */
+export const SNAPSHOT_SHARED_COPY_LIMIT = 100_000;
+
+/** A snapshot over `SNAPSHOT_SHARED_COPY_LIMIT`. */
+export class SnapshotLimitError extends RangeError {
+    constructor(extraCopies: number) {
+        super(
+            `reactive-proxy-state: a snapshot would copy shared objects more than ` +
+            `${SNAPSHOT_SHARED_COPY_LIMIT} extra times (counted ${extraCopies} before stopping; ` +
+            `an object is copied once per place it holds)`
+        );
+        this.name = 'SnapshotLimitError';
+    }
+}
+
+/** Copies a snapshot makes before it measures its whole value against the limit. */
+const SNAPSHOT_CHECK_AFTER = 10_000;
+
+/**
  * Deep clone for event payloads. Unlike `deepClone`, an object that appears
  * at several places in `value` is copied once per place, so the result is a
  * tree: a replica holds one copy per place, and a write through a shared
- * object emits one event per place. Cycles are kept.
+ * object emits one event per place. Copies may not share objects, because a
+ * wire that keeps identity (structuredClone, an in-process listener) would
+ * then hold one object where the source has several places, and apply each
+ * per-place event to it again. Cycles are kept.
+ *
+ * Throws a `SnapshotLimitError` (a `RangeError`) when the copy would make more than
+ * `SNAPSHOT_SHARED_COPY_LIMIT` extra copies of shared objects.
  */
 export function cloneTree<T>(value: T): T {
     if (value === null || typeof value !== 'object') return value;
     const base = cloneAncestors.length;
+    const outerTop = cloneTop;
+    const outerCountdown = cloneCountdown;
+    cloneTop = value;
+    cloneCountdown = SNAPSHOT_CHECK_AFTER;
     try {
         return cloneTreeInto(value, base);
     } finally {
         cloneAncestors.length = base;
         cloneCopies.length = base;
+        cloneTop = outerTop;
+        cloneCountdown = outerCountdown;
     }
+}
+
+// The value the current `cloneTree` call copies, and how many copies it may
+// still make before it measures that value (see `checkSharedCopies`).
+let cloneTop: object | undefined;
+let cloneCountdown = 0;
+
+/** Count one copy; at `SNAPSHOT_CHECK_AFTER` copies, measure the whole value once. */
+function countCopy(): void {
+    if (--cloneCountdown === 0) checkSharedCopies(cloneTop!);
+}
+
+/** One `checkSharedCopies` walk. */
+interface CopyWalk {
+    /** Copies beyond the first copy of each object, so far. */
+    extra: number;
+    /** After `walkCopies`: the depth of the highest ancestor a cycle below returned to. */
+    low: number;
+    /** The objects on the path from the top, with their depth. */
+    depth: Map<object, number>;
+    /** Copies a subtree makes, for subtrees whose count does not depend on the path. */
+    sizes: Map<object, number>;
+    distinct: Set<object>;
+}
+
+/**
+ * Throws when a tree copy of `value` (made like `cloneTreeInto`) would make
+ * more than `SNAPSHOT_SHARED_COPY_LIMIT` copies beyond the first copy of each
+ * object. The copies of a shared subtree are counted once and remembered, so
+ * the walk is linear in the distinct objects. A subtree with a cycle to an
+ * object above it is counted again at each place, and the walk stops as soon
+ * as the limit is passed.
+ */
+function checkSharedCopies(value: object): void {
+    const walk: CopyWalk = { extra: 0, low: Infinity, depth: new Map(), sizes: new Map(), distinct: new Set() };
+    walkCopies(value, 0, walk);
+    if (walk.extra > SNAPSHOT_SHARED_COPY_LIMIT) {
+        throw new SnapshotLimitError(walk.extra);
+    }
+}
+
+/** The number of copies a tree copy of `value` makes; sets `walk.low`. */
+function walkCopies(value: object, depth: number, walk: CopyWalk): number {
+    const identity = toRaw(value) as object;
+    const ancestor = walk.depth.get(identity);
+    if (ancestor !== undefined) {
+        // a cycle: the copy reuses the ancestor's copy
+        walk.low = ancestor;
+        return 0;
+    }
+    walk.low = Infinity;
+    const known = walk.sizes.get(identity);
+    if (known !== undefined) {
+        walk.extra += known;
+        return known;
+    }
+    if (walk.distinct.has(identity)) walk.extra++;
+    else walk.distinct.add(identity);
+    if (identity instanceof Date || walk.extra > SNAPSHOT_SHARED_COPY_LIMIT) return 1;
+
+    walk.depth.set(identity, depth);
+    let size = 1;
+    let low = Infinity;
+    const child = (entry: unknown): void => {
+        if (entry === null || typeof entry !== 'object' || walk.extra > SNAPSHOT_SHARED_COPY_LIMIT) return;
+        size += walkCopies(entry, depth + 1, walk);
+        if (walk.low < low) low = walk.low;
+    };
+    if (Array.isArray(identity)) {
+        for (let i = 0; i < identity.length; i++) child(identity[i]);
+    } else if (identity instanceof Map) {
+        identity.forEach((entry, key) => {
+            child(key);
+            child(entry);
+        });
+    } else if (identity instanceof Set) {
+        identity.forEach(child);
+    } else {
+        for (const key in identity) {
+            if (hasOwn.call(identity, key)) child((identity as any)[key]);
+        }
+        const symbolKeys = Object.getOwnPropertySymbols(identity);
+        for (let i = 0; i < symbolKeys.length; i++) {
+            if (isEnumerable.call(identity, symbolKeys[i])) child((identity as any)[symbolKeys[i]]);
+        }
+    }
+    walk.depth.delete(identity);
+    // remember the count only when no cycle below returns above this object
+    if (low >= depth) walk.sizes.set(identity, size);
+    walk.low = low;
+    return size;
 }
 
 // The raw objects on the path from the top of the current clone to here, and
@@ -311,6 +439,7 @@ function cloneTreeInto(value: any, base: number): any {
         if (cloneAncestors[i] === identity) return cloneCopies[i];
     }
 
+    countCopy();
     let copy: any;
     if (Array.isArray(value)) {
         const length = value.length;

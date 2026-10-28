@@ -44,9 +44,13 @@ function placeKey(prop: string | symbol): unknown {
   return index >= 0 ? index : prop;
 }
 
-/** ToIntegerOrInfinity: NaN is 0, fractions go toward zero, -0 is 0. */
+/**
+ * ToIntegerOrInfinity: NaN is 0, fractions go toward zero, -0 is 0. Unary
+ * plus is ToNumber, so a BigInt or a Symbol throws a TypeError like native
+ * `splice` (`Number(1n)` would give 1).
+ */
 function toIntegerOrInfinity(value: unknown): number {
-  const number = Number(value);
+  const number = +(value as number);
   if (number !== number || number === 0) return 0;
   return Math.trunc(number);
 }
