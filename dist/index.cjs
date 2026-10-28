@@ -2614,6 +2614,58 @@ function cloneStored(value, container) {
   return copyUnless(value, container, true);
 }
 var copiedFresh = false;
+function isFresh(value) {
+  if (toRaw(value) !== value || locationNodes.get(value) !== undefined)
+    return false;
+  const seen = new Set;
+  seen.add(value);
+  return freshChildren(value, seen);
+}
+function freshEntry(entry, seen) {
+  if (entry === null || typeof entry !== "object")
+    return true;
+  if (toRaw(entry) !== entry || locationNodes.get(entry) !== undefined)
+    return false;
+  const size = seen.size;
+  seen.add(entry);
+  if (seen.size === size)
+    return false;
+  return freshChildren(entry, seen);
+}
+function freshChildren(value, seen) {
+  if (Array.isArray(value)) {
+    for (let i = 0;i < value.length; i++)
+      if (!freshEntry(value[i], seen))
+        return false;
+    return true;
+  }
+  if (Object.getPrototypeOf(value) !== Object.prototype) {
+    if (value instanceof Date)
+      return true;
+    if (value instanceof Map) {
+      for (const [key, entry] of value)
+        if (!freshEntry(key, seen) || !freshEntry(entry, seen))
+          return false;
+      return true;
+    }
+    if (value instanceof Set) {
+      for (const entry of value)
+        if (!freshEntry(entry, seen))
+          return false;
+      return true;
+    }
+  }
+  for (const key in value) {
+    if (hasOwn.call(value, key) && !freshEntry(value[key], seen))
+      return false;
+  }
+  const symbolKeys = Object.getOwnPropertySymbols(value);
+  for (let i = 0;i < symbolKeys.length; i++) {
+    if (isEnumerable.call(value, symbolKeys[i]) && !freshEntry(value[symbolKeys[i]], seen))
+      return false;
+  }
+  return true;
+}
 function copyUnless(value, container, checkFresh) {
   try {
     return copyTree(value, container, undefined, checkFresh);
@@ -2874,58 +2926,90 @@ function cloneTreeInto(value, base) {
       return cloneCopies[i];
   }
   countCopy();
-  let copy;
+  let pushed = false;
   if (Array.isArray(value)) {
     const length = value.length;
-    copy = new Array(length);
-    cloneAncestors.push(identity);
-    cloneCopies.push(copy);
-    for (let i = 0;i < length; i++)
-      copy[i] = cloneChild(value[i], base);
-  } else {
-    const prototype = Object.getPrototypeOf(value);
-    if (prototype === Object.prototype) {
-      copy = {};
-    } else if (value instanceof Date) {
-      return new Date(value.getTime());
-    } else if (value instanceof Map) {
-      copy = new Map;
-      cloneAncestors.push(identity);
-      cloneCopies.push(copy);
-      value.forEach((entry, key) => {
-        copy.set(cloneChild(key, base), cloneChild(entry, base));
-      });
+    const copy2 = new Array(length);
+    for (let i = 0;i < length; i++) {
+      const child = value[i];
+      if (child === null || typeof child !== "object") {
+        copy2[i] = child;
+        continue;
+      }
+      if (!pushed) {
+        pushed = true;
+        cloneAncestors.push(identity);
+        cloneCopies.push(copy2);
+      }
+      copy2[i] = cloneChild(child, base);
+    }
+    if (pushed) {
       cloneAncestors.pop();
       cloneCopies.pop();
-      return copy;
-    } else if (value instanceof Set) {
-      copy = new Set;
-      cloneAncestors.push(identity);
-      cloneCopies.push(copy);
-      value.forEach((entry) => {
-        copy.add(cloneChild(entry, base));
-      });
-      cloneAncestors.pop();
-      cloneCopies.pop();
-      return copy;
-    } else {
-      copy = Object.create(prototype);
     }
-    cloneAncestors.push(identity);
-    cloneCopies.push(copy);
-    for (const key in value) {
-      if (hasOwn.call(value, key))
-        copy[key] = cloneChild(value[key], base);
-    }
-    const symbolKeys = Object.getOwnPropertySymbols(value);
-    for (let i = 0;i < symbolKeys.length; i++) {
-      const symbolKey = symbolKeys[i];
-      if (isEnumerable.call(value, symbolKey))
-        copy[symbolKey] = cloneChild(value[symbolKey], base);
-    }
+    return copy2;
   }
-  cloneAncestors.pop();
-  cloneCopies.pop();
+  const prototype = Object.getPrototypeOf(value);
+  let copy;
+  if (prototype === Object.prototype) {
+    copy = {};
+  } else if (value instanceof Date) {
+    return new Date(value.getTime());
+  } else if (value instanceof Map) {
+    const map = new Map;
+    cloneAncestors.push(identity);
+    cloneCopies.push(map);
+    value.forEach((entry, key) => {
+      map.set(cloneChild(key, base), cloneChild(entry, base));
+    });
+    cloneAncestors.pop();
+    cloneCopies.pop();
+    return map;
+  } else if (value instanceof Set) {
+    const set = new Set;
+    cloneAncestors.push(identity);
+    cloneCopies.push(set);
+    value.forEach((entry) => {
+      set.add(cloneChild(entry, base));
+    });
+    cloneAncestors.pop();
+    cloneCopies.pop();
+    return set;
+  } else {
+    copy = Object.create(prototype);
+  }
+  for (const key in value) {
+    if (!hasOwn.call(value, key))
+      continue;
+    const child = value[key];
+    if (child === null || typeof child !== "object") {
+      copy[key] = child;
+      continue;
+    }
+    if (!pushed) {
+      pushed = true;
+      cloneAncestors.push(identity);
+      cloneCopies.push(copy);
+    }
+    copy[key] = cloneChild(child, base);
+  }
+  const symbolKeys = Object.getOwnPropertySymbols(value);
+  for (let i = 0;i < symbolKeys.length; i++) {
+    const symbolKey = symbolKeys[i];
+    if (!isEnumerable.call(value, symbolKey))
+      continue;
+    const child = value[symbolKey];
+    if (child !== null && typeof child === "object" && !pushed) {
+      pushed = true;
+      cloneAncestors.push(identity);
+      cloneCopies.push(copy);
+    }
+    copy[symbolKey] = cloneChild(child, base);
+  }
+  if (pushed) {
+    cloneAncestors.pop();
+    cloneCopies.pop();
+  }
   return copy;
 }
 function deepClone(value, seen = new WeakMap) {
@@ -3449,9 +3533,11 @@ function attachedBefore(node, former) {
 }
 function dispatch(target, event) {
   const { root, paths } = target;
-  const emit = root.emit;
   if (paths.length === 1) {
-    emit(event);
+    if (root.undelivered === undefined)
+      root.emit(event);
+    else
+      deliver(root, [event]);
     return;
   }
   const events = [event];
@@ -3459,30 +3545,57 @@ function dispatch(target, event) {
     const copy = { ...event, path: paths[i] };
     if (isObject2(event.newValue))
       copy.newValue = cloneTree(event.newValue);
-    if (isObject2(event.oldValue))
-      copy.oldValue = cloneTree(event.oldValue);
     if (isObject2(event.value))
       copy.value = cloneTree(event.value);
     if (event.items !== undefined)
       copy.items = cloneTree(event.items);
-    if (event.oldValues !== undefined)
-      copy.oldValues = cloneTree(event.oldValues);
+    if (root.async) {
+      if (isObject2(event.oldValue))
+        copy.oldValue = cloneTree(event.oldValue);
+      if (event.oldValues !== undefined)
+        copy.oldValues = cloneTree(event.oldValues);
+    }
     events.push(copy);
   }
-  for (let i = 0;i < events.length; i++)
-    emit(events[i]);
+  deliver(root, events);
 }
-function copyPayload(event, container) {
+function deliver(root, events) {
+  const emit = root.emit;
+  let queue = root.undelivered;
+  if (queue === undefined) {
+    if (events.length === 1) {
+      emit(events[0]);
+      return;
+    }
+    queue = root.undelivered = { events, next: 0 };
+  } else {
+    for (let i = 0;i < events.length; i++)
+      queue.events.push(events[i]);
+  }
+  try {
+    while (queue.next < queue.events.length)
+      emit(queue.events[queue.next++]);
+  } catch (error) {
+    queue.events.length = 0;
+    queue.next = 0;
+    throw error;
+  } finally {
+    if (root.undelivered === queue && queue.next === queue.events.length)
+      root.undelivered = undefined;
+  }
+}
+function copyPayload(event, target, container, held) {
   if (event === undefined)
     return 1 /* Done */;
+  const removed = target.root.async;
   const { newValue, oldValue, value, items, oldValues } = event;
   let fresh = true;
   let newCopy = newValue;
   if (isObject2(newValue)) {
-    newCopy = cloneStored(newValue, container);
+    newCopy = held === undefined ? cloneStored(newValue, container) : cloneTreeUnless(newValue, container);
     if (newCopy === REACHES)
       return 0 /* Reaches */;
-    fresh = copiedFresh;
+    fresh = held === undefined && copiedFresh;
   }
   let valueCopy = value;
   if (isObject2(value)) {
@@ -3498,35 +3611,38 @@ function copyPayload(event, container) {
       return 0 /* Reaches */;
     fresh &&= copiedFresh;
   }
-  const oldCopy = isObject2(oldValue) ? cloneTreeUnless(oldValue, container) : oldValue;
-  if (oldCopy === REACHES)
-    return 0 /* Reaches */;
-  const oldValuesCopy = oldValues !== undefined && holdsObject(oldValues) ? cloneTreeUnless(oldValues, container) : oldValues;
-  if (oldValuesCopy === REACHES)
-    return 0 /* Reaches */;
+  if (removed) {
+    const oldCopy = isObject2(oldValue) ? cloneTreeUnless(oldValue, container) : oldValue;
+    if (oldCopy === REACHES)
+      return 0 /* Reaches */;
+    const oldValuesCopy = oldValues !== undefined && holdsObject(oldValues) ? cloneTreeUnless(oldValues, container) : oldValues;
+    if (oldValuesCopy === REACHES)
+      return 0 /* Reaches */;
+    if (isObject2(oldValue))
+      event.oldValue = oldCopy;
+    if (oldValues !== undefined)
+      event.oldValues = oldValuesCopy;
+  }
   if (isObject2(newValue))
     event.newValue = newCopy;
-  if (isObject2(oldValue))
-    event.oldValue = oldCopy;
   if (isObject2(value))
     event.value = valueCopy;
   if (items !== undefined)
     event.items = itemsCopy;
-  if (oldValues !== undefined)
-    event.oldValues = oldValuesCopy;
   return fresh ? 2 /* Fresh */ : 1 /* Done */;
 }
-function copyPayloadReaching(event, container, after) {
-  refuseAccessors(event, container, after);
-  copyPayloadAfter(event, container, after);
+function copyPayloadReaching(event, target, container, after) {
+  refuseAccessors(event, target.root.async, container, after);
+  copyPayloadAfter(event, target, container, after);
 }
-function copyPayloadAfter(event, container, after) {
+function copyPayloadAfter(event, target, container, after) {
   const { newValue, oldValue, value, items, oldValues } = event;
+  const removed = target.root.async;
   const newCopy = isObject2(newValue) ? cloneTreeAfter(newValue, container, after) : newValue;
-  const oldCopy = isObject2(oldValue) ? cloneTreeAfter(oldValue, container, after) : oldValue;
+  const oldCopy = removed && isObject2(oldValue) ? cloneTreeAfter(oldValue, container, after) : oldValue;
   const valueCopy = isObject2(value) ? cloneTreeAfter(value, container, after) : value;
   const itemsCopy = items !== undefined && holdsObject(items) ? cloneTreeAfter(items, container, after) : items;
-  const oldValuesCopy = oldValues !== undefined && holdsObject(oldValues) ? cloneTreeAfter(oldValues, container, after) : oldValues;
+  const oldValuesCopy = removed && oldValues !== undefined && holdsObject(oldValues) ? cloneTreeAfter(oldValues, container, after) : oldValues;
   if (isObject2(newValue))
     event.newValue = newCopy;
   if (isObject2(oldValue))
@@ -3570,12 +3686,15 @@ function enumerableData(object, key) {
   }
   return descriptor.value;
 }
-function refuseAccessors(event, container, after) {
-  const pending = [event.newValue, event.oldValue, event.value];
+function refuseAccessors(event, removed, container, after) {
+  const pending = [event.newValue, event.value];
   if (event.items !== undefined)
     pending.push(event.items);
-  if (event.oldValues !== undefined)
-    pending.push(event.oldValues);
+  if (removed) {
+    pending.push(event.oldValue);
+    if (event.oldValues !== undefined)
+      pending.push(event.oldValues);
+  }
   const seen = new Set;
   while (pending.length > 0) {
     const entry = pending.pop();
@@ -3825,6 +3944,8 @@ function heldBefore(value, replaced) {
     if (!isObject2(item) || nodes.get(item) !== undefined)
       continue;
     if (before === undefined) {
+      if (replaced.indexOf(item) === -1)
+        return;
       before = new Set;
       for (let j = 0;j < replaced.length; j++)
         if (isObject2(replaced[j]))
@@ -3835,7 +3956,12 @@ function heldBefore(value, replaced) {
   }
   return before;
 }
-function attachValue(value, parent, key, fresh, replaced) {
+function heldItems(value, replaced) {
+  if (!isObject2(value) || !isObject2(replaced) || nodes.get(replaced) === undefined)
+    return;
+  return heldBefore(value, replaced);
+}
+function attachValue(value, parent, key, fresh, replaced, held) {
   if (fresh)
     return;
   const former = isObject2(replaced) ? nodes.get(replaced) : undefined;
@@ -3847,7 +3973,6 @@ function attachValue(value, parent, key, fresh, replaced) {
   }
   if (existing === undefined && !hasObjectChild(value))
     return;
-  const held = former === undefined ? undefined : heldBefore(value, replaced);
   const touched = [];
   adoptAll(touched, former, held, (walk) => {
     const node = adopt(value, walk);
@@ -4324,7 +4449,7 @@ function wrapArray(arr, node) {
               newValue: target
             };
             if (event !== undefined)
-              copyPayloadAfter(event, target, after);
+              copyPayloadAfter(event, located, target, after);
             writeReorder(target, reorder);
             relinkReorder(node, target, before, prop === "fill" ? [args[0]] : undefined);
             if (event !== undefined)
@@ -4347,11 +4472,11 @@ function wrapArray(arr, node) {
               key: oldLength,
               items
             };
-            const copied = copyPayload(event, target);
+            const copied = copyPayload(event, located, target);
             if (copied === 0 /* Reaches */) {
               const after = target.slice();
               after.push(...items);
-              copyPayloadReaching(event, target, after);
+              copyPayloadReaching(event, located, target, after);
             }
             const result = target.push(...items);
             const newLength = target.length;
@@ -4382,10 +4507,10 @@ function wrapArray(arr, node) {
               key: poppedIndex,
               oldValue
             };
-            if (copyPayload(event, target) === 0 /* Reaches */) {
+            if (copyPayload(event, located, target) === 0 /* Reaches */) {
               const after = target.slice();
               after.pop();
-              copyPayloadReaching(event, target, after);
+              copyPayloadReaching(event, located, target, after);
             }
             const result = target.pop();
             const newLength = target.length;
@@ -4416,10 +4541,10 @@ function wrapArray(arr, node) {
               key: 0,
               oldValue
             };
-            if (copyPayload(event, target) === 0 /* Reaches */) {
+            if (copyPayload(event, located, target) === 0 /* Reaches */) {
               const after = target.slice();
               after.shift();
-              copyPayloadReaching(event, target, after);
+              copyPayloadReaching(event, located, target, after);
             }
             const result = target.shift();
             const newLength = target.length;
@@ -4447,11 +4572,11 @@ function wrapArray(arr, node) {
               key: 0,
               items
             };
-            const copied = copyPayload(event, target);
+            const copied = copyPayload(event, located, target);
             if (copied === 0 /* Reaches */) {
               const after = target.slice();
               after.unshift(...items);
-              copyPayloadReaching(event, target, after);
+              copyPayloadReaching(event, located, target, after);
             }
             const result = target.unshift(...items);
             const newLength = target.length;
@@ -4485,11 +4610,11 @@ function wrapArray(arr, node) {
               items: items.length > 0 ? items : undefined,
               oldValues: actualDeleteCount > 0 ? target.slice(actualStart, actualStart + actualDeleteCount) : undefined
             };
-            const copied = copyPayload(event, target);
+            const copied = copyPayload(event, located, target);
             if (copied === 0 /* Reaches */) {
               const after = target.slice();
               after.splice(actualStart, actualDeleteCount, ...items);
-              copyPayloadReaching(event, target, after);
+              copyPayloadReaching(event, located, target, after);
             }
             const deletedItems = target.splice(actualStart, actualDeleteCount, ...items);
             const newLength = target.length;
@@ -4593,11 +4718,12 @@ function wrapArray(arr, node) {
       const grows = prop === "length" && Number(value) > Number(oldValue);
       const located = emits ? grows ? locate(node) : locate(node, prop) : undefined;
       const event = located === undefined || grows ? undefined : { action: "set", path: located.paths[0], oldValue, newValue: value };
-      const copied = copyPayload(event, target);
+      const held = event !== undefined ? heldItems(value, oldValue) : undefined;
+      const copied = copyPayload(event, located, target, held);
       if (copied === 0 /* Reaches */) {
         const after = target.slice();
         Reflect.set(after, prop, value);
-        copyPayloadReaching(event, target, after);
+        copyPayloadReaching(event, located, target, after);
       }
       const result = Reflect.set(target, prop, value, receiver);
       if (result && emits) {
@@ -4608,17 +4734,21 @@ function wrapArray(arr, node) {
           if (isObject3(oldValue))
             detachPlace(oldValue, node, key);
           if (isObject3(value))
-            attachValue(value, node, key, copied === 2 /* Fresh */, located && oldValue);
+            attachValue(value, node, key, copied === 2 /* Fresh */, located && oldValue, held);
         }
         if (grows) {
           if (located !== undefined) {
             const oldLength = Number(oldValue);
             const newLength = Number(value);
+            const events = [];
             for (let i = oldLength;i < newLength; i++) {
               const index = String(i);
-              const paths = located.paths.map((path) => [...path, index]);
-              dispatch({ root: located.root, paths }, { action: "set", path: paths[0], newValue: undefined });
+              for (let j = 0;j < located.paths.length; j++) {
+                events.push({ action: "set", path: [...located.paths[j], index], newValue: undefined });
+              }
             }
+            if (events.length > 0)
+              deliver(located.root, events);
           }
         } else if (event !== undefined) {
           dispatch(located, event);
@@ -4637,10 +4767,10 @@ function wrapArray(arr, node) {
       const hadProperty = Object.prototype.hasOwnProperty.call(target, prop);
       const located = hadProperty ? locate(node, prop) : undefined;
       const event = located && { action: "delete", path: located.paths[0], oldValue };
-      if (copyPayload(event, target) === 0 /* Reaches */) {
+      if (copyPayload(event, located, target) === 0 /* Reaches */) {
         const after = target.slice();
         Reflect.deleteProperty(after, prop);
-        copyPayloadReaching(event, target, after);
+        copyPayloadReaching(event, located, target, after);
       }
       const result = Reflect.deleteProperty(target, prop);
       if (hadProperty && result) {
@@ -4705,16 +4835,17 @@ function wrapMap(map, node) {
             oldValue,
             newValue: value2
           };
-          const copied = copyPayload(event, target);
+          const held = located && heldItems(value2, oldValue);
+          const copied = copyPayload(event, located, target, held);
           if (copied === 0 /* Reaches */) {
-            copyPayloadReaching(event, target, shallowCopy(target).set(key, value2));
+            copyPayloadReaching(event, located, target, shallowCopy(target).set(key, value2));
           }
           target.set(key, value2);
           const newSize = target.size;
           if (isObject4(oldValue))
             detachPlace(oldValue, node, key);
           if (isObject4(value2))
-            attachValue(value2, node, key, copied === 2 /* Fresh */, located && oldValue);
+            attachValue(value2, node, key, copied === 2 /* Fresh */, located && oldValue, held);
           if (event !== undefined)
             dispatch(located, event);
           if (!existed) {
@@ -4745,10 +4876,10 @@ function wrapMap(map, node) {
             key,
             oldValue
           };
-          if (copyPayload(event, target) === 0 /* Reaches */) {
+          if (copyPayload(event, located, target) === 0 /* Reaches */) {
             const after = shallowCopy(target);
             after.delete(key);
-            copyPayloadReaching(event, target, after);
+            copyPayloadReaching(event, located, target, after);
           }
           const result = target.delete(key);
           const newSize = target.size;
@@ -4903,9 +5034,9 @@ function wrapSet(set, node) {
               path: located.paths[0],
               value: value2
             };
-            const copied = copyPayload(event, target);
+            const copied = copyPayload(event, located, target);
             if (copied === 0 /* Reaches */) {
-              copyPayloadReaching(event, target, shallowCopy(target).add(value2));
+              copyPayloadReaching(event, located, target, shallowCopy(target).add(value2));
             }
             target.add(value2);
             const newSize = target.size;
@@ -4935,10 +5066,10 @@ function wrapSet(set, node) {
               value: value2,
               oldValue
             };
-            if (copyPayload(event, target) === 0 /* Reaches */) {
+            if (copyPayload(event, located, target) === 0 /* Reaches */) {
               const after = shallowCopy(target);
               after.delete(value2);
-              copyPayloadReaching(event, target, after);
+              copyPayloadReaching(event, located, target, after);
             }
             const result = target.delete(value2);
             const newSize = target.size;
@@ -5091,8 +5222,13 @@ function reactive(obj, emit, path = [], options) {
   let fresh = false;
   if (emit && path.length === 0) {
     try {
-      const newValue = cloneStored(obj, undefined);
-      fresh = copiedFresh;
+      let newValue = obj;
+      if (!options?.async && isFresh(obj)) {
+        fresh = true;
+      } else {
+        newValue = cloneStored(obj, undefined);
+        fresh = copiedFresh;
+      }
       emit({ action: "replace", path: [], newValue });
     } catch (error) {
       if (error instanceof SnapshotLimitError)
@@ -5101,7 +5237,7 @@ function reactive(obj, emit, path = [], options) {
     }
   }
   const node = ensureLocationNode(obj);
-  node.root = { emit, path };
+  node.root = { emit, path, async: emit !== undefined && options?.async === true, undelivered: undefined };
   node.scope = node.root;
   if (emit && !fresh)
     adoptRoot(node);
@@ -5168,20 +5304,21 @@ function wrapObject(obj, node, options) {
         oldValue,
         newValue: value
       };
-      const copied = copyPayload(event, target);
+      const held = located && heldItems(value, oldValue);
+      const copied = copyPayload(event, located, target, held);
       if (copied === 0 /* Reaches */) {
         const after = shallowCopy(target);
         const descriptor = Reflect.getOwnPropertyDescriptor(target, prop);
         if (descriptor === undefined || descriptor.enumerable)
           setData(after, prop, value);
-        copyPayloadReaching(event, target, after);
+        copyPayloadReaching(event, located, target, after);
       }
       const result = Reflect.set(target, prop, value, receiver);
       if (result && emits) {
         if (isObject6(oldValue))
           detachPlace(oldValue, node, prop);
         if (isObject6(value))
-          attachValue(value, node, prop, copied === 2 /* Fresh */, located && oldValue);
+          attachValue(value, node, prop, copied === 2 /* Fresh */, located && oldValue, held);
         if (event !== undefined)
           dispatch(located, event);
         trigger(target, prop);
@@ -5200,10 +5337,10 @@ function wrapObject(obj, node, options) {
         path: located.paths[0],
         oldValue
       };
-      if (copyPayload(event, target) === 0 /* Reaches */) {
+      if (copyPayload(event, located, target) === 0 /* Reaches */) {
         const after = shallowCopy(target);
         delete after[prop];
-        copyPayloadReaching(event, target, after);
+        copyPayloadReaching(event, located, target, after);
       }
       const result = Reflect.deleteProperty(target, prop);
       if (hadProperty && result) {

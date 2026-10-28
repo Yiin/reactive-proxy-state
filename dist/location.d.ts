@@ -28,6 +28,21 @@ export declare const enum ContainerKind {
 export interface LocationRoot {
     emit: EmitFunction | undefined;
     path: Path;
+    /**
+     * The root emits on a later microtask (`{ async: true }`): its events
+     * wait, so they also copy what a write removes (see `copyPayload`).
+     */
+    async: boolean;
+    /**
+     * Events made under this root and not delivered yet, oldest first, while
+     * a write that made several is delivering them (see `deliver`).
+     */
+    undelivered: Undelivered | undefined;
+}
+/** A root's queue: `events[next]` is the oldest event not delivered yet. */
+interface Undelivered {
+    events: StateEvent[];
+    next: number;
 }
 export declare class Place {
     private readonly parentRef;
@@ -103,8 +118,26 @@ export declare function isAttached(node: LocationNode): boolean;
  * further path gets copies of those copies, all made before the first emit,
  * so a listener that changes a payload cannot change another, and two
  * remote places never share one object. The first path gets `event` itself.
+ * What the write removed is copied per path only where `copyPayload` copied
+ * it (an async root); otherwise every path carries the removed value itself.
  */
 export declare function dispatch(target: Target, event: StateEvent): void;
+/**
+ * Deliver the `events` of one write to `root.emit`, in order, after the
+ * events earlier writes left undelivered under this root.
+ *
+ * A listener can write while it receives an event. That write changed the
+ * state after the events still waiting (the other places of an alias), so
+ * its own events go after them: it adds them to the root's queue, then
+ * delivers the queue from the oldest event, before it returns. So events
+ * reach `emit` in the order the state changed, every write is delivered
+ * before it returns, and a write made while nothing waits is delivered at
+ * once, inside the listener call that made it.
+ *
+ * An `emit` that throws drops the events of this root not delivered yet; the
+ * error reaches the write that was delivering them.
+ */
+export declare function deliver(root: LocationRoot, events: StateEvent[]): void;
 /** What `copyPayload` did. */
 export declare const enum Copied {
     /** Nothing: the payload reaches its container (see `copyPayloadReaching`). */
@@ -128,12 +161,22 @@ export declare const enum Copied {
  * holds no object. A payload too large to copy throws a `SnapshotLimitError`
  * and leaves `event` as it was, so the write is never made.
  *
+ * What the write stores (`newValue`, `value`, `items`) is always copied: it
+ * stays in the tree, where later writes change it, and a replica needs it
+ * as it was. What the write removes (`oldValue`, `oldValues`) is copied only
+ * for an async root (`target.root.async`), whose events wait for a
+ * microtask. A synchronous root delivers the event before the write
+ * returns, and sends the removed value itself, as 1.0.44 did.
+ *
  * A payload that reaches `container` would be copied as `container` is
  * before the write. Then nothing is copied and the result is
  * `Copied.Reaches`: the caller makes the write on `shallowCopy(container)`
  * and copies with `copyPayloadReaching`, still before the write.
+ *
+ * `held` comes from `heldItems` for the store of `newValue`: the place walk
+ * of that store skips those items, so the copy does not check freshness.
  */
-export declare function copyPayload(event: StateEvent | undefined, container: object): Copied;
+export declare function copyPayload(event: StateEvent | undefined, target: Target | undefined, container: object, held?: Set<object>): Copied;
 /**
  * `copyPayloadAfter` for a write that `copyPayload` refused because its
  * payload reaches `container`. A getter in that payload would be read
@@ -141,7 +184,7 @@ export declare function copyPayload(event: StateEvent | undefined, container: ob
  * property in it is refused (an `UnsupportedStateError`) without being
  * read. `after` comes from `shallowCopy`, which refuses the container's own.
  */
-export declare function copyPayloadReaching(event: StateEvent, container: object, after: object): void;
+export declare function copyPayloadReaching(event: StateEvent, target: Target, container: object, after: object): void;
 /**
  * Like `copyPayload`, for a payload that reaches `container`: `after` (a
  * `shallowCopy` of `container` with the write made on it) stands in for
@@ -149,7 +192,7 @@ export declare function copyPayloadReaching(event: StateEvent, container: object
  * before the write. Throws a `SnapshotLimitError` when it is too large to
  * copy; the write is then never made, and nothing needs to be put back.
  */
-export declare function copyPayloadAfter(event: StateEvent, container: object, after: object): void;
+export declare function copyPayloadAfter(event: StateEvent, target: Target, container: object, after: object): void;
 /**
  * A copy of `container` (raw) that holds the same entries, of the same kind
  * and prototype: an array holds the same items, a map the same entries, a
@@ -172,12 +215,20 @@ export declare function notePlace(node: LocationNode, parent: LocationNode, key:
 /** `parent[key]` no longer holds `value`. */
 export declare function detachPlace(value: object, parent: LocationNode, key: unknown): void;
 /**
+ * `heldBefore` for a store of `value` over `replaced`, the value it writes
+ * over when its container was in the tree (see `attachedBefore`); undefined
+ * when `replaced` has no node. Made before the write, for `copyPayload` and
+ * `attachValue`.
+ */
+export declare function heldItems(value: unknown, replaced: unknown): Set<object> | undefined;
+/**
  * `parent[key]` now holds `value` (a raw object). A `fresh` value (the copy
  * this store made found it fresh, see `cloneStored`) has nothing to place.
  * `replaced` is the value the store wrote over, when `parent` was in the
- * tree before the store (see `attachedBefore`).
+ * tree before the store (see `attachedBefore`), and `held` is
+ * `heldItems(value, replaced)`.
  */
-export declare function attachValue(value: object, parent: LocationNode, key: unknown, fresh: boolean, replaced?: unknown): void;
+export declare function attachValue(value: object, parent: LocationNode, key: unknown, fresh: boolean, replaced?: unknown, held?: Set<object>): void;
 /**
  * A new root: give places to the objects in its initial value that need
  * them now, which are the aliases (an object at two places) and the
@@ -204,3 +255,4 @@ export declare function relinkReorder(arrayNode: LocationNode, array: readonly u
 export declare function evictDeep(value: any, parent?: LocationNode): void;
 /** The proxy an evicted object had, if it is still alive; it goes back in the caches. */
 export declare function restoreEvicted(node: LocationNode): object | undefined;
+export {};
