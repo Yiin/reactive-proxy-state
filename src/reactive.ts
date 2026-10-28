@@ -13,7 +13,7 @@ import {
   locate,
   notePlace,
   restoreEvicted,
-  copyPayloadAfter,
+  copyPayloadReaching,
   setData,
   shallowCopy,
 } from "./location";
@@ -220,7 +220,7 @@ function wrapObject<T extends object>(obj: T, node: LocationNode, options?: Reac
         const after = shallowCopy(target);
         // a non-enumerable property stays out of copies, written or not
         if (descriptor === undefined || descriptor.enumerable) setData(after, prop, value);
-        copyPayloadAfter(event!, target, after);
+        copyPayloadReaching(event!, target, after);
       }
       const result = Reflect.set(target, prop, value, receiver);
 
@@ -256,7 +256,7 @@ function wrapObject<T extends object>(obj: T, node: LocationNode, options?: Reac
       if (!copyPayload(event, target)) {
         const after = shallowCopy(target);
         delete after[prop];
-        copyPayloadAfter(event!, target, after);
+        copyPayloadReaching(event!, target, after);
       }
       const result = Reflect.deleteProperty(target, prop);
 

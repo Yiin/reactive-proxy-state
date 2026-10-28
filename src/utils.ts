@@ -298,6 +298,20 @@ export class SnapshotLimitError extends RangeError {
 }
 
 /**
+ * A write the library cannot synchronize, refused before anything changed.
+ * See "Supported inputs" under "Synchronization Limits" in the README.
+ */
+export class UnsupportedStateError extends TypeError {
+    constructor(problem: string) {
+        super(
+            `reactive-proxy-state: ${problem}. Nothing was changed. See "Supported inputs" under ` +
+            `"Synchronization Limits" in the README`
+        );
+        this.name = 'UnsupportedStateError';
+    }
+}
+
+/**
  * Copies a snapshot makes before it measures its whole value against the
  * limit. Extra copies never outnumber copies, so a smaller snapshot cannot
  * pass the limit and is never measured.

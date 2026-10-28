@@ -14,7 +14,7 @@ import {
   dispatch,
   evictDeep,
   locate,
-  copyPayloadAfter,
+  copyPayloadReaching,
   shallowCopy,
 } from "./location";
 import type { StateEvent } from "./types";
@@ -81,7 +81,7 @@ export function wrapMap<K, V>(map: Map<K, V>, node: LocationNode): Map<K, V> {
           };
           // copies the payload, or throws, before the write
           if (!copyPayload(event, target)) {
-            copyPayloadAfter(event!, target, shallowCopy(target).set(key, value));
+            copyPayloadReaching(event!, target, shallowCopy(target).set(key, value));
           }
           target.set(key, value);
           const newSize = target.size;
@@ -124,7 +124,7 @@ export function wrapMap<K, V>(map: Map<K, V>, node: LocationNode): Map<K, V> {
           if (!copyPayload(event, target)) {
             const after = shallowCopy(target);
             after.delete(key);
-            copyPayloadAfter(event!, target, after);
+            copyPayloadReaching(event!, target, after);
           }
           const result = target.delete(key);
           const newSize = target.size;

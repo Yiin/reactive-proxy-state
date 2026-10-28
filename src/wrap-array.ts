@@ -18,6 +18,7 @@ import {
   relinkArray,
   relinkReorder,
   copyPayloadAfter,
+  copyPayloadReaching,
 } from "./location";
 import { track, trigger } from "./watch-effect";
 import { ReactiveFlags } from "./constants";
@@ -69,18 +70,100 @@ function unwrapItems(items: any[]): void {
   }
 }
 
+const hasOwn = Object.prototype.hasOwnProperty;
+
 /**
- * Write `sorted` (a copy of `target` that `sort` sorted) into `target` the
- * way native `sort` writes its result: every index in order, the holes at
- * the end deleted, and a TypeError for a write or delete that fails.
+ * A reorder (`sort`, `reverse`, `fill`, `copyWithin`) planned on a copy:
+ * `after` is the array as the reorder leaves it, and the reorder writes or
+ * deletes the indexes from `first` up to `last`, except `skip`, the ones
+ * native code writes.
  */
-function writeSorted(target: unknown[], sorted: readonly unknown[]): void {
-  for (let i = 0; i < sorted.length; i++) {
-    if (i in sorted) {
-      if (!Reflect.set(target, i, sorted[i])) throw new TypeError(`Cannot assign to read only property '${i}'`);
-    } else if (!Reflect.deleteProperty(target, i)) {
-      throw new TypeError(`Cannot delete property '${i}'`);
+interface Reorder {
+  after: unknown[];
+  first: number;
+  last: number;
+  skip: number;
+}
+
+/**
+ * Plan `method` (a reorder) with `args` on a copy of `target`. Bounds are
+ * converted once, in native order, after the length is read; the copy and
+ * the write use the same numbers. `sort` runs its comparator here, on the
+ * copy, and returns what native sort returns: the items it read, sorted,
+ * then any tail the comparator appended.
+ */
+function planReorder(target: unknown[], prop: string | symbol, method: Function, args: any[]): Reorder {
+  const length = target.length;
+  if (prop === "fill" || prop === "copyWithin") {
+    const fill = prop === "fill";
+    const to = fill ? 0 : clampIndex(toIntegerOrInfinity(args[0]), length);
+    const start = clampIndex(toIntegerOrInfinity(args[1]), length);
+    const end = args[2] === undefined ? length : clampIndex(toIntegerOrInfinity(args[2]), length);
+    // a bound's valueOf may have changed the array: the copy is taken now
+    const after = target.slice();
+    method.call(after, fill ? args[0] : to, start, end);
+    const size = after.length;
+    if (fill) return { after, first: Math.min(start, size), last: Math.min(end, size), skip: -1 };
+    const from = Math.min(to, size);
+    const count = Math.min(Math.min(end, size) - Math.min(start, size), size - from);
+    return { after, first: from, last: from + Math.max(count, 0), skip: -1 };
+  }
+  const after = target.slice();
+  method.apply(after, args);
+  if (prop === "reverse") {
+    // the middle of an odd length stays where it is
+    return { after, first: 0, last: length, skip: length % 2 === 1 ? (length - 1) / 2 : -1 };
+  }
+  // sort: an array shorter than two is not written, as the engine does
+  const sorted = length < 2 ? 0 : length;
+  for (let i = length; i < target.length; i++) {
+    if (hasOwn.call(target, i)) after[i] = target[i];
+    else after.length = i + 1;
+  }
+  return { after, first: 0, last: sorted, skip: -1 };
+}
+
+/**
+ * Throw a TypeError, before any write, when `target` would refuse a write
+ * of `reorder`: a read-only index, a hole in a non-extensible array, or a
+ * non-configurable index to delete. A write of the value an index holds
+ * changes nothing and fails exactly when the index is read-only.
+ */
+function checkReorder(target: unknown[], reorder: Reorder): void {
+  const { after, first, last, skip } = reorder;
+  let extensible: boolean | undefined;
+  for (let i = first; i < last; i++) {
+    if (i === skip) continue;
+    if (hasOwn.call(after, i)) {
+      if (hasOwn.call(target, i)) {
+        if (!Reflect.set(target, i, target[i])) throw new TypeError(`Cannot assign to read only property '${i}' of array`);
+      } else if (!(extensible ??= Object.isExtensible(target))) {
+        throw new TypeError(`Cannot add property ${i}, array is not extensible`);
+      }
+    } else if (hasOwn.call(target, i) && !Reflect.getOwnPropertyDescriptor(target, i)!.configurable) {
+      throw new TypeError(`Cannot delete property '${i}' of array`);
     }
+  }
+}
+
+/** Does `after` differ from `target` anywhere: a value (`Object.is`) or a hole? */
+function reorderChanges(target: unknown[], after: unknown[]): boolean {
+  if (after.length !== target.length) return true;
+  for (let i = 0; i < after.length; i++) {
+    const value = after[i];
+    if (!Object.is(value, target[i])) return true;
+    if (value === undefined && hasOwn.call(after, i) !== hasOwn.call(target, i)) return true;
+  }
+  return false;
+}
+
+/** Make the writes of `reorder` (checked by `checkReorder`) on `target`. */
+function writeReorder(target: unknown[], reorder: Reorder): void {
+  const { after, first, last, skip } = reorder;
+  for (let i = first; i < last; i++) {
+    if (i === skip) continue;
+    if (hasOwn.call(after, i)) target[i] = after[i];
+    else delete target[i];
   }
 }
 
@@ -120,20 +203,16 @@ export function wrapArray<T extends any[]>(arr: T, node: LocationNode): T {
           const method = (Array.prototype as any)[prop] as Function;
           methodCache[prop] = function (...args: any[]): T {
             if (prop === "fill" && isObject(args[0])) args[0] = unwrapForStore(args[0]);
-            const before = target.slice();
-            // the change is made on a copy first: the payload is the array
+            // the change is planned on a copy first: the payload is the array
             // itself, copied as it will be, or refused, before the write
-            const after = target.slice();
-            method.apply(after, args);
-            let changed = false;
-            for (let i = 0; i < before.length; i++) {
-              if (before[i] !== after[i]) {
-                changed = true;
-                break;
-              }
-            }
+            const reorder = planReorder(target, prop, method, args);
+            // what the write replaces, after anything the comparator wrote
+            const before = target.slice();
+            checkReorder(target, reorder);
+            const after = reorder.after;
+            if (!reorderChanges(target, after)) return proxy;
             // the reorder does not move `target`, so its paths are known before it
-            const located = changed ? locate(node) : undefined;
+            const located = locate(node);
             const event: StateEvent | undefined = located && {
               action: "replace",
               path: located.paths[0],
@@ -141,11 +220,7 @@ export function wrapArray<T extends any[]>(arr: T, node: LocationNode): T {
               newValue: target,
             };
             if (event !== undefined) copyPayloadAfter(event, target, after);
-            // the same change on the array, with the native checks (a frozen
-            // item throws); only `sort` runs user code, so it is not run twice
-            if (prop === "sort") writeSorted(target, after);
-            else method.apply(target, args);
-            if (!changed) return proxy;
+            writeReorder(target, reorder);
             relinkReorder(node, target, before, prop === "fill" ? [args[0]] : undefined);
             if (event !== undefined) dispatch(located!, event);
             trigger(target, Symbol.iterator);
@@ -170,7 +245,7 @@ export function wrapArray<T extends any[]>(arr: T, node: LocationNode): T {
             if (!copyPayload(event, target)) {
               const after = target.slice();
               after.push(...items);
-              copyPayloadAfter(event!, target, after);
+              copyPayloadReaching(event!, target, after);
             }
             const result = target.push(...items);
             const newLength = target.length;
@@ -202,7 +277,7 @@ export function wrapArray<T extends any[]>(arr: T, node: LocationNode): T {
             if (!copyPayload(event, target)) {
               const after = target.slice();
               after.pop();
-              copyPayloadAfter(event!, target, after);
+              copyPayloadReaching(event!, target, after);
             }
             const result = target.pop();
             const newLength = target.length;
@@ -232,7 +307,7 @@ export function wrapArray<T extends any[]>(arr: T, node: LocationNode): T {
             if (!copyPayload(event, target)) {
               const after = target.slice();
               after.shift();
-              copyPayloadAfter(event!, target, after);
+              copyPayloadReaching(event!, target, after);
             }
             const result = target.shift();
             const newLength = target.length;
@@ -261,7 +336,7 @@ export function wrapArray<T extends any[]>(arr: T, node: LocationNode): T {
             if (!copyPayload(event, target)) {
               const after = target.slice();
               after.unshift(...items);
-              copyPayloadAfter(event!, target, after);
+              copyPayloadReaching(event!, target, after);
             }
             const result = target.unshift(...items);
             const newLength = target.length;
@@ -306,7 +381,7 @@ export function wrapArray<T extends any[]>(arr: T, node: LocationNode): T {
             if (!copyPayload(event, target)) {
               const after = target.slice();
               after.splice(actualStart, actualDeleteCount, ...items);
-              copyPayloadAfter(event!, target, after);
+              copyPayloadReaching(event!, target, after);
             }
             const deletedItems = target.splice(actualStart, actualDeleteCount, ...items);
             const newLength = target.length;
@@ -451,7 +526,7 @@ export function wrapArray<T extends any[]>(arr: T, node: LocationNode): T {
       if (!copyPayload(event, target)) {
         const after = target.slice();
         Reflect.set(after, prop, value);
-        copyPayloadAfter(event!, target, after);
+        copyPayloadReaching(event!, target, after);
       }
       const result = Reflect.set(target, prop, value, receiver);
 
@@ -495,7 +570,7 @@ export function wrapArray<T extends any[]>(arr: T, node: LocationNode): T {
       if (!copyPayload(event, target)) {
         const after = target.slice();
         Reflect.deleteProperty(after, prop);
-        copyPayloadAfter(event!, target, after);
+        copyPayloadReaching(event!, target, after);
       }
       const result = Reflect.deleteProperty(target, prop);
 

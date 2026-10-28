@@ -8,7 +8,7 @@ import {
   dispatch,
   evictDeep,
   locate,
-  copyPayloadAfter,
+  copyPayloadReaching,
   shallowCopy,
 } from "./location";
 import type { StateEvent } from "./types";
@@ -63,7 +63,7 @@ export function wrapSet<T>(set: Set<T>, node: LocationNode): Set<T> {
             };
             // copies the payload, or throws, before the write
             if (!copyPayload(event, target)) {
-              copyPayloadAfter(event!, target, shallowCopy(target).add(value));
+              copyPayloadReaching(event!, target, shallowCopy(target).add(value));
             }
             target.add(value);
             const newSize = target.size;
@@ -96,7 +96,7 @@ export function wrapSet<T>(set: Set<T>, node: LocationNode): Set<T> {
             if (!copyPayload(event, target)) {
               const after = shallowCopy(target);
               after.delete(value);
-              copyPayloadAfter(event!, target, after);
+              copyPayloadReaching(event!, target, after);
             }
             const result = target.delete(value);
             const newSize = target.size;

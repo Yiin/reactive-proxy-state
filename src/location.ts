@@ -1,6 +1,16 @@
 import { ReactiveFlags } from "./constants";
 import type { EmitFunction, Path, StateEvent } from "./types";
-import { REACHES, cloneTree, cloneTreeAfter, cloneTreeUnless, globalSeen, wrapperCache, proxyStats, toRaw } from "./utils";
+import {
+  REACHES,
+  UnsupportedStateError,
+  cloneTree,
+  cloneTreeAfter,
+  cloneTreeUnless,
+  globalSeen,
+  wrapperCache,
+  proxyStats,
+  toRaw,
+} from "./utils";
 
 /**
  * Where each wrapped object sits in its state tree.
@@ -357,6 +367,18 @@ export function copyPayload(event: StateEvent | undefined, container: object): b
 }
 
 /**
+ * `copyPayloadAfter` for a write that `copyPayload` refused because its
+ * payload reaches `container`. A getter in that payload would be read
+ * before the write, and could give another value after it, so an accessor
+ * property in it is refused (an `UnsupportedStateError`) without being
+ * read. `after` comes from `shallowCopy`, which refuses the container's own.
+ */
+export function copyPayloadReaching(event: StateEvent, container: object, after: object): void {
+  refuseAccessors(event, container, after);
+  copyPayloadAfter(event, container, after);
+}
+
+/**
  * Like `copyPayload`, for a payload that reaches `container`: `after` (a
  * `shallowCopy` of `container` with the write made on it) stands in for
  * `container`, so the payload is copied as it will be after the write,
@@ -388,23 +410,69 @@ function holdsObject(values: readonly unknown[]): boolean {
  * and prototype: an array holds the same items, a map the same entries, a
  * set the same members, an object the same own enumerable properties (as
  * data). A write is made on it to copy a payload as it will be after that
- * write (see `copyPayloadAfter`).
+ * write (see `copyPayloadReaching`). An own enumerable accessor of an object
+ * is refused (an `UnsupportedStateError`) without being read.
  */
 export function shallowCopy(container: object): any {
   if (Array.isArray(container)) return container.slice();
   if (container instanceof Map) return new Map(container);
   if (container instanceof Set) return new Set(container);
   const copy = Object.create(Object.getPrototypeOf(container));
-  for (const key in container) {
-    if (Object.prototype.hasOwnProperty.call(container, key)) setData(copy, key, (container as any)[key]);
-  }
-  const symbolKeys = Object.getOwnPropertySymbols(container);
-  for (let i = 0; i < symbolKeys.length; i++) {
-    if (Object.prototype.propertyIsEnumerable.call(container, symbolKeys[i])) {
-      setData(copy, symbolKeys[i], (container as any)[symbolKeys[i]]);
-    }
+  const keys = Reflect.ownKeys(container);
+  for (let i = 0; i < keys.length; i++) {
+    const value = enumerableData(container, keys[i]);
+    if (value !== NOT_ENUMERABLE) setData(copy, keys[i], value);
   }
   return copy;
+}
+
+const NOT_ENUMERABLE = Symbol("not enumerable");
+
+/** The value of `object[key]` when it is an own enumerable data property; refuses an accessor. */
+function enumerableData(object: object, key: PropertyKey): unknown {
+  const descriptor = Reflect.getOwnPropertyDescriptor(object, key)!;
+  if (!descriptor.enumerable) return NOT_ENUMERABLE;
+  if (descriptor.get !== undefined || descriptor.set !== undefined) {
+    throw new UnsupportedStateError(
+      `the accessor property '${String(key)}' sits in a payload that reaches back into the ` +
+        `object it is written to, and a getter cannot be read as it will be after the write`
+    );
+  }
+  return descriptor.value;
+}
+
+/**
+ * Refuse (see `copyPayloadReaching`) an own enumerable accessor anywhere in
+ * the payload of `event`, reading `after` for `container`, without calling
+ * it. Array indexes are not checked: an accessor index is a descriptor
+ * change, outside the supported input.
+ */
+function refuseAccessors(event: StateEvent, container: object, after: object): void {
+  const pending: unknown[] = [event.newValue, event.oldValue, event.value];
+  if (event.items !== undefined) pending.push(event.items);
+  if (event.oldValues !== undefined) pending.push(event.oldValues);
+  const seen = new Set<object>();
+  while (pending.length > 0) {
+    const entry = pending.pop();
+    if (!isObject(entry)) continue;
+    let value: object = toRaw(entry);
+    if (value === container) value = after;
+    if (seen.has(value)) continue;
+    seen.add(value);
+    if (Array.isArray(value)) {
+      for (let i = 0; i < value.length; i++) pending.push(value[i]);
+    } else if (value instanceof Map) {
+      for (const [key, item] of value) pending.push(key, item);
+    } else if (value instanceof Set) {
+      for (const item of value) pending.push(item);
+    } else if (!(value instanceof Date)) {
+      const keys = Reflect.ownKeys(value);
+      for (let i = 0; i < keys.length; i++) {
+        const item = enumerableData(value, keys[i]);
+        if (item !== NOT_ENUMERABLE) pending.push(item);
+      }
+    }
+  }
 }
 
 /**
