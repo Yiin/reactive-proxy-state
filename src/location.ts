@@ -646,8 +646,9 @@ function enumerableData(object: object, key: PropertyKey): unknown {
 /**
  * Refuse (see `copyPayloadReaching`) an own enumerable accessor anywhere in
  * the payload of `event` that is copied (what the write removes only when
- * `removed`), reading `after` for `container`, without calling it. Array indexes are not checked: an accessor index is a descriptor
- * change, outside the supported input.
+ * `removed`), reading `after` for `container`, without calling it. Array
+ * indexes are not checked: an accessor index is a descriptor change,
+ * outside the supported input.
  */
 function refuseAccessors(event: StateEvent, removed: boolean, container: object, after: object): void {
   const pending: unknown[] = [event.newValue, event.value];

@@ -101,12 +101,12 @@ export function reactive<T extends object>(
   }
 
   // if this is the root call (path is empty) and an emit function is provided,
-  // emit the initial state event. Its payload is a copy when a later write
-  // could reach the listener through it: the event waits for a microtask
-  // (`async`), or the value holds an object at two places (the remote needs
-  // one copy per place) or objects another root knows. Otherwise the event
-  // carries `obj` itself, as 1.0.44 did: a synchronous listener reads it
-  // before the first write. A value too large to copy (see
+  // emit the initial state event. Its payload is a copy when the event
+  // waits for a microtask (`async`), or when the value is not fresh (see
+  // `isFresh`): an object at two places or a cycle (the remote needs one
+  // copy per place), a proxy, or an object another root knows. Otherwise
+  // the event carries `obj` itself, as 1.0.44 did: a synchronous listener
+  // reads it before the first write. A value too large to copy (see
   // SNAPSHOT_SHARED_COPY_LIMIT) throws here, before the root has a proxy.
   let fresh = false;
   if (emit && path.length === 0) {
