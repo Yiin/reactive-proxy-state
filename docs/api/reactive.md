@@ -122,8 +122,13 @@ b.xp = 12; // emits { action: 'set', path: ['list', '0', 'xp'], ... }
 - `splice`, `shift`, `unshift`, `pop`, `push`, index writes, `length` writes, whole-array replacement and map or set changes all move the paths of the objects they keep, at any depth.
 - `sort`, `reverse`, `fill` and `copyWithin` emit one `replace` event with the array's new contents as `newValue` and the old items as `oldValue`, and return the proxy.
 - A proxy whose object left the tree emits nothing. If the object comes back, its proxy emits at the new place.
-- An object placed at two places (`list[0] = list[1]`) emits one event per place for each write, because a replica holds a copy at each place. Event payloads never share objects between places.
+- An object placed at two places (`list[0] = list[1]`) emits one event per place for each write, because a replica holds a copy at each place. Event payloads never share objects between places. The places are found when a value is stored (root creation, assignment, insertion, `sort`, `reverse`, `fill`, `copyWithin`), not when it is read.
 - An object reachable from two roots emits only to the root it was first read under.
+- Every payload (`newValue`, `oldValue`, `value`, `items`, `oldValues`, also the initial `replace`) is a deep copy made with the event. A later write cannot change an event that waits in a queue (`{ async: true }`, or your own).
+- `splice` normalizes its arguments like `Array.prototype.splice` (fractions, `NaN`, negatives, omitted or `undefined` arguments); the event's `key` and `deleteCount` are the normalized numbers.
+- A write through a proxy whose object left the tree emits nothing and adds one to `getProxyStats().detachedWrites`.
+
+Map and set limits for synchronization are listed in the README under "Synchronization Limits".
 
 When forwarding events across workers or other structured-clone boundaries, convert them first:
 
