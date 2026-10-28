@@ -251,3 +251,181 @@ describe("cycles are counted with their ancestors", () => {
     expect(() => cloneTree(raw)).toThrow(SnapshotLimitError);
   });
 });
+
+describe("a refusal needs no rollback", () => {
+  // the review's regressions: a refusal that put the container back after
+  // the write lost child places, broke on a non-configurable index and
+  // restarted live iterators
+  for (const async of [false, true]) {
+    for (const method of ["reverse", "sort", "fill", "copyWithin"] as const) {
+      test(`refused ${method} keeps cyclic child locations, async=${async}`, async () => {
+        const raw: any[] = [];
+        const child: any = { n: 0, back: raw };
+        raw.push(child, { n: 1 });
+        const events: any[] = [];
+        const state: any = reactive(raw, (event) => events.push(event), [], { async });
+        const held = state[0];
+        state.push(dag(15));
+        state.push(dag(15));
+        await Promise.resolve();
+        events.length = 0;
+        const before = raw.slice();
+        const act = () =>
+          method === "sort"
+            ? state.sort((left: any, right: any) => (right.n ?? 9) - (left.n ?? 9))
+            : method === "fill"
+              ? state.fill({ n: 3 }, 0, 1)
+              : method === "copyWithin"
+                ? state.copyWithin(0, 1, 2)
+                : state.reverse();
+        expect(act).toThrow(SnapshotLimitError);
+        expect(raw.every((item, index) => item === before[index])).toBe(true);
+        await Promise.resolve();
+        expect(events.length).toBe(0);
+        held.n = 7;
+        await Promise.resolve();
+        expect(events.map((event) => event.path)).toEqual([["0", "n"]]);
+      });
+    }
+  }
+
+  test("a non-configurable index survives a refused write that reaches back into its array", () => {
+    const child = { n: 1 };
+    const raw: any[] = [0, child];
+    Object.defineProperty(raw, "0", { configurable: false });
+    const events: unknown[] = [];
+    const state: any = reactive(raw, (event) => events.push(event));
+    events.length = 0;
+    let error: any;
+    try {
+      state[1] = { back: raw, data: dag(17) };
+    } catch (caught) {
+      error = caught;
+    }
+    expect({ error: error?.name, length: raw.length, child: raw[1] === child, events: events.length }).toEqual({
+      error: "SnapshotLimitError",
+      length: 2,
+      child: true,
+      events: 0,
+    });
+  });
+
+  for (const kind of ["map", "set"] as const) {
+    test(`a refused ${kind} insertion keeps an active iterator`, () => {
+      const raw: any = kind === "map" ? new Map([["a", 1], ["b", 2]]) : new Set([1, 2]);
+      const state: any = reactive(raw, () => {});
+      const iterator = state.values();
+      expect(iterator.next().value).toBe(1);
+      const value = { back: raw, data: dag(17) };
+      expect(() => (kind === "map" ? state.set("new", value) : state.add(value))).toThrow(SnapshotLimitError);
+      expect([...iterator]).toEqual([2]);
+    });
+  }
+
+  /** What `container` holds: entries, members, or own keys with their descriptors. */
+  function contents(container: any): unknown[] {
+    if (container instanceof Map) return [...container].flat();
+    if (container instanceof Set) return [...container];
+    return Reflect.ownKeys(container).flatMap((key) => {
+      const descriptor = Reflect.getOwnPropertyDescriptor(container, key)!;
+      return [key, descriptor.value, descriptor.writable, descriptor.enumerable, descriptor.configurable];
+    });
+  }
+
+  /** A value that points back into `container` and is too large to copy. */
+  const reaching = (container: object) => ({ back: container, data: dag(17) });
+
+  type WritePath = {
+    name: string;
+    make: () => any;
+    /** Stores a value through the raw object, before the proxies are made. */
+    setup?: (raw: any) => unknown;
+    write: (state: any, raw: any) => unknown;
+  };
+  const writePaths: WritePath[] = [
+    { name: "object set", make: () => ({ a: 1 }), write: (state, raw) => (state.b = reaching(raw)) },
+    {
+      name: "object set over an old value that reaches back",
+      make: () => ({ a: 1 }),
+      setup: (raw) => (raw.b = reaching(raw)),
+      write: (state) => (state.b = 2),
+    },
+    {
+      name: "object delete",
+      make: () => ({ a: 1 }),
+      setup: (raw) => (raw.b = reaching(raw)),
+      write: (state) => delete state.b,
+    },
+    { name: "array index write", make: () => [1, 2], write: (state, raw) => (state[1] = reaching(raw)) },
+    { name: "array index write past the end", make: () => [1, 2], write: (state, raw) => (state[4] = reaching(raw)) },
+    {
+      name: "array delete",
+      make: () => [1, 2],
+      setup: (raw) => raw.push(reaching(raw)),
+      write: (state) => delete state[2],
+    },
+    { name: "push", make: () => [1, 2], write: (state, raw) => state.push(reaching(raw)) },
+    { name: "unshift", make: () => [1, 2], write: (state, raw) => state.unshift(reaching(raw)) },
+    { name: "splice insertion", make: () => [1, 2], write: (state, raw) => state.splice(1, 0, reaching(raw)) },
+    {
+      name: "splice removal",
+      make: () => [1, 2],
+      setup: (raw) => raw.push(reaching(raw)),
+      write: (state) => state.splice(2, 1),
+    },
+    { name: "pop", make: () => [1, 2], setup: (raw) => raw.push(reaching(raw)), write: (state) => state.pop() },
+    { name: "shift", make: () => [1, 2], setup: (raw) => raw.unshift(reaching(raw)), write: (state) => state.shift() },
+    {
+      name: "map set",
+      make: () => new Map<any, any>([["a", 1]]),
+      write: (state, raw) => state.set("b", reaching(raw)),
+    },
+    {
+      name: "map delete",
+      make: () => new Map<any, any>([["a", 1]]),
+      setup: (raw) => raw.set("b", reaching(raw)),
+      write: (state) => state.delete("b"),
+    },
+    { name: "set add", make: () => new Set<any>([1]), write: (state, raw) => state.add(reaching(raw)) },
+    {
+      name: "set delete",
+      make: () => new Set<any>([1]),
+      setup: (raw) => raw.add(reaching(raw)),
+      write: (state, raw) => state.delete([...raw].find((member: any) => typeof member === "object")),
+    },
+  ];
+
+  for (const { name, make, setup, write } of writePaths) {
+    test(`${name}: a refused payload that reaches back into its container writes nothing`, () => {
+      const child = { n: 1 };
+      const raw = make();
+      const collection = raw instanceof Map || raw instanceof Set;
+      // a non-configurable property, which a delete-and-redefine rollback cannot restore
+      if (!collection) Object.defineProperty(raw, "0", { configurable: false });
+      const events: any[] = [];
+      const state: any = reactive({ child, box: raw }, (event) => events.push(event));
+      // stored raw, after the root: a root over the limit is refused
+      setup?.(raw);
+      const box = state.box;
+      const held = state.child;
+      const iterator = collection ? box.values() : undefined;
+      iterator?.next();
+      events.length = 0;
+      const before = contents(raw);
+      let error: unknown;
+      try {
+        write(box, raw);
+      } catch (caught) {
+        error = caught;
+      }
+      expect(error).toBeInstanceOf(SnapshotLimitError);
+      const after = contents(raw);
+      expect(after.length).toBe(before.length);
+      for (let i = 0; i < before.length; i++) expect(after[i]).toBe(before[i]);
+      expect(events.length).toBe(0);
+      if (iterator !== undefined) expect([...iterator].length).toBe(raw.size - 1);
+      held.n = 2;
+      expect(events.map((event) => event.path)).toEqual([["child", "n"]]);
+    });
+  }
+});
