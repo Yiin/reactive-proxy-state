@@ -2593,7 +2593,7 @@ class SnapshotLimitError extends RangeError {
     this.name = "SnapshotLimitError";
   }
 }
-var SNAPSHOT_CHECK_AFTER = 1e4;
+var SNAPSHOT_CHECK_AFTER = SNAPSHOT_SHARED_COPY_LIMIT + 1;
 function cloneTree(value) {
   if (value === null || typeof value !== "object")
     return value;
@@ -2618,65 +2618,89 @@ function countCopy() {
     checkSharedCopies(cloneTop);
 }
 function checkSharedCopies(value) {
-  const walk = { extra: 0, low: Infinity, depth: new Map, sizes: new Map, distinct: new Set };
+  const walk = { extra: 0, low: Infinity, marks: new Map };
   walkCopies(value, 0, walk);
-  if (walk.extra > SNAPSHOT_SHARED_COPY_LIMIT) {
+  if (walk.extra > SNAPSHOT_SHARED_COPY_LIMIT)
     throw new SnapshotLimitError(walk.extra);
+}
+function walkEntry(entry, depth, walk) {
+  if (entry === null || typeof entry !== "object") {
+    walk.low = Infinity;
+    return 0;
   }
+  return walkCopies(entry, depth, walk);
 }
 function walkCopies(value, depth, walk) {
   const identity = toRaw(value);
-  const ancestor = walk.depth.get(identity);
-  if (ancestor !== undefined) {
-    walk.low = ancestor;
-    return 0;
-  }
-  walk.low = Infinity;
-  const known = walk.sizes.get(identity);
-  if (known !== undefined) {
-    walk.extra += known;
-    return known;
-  }
-  if (walk.distinct.has(identity))
+  const marks = walk.marks;
+  const mark = marks.get(identity);
+  if (mark !== undefined) {
+    if (mark <= -2) {
+      walk.low = -mark - 2;
+      return 0;
+    }
+    walk.low = Infinity;
+    if (mark > 0) {
+      walk.extra += mark;
+      return mark;
+    }
     walk.extra++;
-  else
-    walk.distinct.add(identity);
-  if (identity instanceof Date || walk.extra > SNAPSHOT_SHARED_COPY_LIMIT)
+  }
+  if (walk.extra > SNAPSHOT_SHARED_COPY_LIMIT || identity instanceof Date) {
+    if (mark === undefined)
+      marks.set(identity, 1);
+    walk.low = Infinity;
     return 1;
-  walk.depth.set(identity, depth);
+  }
+  marks.set(identity, -(depth + 2));
+  const below = depth + 1;
   let size = 1;
   let low = Infinity;
-  const child = (entry) => {
-    if (entry === null || typeof entry !== "object" || walk.extra > SNAPSHOT_SHARED_COPY_LIMIT)
-      return;
-    size += walkCopies(entry, depth + 1, walk);
-    if (walk.low < low)
-      low = walk.low;
-  };
   if (Array.isArray(identity)) {
-    for (let i = 0;i < identity.length; i++)
-      child(identity[i]);
+    for (let i = 0;i < identity.length && walk.extra <= SNAPSHOT_SHARED_COPY_LIMIT; i++) {
+      size += walkEntry(identity[i], below, walk);
+      if (walk.low < low)
+        low = walk.low;
+    }
   } else if (identity instanceof Map) {
-    identity.forEach((entry, key) => {
-      child(key);
-      child(entry);
-    });
+    for (const [key, entry] of identity) {
+      size += walkEntry(key, below, walk);
+      if (walk.low < low)
+        low = walk.low;
+      size += walkEntry(entry, below, walk);
+      if (walk.low < low)
+        low = walk.low;
+      if (walk.extra > SNAPSHOT_SHARED_COPY_LIMIT)
+        break;
+    }
   } else if (identity instanceof Set) {
-    identity.forEach(child);
+    for (const entry of identity) {
+      size += walkEntry(entry, below, walk);
+      if (walk.low < low)
+        low = walk.low;
+      if (walk.extra > SNAPSHOT_SHARED_COPY_LIMIT)
+        break;
+    }
   } else {
     for (const key in identity) {
-      if (hasOwn.call(identity, key))
-        child(identity[key]);
+      if (!hasOwn.call(identity, key))
+        continue;
+      size += walkEntry(identity[key], below, walk);
+      if (walk.low < low)
+        low = walk.low;
+      if (walk.extra > SNAPSHOT_SHARED_COPY_LIMIT)
+        break;
     }
     const symbolKeys = Object.getOwnPropertySymbols(identity);
     for (let i = 0;i < symbolKeys.length; i++) {
-      if (isEnumerable.call(identity, symbolKeys[i]))
-        child(identity[symbolKeys[i]]);
+      if (!isEnumerable.call(identity, symbolKeys[i]))
+        continue;
+      size += walkEntry(identity[symbolKeys[i]], below, walk);
+      if (walk.low < low)
+        low = walk.low;
     }
   }
-  walk.depth.delete(identity);
-  if (low >= depth)
-    walk.sizes.set(identity, size);
+  marks.set(identity, low >= depth ? size : -1);
   walk.low = low;
   return size;
 }
