@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { reactive, toRaw } from "../src/index";
+import { replicate } from "./replica";
 
 /**
  * Location records must not keep removed containers alive. A child's place
@@ -115,5 +116,44 @@ describe("location records and garbage collection", () => {
     await collectGarbage();
     expect(alive(refs)).toBeLessThanOrEqual(fewOf(refs.length));
     expect(kept.length).toBe(100);
+  });
+
+  test("after collection, writes through held proxies emit the places they hold now", async () => {
+    let nextId = 0;
+    const job = () => ({ id: nextId++, runHistory: Array.from({ length: 3 }, (_, at) => ({ at })) });
+    const sync = replicate({ jobs: Array.from({ length: 20 }, job) });
+    const state: any = sync.state;
+    const held = state.jobs[5].runHistory[2];
+    const heldJob = state.jobs[5];
+    const replacedLists: WeakRef<object>[] = [];
+    function churn(times: number) {
+      for (let i = 0; i < times; i++) {
+        replacedLists.push(new WeakRef(toRaw(state.jobs)));
+        // drop the first job that is not the held one, add one in front
+        const victim = state.jobs[0] === heldJob ? state.jobs[1].id : state.jobs[0].id;
+        state.jobs = state.jobs.filter((entry: any) => entry.id !== victim);
+        state.jobs.unshift(job());
+        void state.jobs[3].runHistory[0].at;
+      }
+    }
+    churn(200);
+    await collectGarbage();
+    expect(alive(replacedLists)).toBeLessThanOrEqual(fewOf(replacedLists.length));
+
+    const index = toRaw(state.jobs).indexOf(toRaw(heldJob));
+    expect(index).toBeGreaterThan(0);
+    sync.clear();
+    held.at = 99;
+    heldJob.runHistory.push({ at: 3 });
+    state.jobs.reverse();
+    held.at = 100;
+    const reversed = toRaw(state.jobs).length - 1 - index;
+    expect(sync.paths()).toEqual([
+      `set:jobs.${index}.runHistory.2.at`,
+      `array-push:jobs.${index}.runHistory`,
+      "replace:jobs",
+      `set:jobs.${reversed}.runHistory.2.at`,
+    ]);
+    expect(sync.inSync()).toBe(true);
   });
 });
