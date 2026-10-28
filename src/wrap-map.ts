@@ -1,5 +1,4 @@
 import {
-  cloneTree,
   deepEqual,
   unwrapForStore,
   wrapperCache,
@@ -63,7 +62,7 @@ export function wrapMap<K, V>(map: Map<K, V>, node: LocationNode): Map<K, V> {
             typeof oldValue === "object" &&
             value &&
             typeof value === "object" &&
-            deepEqual(oldValue, value, new WeakMap())
+            deepEqual(oldValue, value)
           )
             return receiver;
 
@@ -81,7 +80,7 @@ export function wrapMap<K, V>(map: Map<K, V>, node: LocationNode): Map<K, V> {
               path: located.paths[0],
               key,
               oldValue,
-              newValue: isObject(value) ? cloneTree(value) : value,
+              newValue: value,
             });
           }
 

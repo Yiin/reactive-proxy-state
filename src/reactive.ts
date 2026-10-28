@@ -2,6 +2,7 @@ import { EmitFunction, Path, ReactiveOptions, StateEvent } from "./types";
 import { cloneTree, deepEqual, globalSeen, proxyStats, unwrapForStore } from "./utils";
 import {
   LocationNode,
+  adoptRoot,
   attachValue,
   detachPlace,
   dispatch,
@@ -83,13 +84,13 @@ export function reactive<T extends object>(
   }
 
   // if this is the root call (path is empty) and an emit function is provided,
-  // emit the initial state event.
+  // emit the initial state event, with a copy like every other event.
   if (emit && path.length === 0) {
     try {
       const initialEvent: StateEvent = {
         action: "replace",
         path: [],
-        newValue: obj,
+        newValue: cloneTree(obj),
       };
       emit(initialEvent);
     } catch (error) {
@@ -100,6 +101,8 @@ export function reactive<T extends object>(
   const node = ensureLocationNode(obj);
   node.root = { emit, path };
   node.scope = node.root;
+  // an object at two places in the initial value emits to both from the start
+  if (emit) adoptRoot(node);
   return createProxy(obj, node, options);
 }
 
@@ -178,7 +181,7 @@ function wrapObject<T extends object>(obj: T, node: LocationNode, options?: Reac
         !options?.async &&
         isObject(oldValue) &&
         isObject(value) &&
-        deepEqual(oldValue, value, new WeakMap())
+        deepEqual(oldValue, value)
       )
         return true;
 
@@ -197,7 +200,7 @@ function wrapObject<T extends object>(obj: T, node: LocationNode, options?: Reac
             action: "set",
             path: located.paths[0],
             oldValue,
-            newValue: isObject(value) ? cloneTree(value) : value,
+            newValue: value,
           });
         }
 

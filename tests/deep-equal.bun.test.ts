@@ -1,5 +1,5 @@
 import { expect, test, describe } from "bun:test";
-import { deepEqual } from '../src/index';
+import { deepEqual, reactive } from '../src/index';
 
 describe("Deep Equal Tests", () => {
   test("deepEqual handles primitives", () => {
@@ -50,3 +50,26 @@ describe("Deep Equal Tests", () => {
     expect(deepEqual(date1, date3)).toBe(false);
   });
 }); 
+describe("deepEqual after a change", () => {
+  test("a pair compared before is compared again after one side changed", () => {
+    const left = { n: 1, nested: { m: 1 } };
+    const right = { n: 1, nested: { m: 1 } };
+    expect(deepEqual(left, right)).toBe(true);
+    right.n = 2;
+    expect(deepEqual(left, right)).toBe(false);
+    right.n = 1;
+    right.nested.m = 2;
+    expect(deepEqual(left, right)).toBe(false);
+  });
+
+  test("assigning an object that changed since an equal assignment is not dropped", () => {
+    const events: any[] = [];
+    const state: any = reactive({ x: { n: 1 } }, (event) => events.push(event));
+    const next = { n: 1 };
+    state.x = next; // deep-equal: no change
+    next.n = 2;
+    state.x = next;
+    expect(state.x.n).toBe(2);
+    expect(events.at(-1)).toMatchObject({ action: "set", path: ["x"], newValue: { n: 2 } });
+  });
+});

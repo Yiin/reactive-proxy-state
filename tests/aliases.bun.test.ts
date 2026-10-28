@@ -104,7 +104,8 @@ describe("reattached containers get their children's places back", () => {
   test("a grandchild link pruned under a detached container", () => {
     const sync = replicate({ a: { n: 0 }, box: null as any, c: null as any });
     const child = sync.state.a;
-    sync.state.box = { inner: { child } };
+    sync.state.box = { inner: {} };
+    sync.state.box.inner.child = child;
     const box = sync.state.box;
     void box.inner.child;
     sync.state.box = null;

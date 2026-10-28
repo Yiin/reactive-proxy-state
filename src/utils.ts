@@ -41,8 +41,6 @@ export function unwrapForStore(value: any): any {
   return value
 }
 
-// cache for memoized deepEqual results, using weakmap to avoid memory leaks
-const deepEqualCache = new WeakMap<object, WeakMap<object, boolean>>();
 const MAX_CACHE_SIZE = 1000;
 
 // path traversal cache (object -> pathString -> value) with lru-like behavior
@@ -71,10 +69,16 @@ export const proxyStats = {
   objects: 0,
   /** Number of old proxied values evicted when replaced via set trap */
   staleEvicted: 0,
+  /**
+   * Writes through a proxy whose object is in no tree (it was removed, or
+   * never placed). They change the object and emit nothing.
+   */
+  detachedWrites: 0,
 }
 
 export function getProxyStats() {
-  return { ...proxyStats }
+  // pathConcatCacheSize: the path cache is gone; kept at 0 so the shape stays
+  return { ...proxyStats, pathConcatCacheSize: 0 }
 }
 
 export function resetProxyStats() {
@@ -84,6 +88,7 @@ export function resetProxyStats() {
   proxyStats.sets = 0
   proxyStats.objects = 0
   proxyStats.staleEvicted = 0
+  proxyStats.detachedWrites = 0
 }
 
 // simple lru-like cleanup for individual object path caches
@@ -102,67 +107,73 @@ function cleanupPathCache(root: object) {
     }
 }
 
-// `seen` defaults to a fresh WeakMap per call: it is cycle-detection scratch
-// space and must never fall back to the shared `globalSeen` identity map,
-// whose values strongly retain whatever they point at (leak + poisoning).
-// `seen` defaults to a fresh WeakMap per call: it is cycle-detection scratch
-// space and must never fall back to the shared `globalSeen` identity map,
-// whose values strongly retain whatever they point at (leak + poisoning).
-export function deepEqual(a: any, b: any, seen: WeakMap<any, any> = new WeakMap()): boolean {
+// `seen` is cycle-detection scratch space for one comparison: made on the
+// first step into a nested object, never shared, and never the global
+// `globalSeen` identity map, whose values strongly retain whatever they
+// point at (leak + poisoning). Results are not memoized: state objects
+// change, and a remembered result would go stale.
+export function deepEqual(a: any, b: any, seen?: WeakMap<any, any>): boolean {
     if (a === b) return true;
-    if (a == null || b == null) return a === b;
+    if (a == null || b == null) return false;
     if (typeof a !== typeof b) return false;
     if (a instanceof Date && b instanceof Date) return a.getTime() === b.getTime();
     if (typeof a !== 'object') return false;
     if (Array.isArray(a) !== Array.isArray(b)) return false;
 
     // handle circular references
-    if (seen.has(a)) return seen.get(a) === b;
-    seen.set(a, b);
-
-    // check memoization cache before diving deeper
-    if (deepEqualCache.has(a) && deepEqualCache.get(a)?.has(b)) {
-        return deepEqualCache.get(a)!.get(b)!;
+    if (seen !== undefined) {
+        if (seen.has(a)) return seen.get(a) === b;
+        seen.set(a, b);
     }
 
-    if (!deepEqualCache.has(a)) {
-        deepEqualCache.set(a, new WeakMap());
-    }
-
-    let result: boolean;
     if (Array.isArray(a)) {
-        result = a.length === b.length && a.every((val, idx) => deepEqual(val, b[idx], seen));
-    } else if (a instanceof Map && b instanceof Map) {
-        result = a.size === b.size;
-        if (result) {
-            for (const [key, value] of a) {
-                if (!b.has(key) || !deepEqual(value, b.get(key), seen)) {
-                    result = false;
-                    break;
-                }
-            }
+        if (a.length !== b.length) return false;
+        for (let i = 0; i < a.length; i++) {
+            const left = a[i];
+            if (left === undefined && !(i in a)) continue; // a hole in `a` matches anything
+            const right = b[i];
+            if (left === right) continue;
+            if (isObject(left) && isObject(right)) seen ??= startSeen(a, b);
+            if (!deepEqual(left, right, seen)) return false;
         }
-    } else if (a instanceof Set && b instanceof Set) {
-        result = a.size === b.size;
-        if (result) {
-            for (const value of a) {
-                if (!b.has(value)) {
-                    result = false;
-                    break;
-                }
-            }
-        }
-    } else {
-        const keysA = Object.keys(a);
-        const keysB = Object.keys(b);
-        result = keysA.length === keysB.length && keysA.every(key =>
-            Object.prototype.hasOwnProperty.call(b, key) && deepEqual(a[key], b[key], seen)
-        );
+        return true;
     }
+    if (a instanceof Map && b instanceof Map) {
+        if (a.size !== b.size) return false;
+        for (const [key, left] of a) {
+            if (!b.has(key)) return false;
+            const right = b.get(key);
+            if (left === right) continue;
+            if (isObject(left) && isObject(right)) seen ??= startSeen(a, b);
+            if (!deepEqual(left, right, seen)) return false;
+        }
+        return true;
+    }
+    if (a instanceof Set && b instanceof Set) {
+        if (a.size !== b.size) return false;
+        for (const value of a) {
+            if (!b.has(value)) return false;
+        }
+        return true;
+    }
+    const keysA = Object.keys(a);
+    if (keysA.length !== Object.keys(b).length) return false;
+    for (let i = 0; i < keysA.length; i++) {
+        const key = keysA[i];
+        if (!hasOwn.call(b, key)) return false;
+        const left = a[key];
+        const right = b[key];
+        if (left === right) continue;
+        if (isObject(left) && isObject(right)) seen ??= startSeen(a, b);
+        if (!deepEqual(left, right, seen)) return false;
+    }
+    return true;
+}
 
-    // cache the result before returning
-    deepEqualCache.get(a)!.set(b, result);
-    return result;
+function startSeen(a: object, b: object): WeakMap<any, any> {
+    const seen = new WeakMap();
+    seen.set(a, b);
+    return seen;
 }
 
 export function getFromPathCache(root: object, pathKey: string): any | undefined {
@@ -270,63 +281,85 @@ export function traverse(value: any, seen: Set<any> = new Set()) {
  * object emits one event per place. Cycles are kept.
  */
 export function cloneTree<T>(value: T): T {
-    return cloneTreeInto(value, [], []);
+    if (value === null || typeof value !== 'object') return value;
+    const base = cloneAncestors.length;
+    try {
+        return cloneTreeInto(value, base);
+    } finally {
+        cloneAncestors.length = base;
+        cloneCopies.length = base;
+    }
 }
 
-// `ancestors` holds the raw objects on the path from the top to here and
-// `copies` their copies, so only a cycle (not a shared object) is reused.
-function cloneTreeInto(value: any, ancestors: object[], copies: any[]): any {
-    if (value === null || typeof value !== 'object') {
-        return value;
-    }
-    if (value instanceof Date) {
-        return new Date(value.getTime());
-    }
+// The raw objects on the path from the top of the current clone to here, and
+// their copies, so only a cycle (not a shared object) is reused. One stack
+// for every call: a call (also one made from a getter during another clone)
+// looks only at the entries from its own `base` up.
+const cloneAncestors: object[] = [];
+const cloneCopies: any[] = [];
+const hasOwn = Object.prototype.hasOwnProperty;
+const isEnumerable = Object.prototype.propertyIsEnumerable;
+
+function cloneChild(value: any, base: number): any {
+    return value === null || typeof value !== 'object' ? value : cloneTreeInto(value, base);
+}
+
+function cloneTreeInto(value: any, base: number): any {
     // identity from the raw target, reads through `value` (see deepClone)
     const identity = toRaw(value) as object;
-    const cycle = ancestors.lastIndexOf(identity);
-    if (cycle !== -1) return copies[cycle];
+    for (let i = cloneAncestors.length - 1; i >= base; i--) {
+        if (cloneAncestors[i] === identity) return cloneCopies[i];
+    }
 
     let copy: any;
     if (Array.isArray(value)) {
-        copy = new Array(value.length);
-        ancestors.push(identity);
-        copies.push(copy);
-        for (let i = 0; i < value.length; i++) {
-            copy[i] = cloneTreeInto(value[i], ancestors, copies);
-        }
-    } else if (value instanceof Map) {
-        copy = new Map();
-        ancestors.push(identity);
-        copies.push(copy);
-        value.forEach((entry, key) => {
-            copy.set(cloneTreeInto(key, ancestors, copies), cloneTreeInto(entry, ancestors, copies));
-        });
-    } else if (value instanceof Set) {
-        copy = new Set();
-        ancestors.push(identity);
-        copies.push(copy);
-        value.forEach(entry => {
-            copy.add(cloneTreeInto(entry, ancestors, copies));
-        });
+        const length = value.length;
+        copy = new Array(length);
+        cloneAncestors.push(identity);
+        cloneCopies.push(copy);
+        for (let i = 0; i < length; i++) copy[i] = cloneChild(value[i], base);
     } else {
-        copy = Object.create(Object.getPrototypeOf(value));
-        ancestors.push(identity);
-        copies.push(copy);
+        const prototype = Object.getPrototypeOf(value);
+        if (prototype === Object.prototype) {
+            copy = {};
+        } else if (value instanceof Date) {
+            return new Date(value.getTime());
+        } else if (value instanceof Map) {
+            copy = new Map();
+            cloneAncestors.push(identity);
+            cloneCopies.push(copy);
+            value.forEach((entry, key) => {
+                copy.set(cloneChild(key, base), cloneChild(entry, base));
+            });
+            cloneAncestors.pop();
+            cloneCopies.pop();
+            return copy;
+        } else if (value instanceof Set) {
+            copy = new Set();
+            cloneAncestors.push(identity);
+            cloneCopies.push(copy);
+            value.forEach(entry => {
+                copy.add(cloneChild(entry, base));
+            });
+            cloneAncestors.pop();
+            cloneCopies.pop();
+            return copy;
+        } else {
+            copy = Object.create(prototype);
+        }
+        cloneAncestors.push(identity);
+        cloneCopies.push(copy);
         for (const key in value) {
-            if (Object.prototype.hasOwnProperty.call(value, key)) {
-                copy[key] = cloneTreeInto(value[key], ancestors, copies);
-            }
+            if (hasOwn.call(value, key)) copy[key] = cloneChild(value[key], base);
         }
         const symbolKeys = Object.getOwnPropertySymbols(value);
-        for (const symbolKey of symbolKeys) {
-            if (Object.prototype.propertyIsEnumerable.call(value, symbolKey)) {
-                copy[symbolKey] = cloneTreeInto(value[symbolKey], ancestors, copies);
-            }
+        for (let i = 0; i < symbolKeys.length; i++) {
+            const symbolKey = symbolKeys[i];
+            if (isEnumerable.call(value, symbolKey)) copy[symbolKey] = cloneChild(value[symbolKey], base);
         }
     }
-    ancestors.pop();
-    copies.pop();
+    cloneAncestors.pop();
+    cloneCopies.pop();
     return copy;
 }
 

@@ -1,6 +1,5 @@
 import { StateEvent } from "./types";
 import {
-  cloneTree,
   deepEqual,
   unwrapForStore,
   wrapperCache,
@@ -16,6 +15,7 @@ import {
   evictDeep,
   locate,
   relinkArray,
+  relinkReorder,
 } from "./location";
 import { track, trigger } from "./watch-effect";
 import { ReactiveFlags } from "./constants";
@@ -42,6 +42,18 @@ function arrayIndex(prop: string | symbol): number {
 function placeKey(prop: string | symbol): unknown {
   const index = arrayIndex(prop);
   return index >= 0 ? index : prop;
+}
+
+/** ToIntegerOrInfinity: NaN is 0, fractions go toward zero, -0 is 0. */
+function toIntegerOrInfinity(value: unknown): number {
+  const number = Number(value);
+  if (number !== number || number === 0) return 0;
+  return Math.trunc(number);
+}
+
+/** An index relative to `length` (negative counts from the end), clamped to 0..length. */
+function clampIndex(relative: number, length: number): number {
+  return relative < 0 ? Math.max(length + relative, 0) : Math.min(relative, length);
 }
 
 /** Store raw objects, never proxies, in the raw array. */
@@ -97,14 +109,14 @@ export function wrapArray<T extends any[]>(arr: T, node: LocationNode): T {
               }
             }
             if (changed) {
-              relinkArray(node, target, 0, before, prop === "fill" ? [args[0]] : undefined);
+              relinkReorder(node, target, before, prop === "fill" ? [args[0]] : undefined);
               const located = locate(node);
               if (located !== undefined) {
                 dispatch(located, {
                   action: "replace",
                   path: located.paths[0],
                   oldValue: before,
-                  newValue: cloneTree(target),
+                  newValue: target,
                 });
               }
               trigger(target, Symbol.iterator);
@@ -221,31 +233,21 @@ export function wrapArray<T extends any[]>(arr: T, node: LocationNode): T {
           return methodCache[prop];
         case "splice":
           track(target, "length");
-          methodCache[prop] = function (
-            start: number,
-            deleteCount?: number,
-            ...items: any[]
-          ): any[] {
-            unwrapItems(items);
+          methodCache[prop] = function (...args: any[]): any[] {
+            // normalize once, like the spec: the change, the removed items,
+            // the new places and the event all use these numbers
             const oldLength = target.length;
-            const actualStart =
-              start < 0
-                ? Math.max(target.length + start, 0)
-                : Math.min(start, target.length);
-            const deleteCountNum =
-              deleteCount === undefined
-                ? target.length - actualStart
-                : Number(deleteCount);
-            const actualDeleteCount = Math.min(
-              deleteCountNum,
-              target.length - actualStart
-            );
-            const deletedItems = target.slice(
-              actualStart,
-              actualStart + actualDeleteCount
-            );
+            const actualStart = args.length === 0 ? 0 : clampIndex(toIntegerOrInfinity(args[0]), oldLength);
+            const actualDeleteCount =
+              args.length === 0
+                ? 0
+                : args.length === 1
+                  ? oldLength - actualStart
+                  : Math.min(Math.max(toIntegerOrInfinity(args[1]), 0), oldLength - actualStart);
+            const items = args.length > 2 ? args.slice(2) : [];
+            unwrapItems(items);
 
-            const result = target.splice(start, deleteCountNum, ...items);
+            const deletedItems = target.splice(actualStart, actualDeleteCount, ...items);
             const newLength = target.length;
 
             if (actualDeleteCount > 0 || items.length > 0) {
@@ -267,7 +269,7 @@ export function wrapArray<T extends any[]>(arr: T, node: LocationNode): T {
                 trigger(target, "length");
               }
             }
-            return result;
+            return deletedItems;
           };
           return methodCache[prop];
         // special wrapper for find to ensure returned element is reactive
@@ -360,7 +362,7 @@ export function wrapArray<T extends any[]>(arr: T, node: LocationNode): T {
       if (
         isObject(oldValue) &&
         isObject(value) &&
-        deepEqual(oldValue, value, new WeakMap())
+        deepEqual(oldValue, value)
       )
         return true;
 
@@ -399,10 +401,12 @@ export function wrapArray<T extends any[]>(arr: T, node: LocationNode): T {
           // ends up with a hole.
           const oldLength = Number(oldValue);
           const newLength = Number(value);
-          for (let i = oldLength; i < newLength; i++) {
-            const located = locate(node, String(i));
-            if (located !== undefined) {
-              dispatch(located, { action: "set", path: located.paths[0], newValue: undefined });
+          const located = locate(node);
+          if (located !== undefined) {
+            for (let i = oldLength; i < newLength; i++) {
+              const index = String(i);
+              const paths = located.paths.map((path) => [...path, index]);
+              dispatch({ root: located.root, paths }, { action: "set", path: paths[0], newValue: undefined });
             }
           }
         } else {
@@ -412,7 +416,7 @@ export function wrapArray<T extends any[]>(arr: T, node: LocationNode): T {
               action: "set",
               path: located.paths[0],
               oldValue,
-              newValue: isObject(value) ? cloneTree(value) : value,
+              newValue: value,
             });
           }
         }

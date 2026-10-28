@@ -442,6 +442,9 @@ describe("WatchEffect Tests", () => {
         configurable: true
     });
     const state = reactive<{ _count: number, count: number }>(stateObj as any, () => {});
+    // making a root with an emit function reads the initial value (to copy it
+    // into the initial replace event and to find aliases); count from here
+    getterMock.mockClear();
 
     // Simplify the effect - just access the getter
     const stop = watchEffect(() => {
