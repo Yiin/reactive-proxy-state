@@ -296,8 +296,12 @@ export class SnapshotLimitError extends RangeError {
     }
 }
 
-/** Copies a snapshot makes before it measures its whole value against the limit. */
-const SNAPSHOT_CHECK_AFTER = 10_000;
+/**
+ * Copies a snapshot makes before it measures its whole value against the
+ * limit. Extra copies never outnumber copies, so a smaller snapshot cannot
+ * pass the limit and is never measured.
+ */
+const SNAPSHOT_CHECK_AFTER = SNAPSHOT_SHARED_COPY_LIMIT + 1;
 
 /**
  * Deep clone for event payloads. Unlike `deepClone`, an object that appears
@@ -344,11 +348,12 @@ interface CopyWalk {
     extra: number;
     /** After `walkCopies`: the depth of the highest ancestor a cycle below returned to. */
     low: number;
-    /** The objects on the path from the top, with their depth. */
-    depth: Map<object, number>;
-    /** Copies a subtree makes, for subtrees whose count does not depend on the path. */
-    sizes: Map<object, number>;
-    distinct: Set<object>;
+    /**
+     * Each object met: `-(depth + 2)` while it is on the path from the top,
+     * then the copies its subtree makes, or -1 when that count depends on
+     * the path (a cycle below it returns above it).
+     */
+    marks: Map<object, number>;
 }
 
 /**
@@ -360,61 +365,83 @@ interface CopyWalk {
  * as the limit is passed.
  */
 function checkSharedCopies(value: object): void {
-    const walk: CopyWalk = { extra: 0, low: Infinity, depth: new Map(), sizes: new Map(), distinct: new Set() };
+    const walk: CopyWalk = { extra: 0, low: Infinity, marks: new Map() };
     walkCopies(value, 0, walk);
-    if (walk.extra > SNAPSHOT_SHARED_COPY_LIMIT) {
-        throw new SnapshotLimitError(walk.extra);
-    }
+    if (walk.extra > SNAPSHOT_SHARED_COPY_LIMIT) throw new SnapshotLimitError(walk.extra);
 }
 
-/** The number of copies a tree copy of `value` makes; sets `walk.low`. */
-function walkCopies(value: object, depth: number, walk: CopyWalk): number {
-    const identity = toRaw(value) as object;
-    const ancestor = walk.depth.get(identity);
-    if (ancestor !== undefined) {
-        // a cycle: the copy reuses the ancestor's copy
-        walk.low = ancestor;
+/** The copies `entry` makes (0 for a primitive); sets `walk.low`. */
+function walkEntry(entry: unknown, depth: number, walk: CopyWalk): number {
+    if (entry === null || typeof entry !== 'object') {
+        walk.low = Infinity;
         return 0;
     }
-    walk.low = Infinity;
-    const known = walk.sizes.get(identity);
-    if (known !== undefined) {
-        walk.extra += known;
-        return known;
-    }
-    if (walk.distinct.has(identity)) walk.extra++;
-    else walk.distinct.add(identity);
-    if (identity instanceof Date || walk.extra > SNAPSHOT_SHARED_COPY_LIMIT) return 1;
+    return walkCopies(entry, depth, walk);
+}
 
-    walk.depth.set(identity, depth);
+/** The copies a tree copy of `value` makes; sets `walk.low`. */
+function walkCopies(value: object, depth: number, walk: CopyWalk): number {
+    const identity = toRaw(value) as object;
+    const marks = walk.marks;
+    const mark = marks.get(identity);
+    if (mark !== undefined) {
+        if (mark <= -2) {
+            // a cycle: the copy reuses the ancestor's copy
+            walk.low = -mark - 2;
+            return 0;
+        }
+        walk.low = Infinity;
+        if (mark > 0) {
+            walk.extra += mark;
+            return mark;
+        }
+        walk.extra++; // met before, counted again here
+    }
+    if (walk.extra > SNAPSHOT_SHARED_COPY_LIMIT || identity instanceof Date) {
+        if (mark === undefined) marks.set(identity, 1);
+        walk.low = Infinity;
+        return 1;
+    }
+
+    marks.set(identity, -(depth + 2));
+    const below = depth + 1;
     let size = 1;
     let low = Infinity;
-    const child = (entry: unknown): void => {
-        if (entry === null || typeof entry !== 'object' || walk.extra > SNAPSHOT_SHARED_COPY_LIMIT) return;
-        size += walkCopies(entry, depth + 1, walk);
-        if (walk.low < low) low = walk.low;
-    };
     if (Array.isArray(identity)) {
-        for (let i = 0; i < identity.length; i++) child(identity[i]);
+        for (let i = 0; i < identity.length && walk.extra <= SNAPSHOT_SHARED_COPY_LIMIT; i++) {
+            size += walkEntry(identity[i], below, walk);
+            if (walk.low < low) low = walk.low;
+        }
     } else if (identity instanceof Map) {
-        identity.forEach((entry, key) => {
-            child(key);
-            child(entry);
-        });
+        for (const [key, entry] of identity) {
+            size += walkEntry(key, below, walk);
+            if (walk.low < low) low = walk.low;
+            size += walkEntry(entry, below, walk);
+            if (walk.low < low) low = walk.low;
+            if (walk.extra > SNAPSHOT_SHARED_COPY_LIMIT) break;
+        }
     } else if (identity instanceof Set) {
-        identity.forEach(child);
+        for (const entry of identity) {
+            size += walkEntry(entry, below, walk);
+            if (walk.low < low) low = walk.low;
+            if (walk.extra > SNAPSHOT_SHARED_COPY_LIMIT) break;
+        }
     } else {
         for (const key in identity) {
-            if (hasOwn.call(identity, key)) child((identity as any)[key]);
+            if (!hasOwn.call(identity, key)) continue;
+            size += walkEntry((identity as any)[key], below, walk);
+            if (walk.low < low) low = walk.low;
+            if (walk.extra > SNAPSHOT_SHARED_COPY_LIMIT) break;
         }
         const symbolKeys = Object.getOwnPropertySymbols(identity);
         for (let i = 0; i < symbolKeys.length; i++) {
-            if (isEnumerable.call(identity, symbolKeys[i])) child((identity as any)[symbolKeys[i]]);
+            if (!isEnumerable.call(identity, symbolKeys[i])) continue;
+            size += walkEntry((identity as any)[symbolKeys[i]], below, walk);
+            if (walk.low < low) low = walk.low;
         }
     }
-    walk.depth.delete(identity);
     // remember the count only when no cycle below returns above this object
-    if (low >= depth) walk.sizes.set(identity, size);
+    marks.set(identity, low >= depth ? size : -1);
     walk.low = low;
     return size;
 }
