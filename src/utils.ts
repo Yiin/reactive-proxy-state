@@ -440,7 +440,7 @@ function copyTree(
     run.countdown = SNAPSHOT_CHECK_AFTER;
     run.fresh = checkFresh && locationNodes.get(top) === undefined;
     try {
-        const copy = run.fresh ? cloneFreshInto(value, run, base) : cloneInto(value, run, base);
+        const copy = run.fresh ? cloneFreshInto(value, top, run, base) : cloneInto(value, run, base);
         if (checkFresh) copiedFresh = run.fresh;
         return copy;
     } finally {
@@ -735,24 +735,22 @@ function cloneInto(value: any, run: CopyRun, base: number): any {
  */
 function cloneFreshChild(value: any, run: CopyRun, base: number): any {
     if (value === null || typeof value !== 'object') return value;
-    if (run.fresh) noteFresh(toRaw(value) as object, run);
-    return run.fresh ? cloneFreshInto(value, run, base) : cloneInto(value, run, base);
+    if (!run.fresh) return cloneInto(value, run, base);
+    const identity = toRaw(value) as object;
+    noteFresh(identity, run);
+    return run.fresh ? cloneFreshInto(value, identity, run, base) : cloneInto(value, run, base);
 }
 
 /**
- * `cloneInto` for a fresh object: it is not the container (which has a
- * location node) and not an ancestor (it was not met before). A map or a
- * set ends the check: its entries are copied by `cloneInto`.
+ * `cloneInto` for a fresh object (`identity` is `value`, raw): it is not the
+ * container (which has a location node) and not an ancestor (it was not met
+ * before). A map or a set ends the check: its entries are copied by
+ * `cloneInto`.
  */
-function cloneFreshInto(value: any, run: CopyRun, base: number): any {
-    if (value instanceof Map || value instanceof Set) {
-        run.fresh = false;
-        return cloneInto(value, run, base);
-    }
-    if (--run.countdown === 0) countdownDone(run);
+function cloneFreshInto(value: any, identity: object, run: CopyRun, base: number): any {
     let copy: any;
-    const identity = toRaw(value) as object;
     if (Array.isArray(value)) {
+        if (--run.countdown === 0) countdownDone(run);
         const length = value.length;
         copy = new Array(length);
         cloneAncestors.push(identity);
@@ -760,9 +758,18 @@ function cloneFreshInto(value: any, run: CopyRun, base: number): any {
         for (let i = 0; i < length; i++) copy[i] = cloneFreshChild(value[i], run, base);
     } else {
         const prototype = Object.getPrototypeOf(value);
-        if (prototype === Object.prototype) copy = {};
-        else if (value instanceof Date) return new Date(value.getTime());
-        else copy = Object.create(prototype);
+        if (prototype !== Object.prototype) {
+            if (value instanceof Map || value instanceof Set) {
+                run.fresh = false;
+                return cloneInto(value, run, base);
+            }
+            if (value instanceof Date) {
+                if (--run.countdown === 0) countdownDone(run);
+                return new Date(value.getTime());
+            }
+        }
+        if (--run.countdown === 0) countdownDone(run);
+        copy = prototype === Object.prototype ? {} : Object.create(prototype);
         cloneAncestors.push(identity);
         cloneCopies.push(copy);
         for (const key in value) {
