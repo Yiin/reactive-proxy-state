@@ -83,12 +83,32 @@ export declare function locate(node: LocationNode, tail?: PropertyKey): Target |
 /** Is the object somewhere under a root (with or without an emit function)? */
 export declare function isAttached(node: LocationNode): boolean;
 /**
- * Send `event` to every path of `target`. `event` carries live values; each
- * path gets its own deep copy of them, made now, so a later write cannot
- * change an event that waits in a queue, and two remote places never share
- * one object. The first path gets `event` itself.
+ * Send `event` to every path of `target`. Its payload holds copies already
+ * (`copyPayload`, made before the write). Every further path gets copies
+ * of those copies, all made before the first emit, so a listener that
+ * changes a payload cannot change another, and two remote places never
+ * share one object. The first path gets `event` itself.
  */
 export declare function dispatch(target: Target, event: StateEvent): void;
+/**
+ * Replace the payload fields of `event` (live values) with deep copies.
+ * `items` and `oldValues` are arrays the wrapper made for this event; each is
+ * one payload, copied whole, with one copy limit. A payload too large to copy
+ * throws a `SnapshotLimitError` and leaves `event` as it was.
+ *
+ * With `guard`, the copies are made before the write that changes `guard`:
+ * a payload that reaches `guard` would be copied as it is before that write,
+ * so then nothing is copied and the result is false (see `writeThenCopy`).
+ */
+export declare function copyPayload(event: StateEvent | undefined, guard?: object): boolean;
+/**
+ * Make `write`, a change of `container` alone, then copy the payload of
+ * `event`: for a payload that reaches `container` (a cycle through it, or
+ * the container itself, as a reorder sends), which `copyPayload` could not
+ * copy before the write. A payload too large to copy puts the container's
+ * contents back and throws, so the write changes nothing.
+ */
+export declare function writeThenCopy<R>(container: object, event: StateEvent, write: () => R): R;
 /**
  * Record that a proxy read found `raw` at `parent[key]`. Called on every read
  * of a nested object, so the common case (place already known) is one compare.

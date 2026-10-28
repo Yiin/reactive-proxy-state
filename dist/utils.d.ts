@@ -82,6 +82,14 @@ export declare class SnapshotLimitError extends RangeError {
  * `SNAPSHOT_SHARED_COPY_LIMIT` extra copies of shared objects.
  */
 export declare function cloneTree<T>(value: T): T;
+/** What `cloneTreeUnless` returns for a value that reaches the object it names. */
+export declare const REACHES: unique symbol;
+/**
+ * `cloneTree(value)`, or `REACHES` as soon as the copy (or its measure)
+ * meets `guard`. A `SnapshotLimitError` thrown first is measured on objects
+ * other than `guard`.
+ */
+export declare function cloneTreeUnless<T>(value: T, guard: object): T | typeof REACHES;
 /**
  * creates a deep clone of a value.
  * includes cycle detection using a weakmap.

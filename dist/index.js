@@ -2529,13 +2529,29 @@ class SnapshotLimitError extends RangeError {
 }
 var SNAPSHOT_CHECK_AFTER = SNAPSHOT_SHARED_COPY_LIMIT + 1;
 function cloneTree(value) {
+  return copyTree(value, undefined);
+}
+var REACHES = Symbol("reaches");
+function cloneTreeUnless(value, guard) {
+  try {
+    return copyTree(value, guard);
+  } catch (error) {
+    if (error === reachedGuard)
+      return REACHES;
+    throw error;
+  }
+}
+var reachedGuard = new Error("reactive-proxy-state: internal, a copy reached its guard");
+function copyTree(value, guard) {
   if (value === null || typeof value !== "object")
     return value;
   const base = cloneAncestors.length;
   const outerTop = cloneTop;
   const outerCountdown = cloneCountdown;
+  const outerGuard = cloneGuard;
   cloneTop = value;
   cloneCountdown = SNAPSHOT_CHECK_AFTER;
+  cloneGuard = guard;
   try {
     return cloneTreeInto(value, base);
   } finally {
@@ -2543,10 +2559,12 @@ function cloneTree(value) {
     cloneCopies.length = base;
     cloneTop = outerTop;
     cloneCountdown = outerCountdown;
+    cloneGuard = outerGuard;
   }
 }
 var cloneTop;
 var cloneCountdown = 0;
+var cloneGuard;
 function countCopy() {
   if (--cloneCountdown === 0)
     checkSharedCopies(cloneTop);
@@ -2566,6 +2584,8 @@ function walkEntry(entry, depth, walk) {
 }
 function walkCopies(value, depth, walk) {
   const identity = toRaw(value);
+  if (identity === cloneGuard)
+    throw reachedGuard;
   const marks = walk.marks;
   const mark = marks.get(identity);
   if (mark !== undefined) {
@@ -2634,7 +2654,7 @@ function walkCopies(value, depth, walk) {
         low = walk.low;
     }
   }
-  marks.set(identity, low >= depth ? size : -1);
+  marks.set(identity, low > depth ? size : -1);
   walk.low = low;
   return size;
 }
@@ -2647,6 +2667,8 @@ function cloneChild(value, base) {
 }
 function cloneTreeInto(value, base) {
   const identity = toRaw(value);
+  if (identity === cloneGuard)
+    throw reachedGuard;
   for (let i = cloneAncestors.length - 1;i >= base; i--) {
     if (cloneAncestors[i] === identity)
       return cloneCopies[i];
@@ -3176,34 +3198,92 @@ function isAttached(node) {
 function dispatch(target, event) {
   const { root, paths } = target;
   const emit = root.emit;
-  const live = paths.length > 1 ? { ...event } : event;
-  for (let i = 0;i < paths.length; i++) {
-    const copy = i === 0 ? event : { ...live };
-    copy.path = paths[i];
-    snapshotPayload(copy, live);
-    emit(copy);
+  if (paths.length === 1) {
+    emit(event);
+    return;
   }
+  const events = [event];
+  for (let i = 1;i < paths.length; i++) {
+    const copy = { ...event, path: paths[i] };
+    copyPayload(copy);
+    events.push(copy);
+  }
+  for (let i = 0;i < events.length; i++)
+    emit(events[i]);
 }
-function snapshotPayload(event, live) {
-  if (isObject2(live.newValue))
-    event.newValue = cloneTree(live.newValue);
-  if (isObject2(live.oldValue))
-    event.oldValue = cloneTree(live.oldValue);
-  if (isObject2(live.value))
-    event.value = cloneTree(live.value);
-  const items = live.items;
-  if (items !== undefined) {
-    if (event === live) {
-      for (let i = 0;i < items.length; i++) {
-        if (isObject2(items[i]))
-          items[i] = cloneTree(items[i]);
-      }
-    } else {
-      event.items = cloneTree(items);
-    }
+function copyPayload(event, guard) {
+  if (event === undefined)
+    return true;
+  const { newValue, oldValue, value, items, oldValues } = event;
+  const newCopy = isObject2(newValue) ? copyOf(newValue, guard) : newValue;
+  if (newCopy === REACHES)
+    return false;
+  const oldCopy = isObject2(oldValue) ? copyOf(oldValue, guard) : oldValue;
+  if (oldCopy === REACHES)
+    return false;
+  const valueCopy = isObject2(value) ? copyOf(value, guard) : value;
+  if (valueCopy === REACHES)
+    return false;
+  const itemsCopy = items !== undefined ? copyOf(items, guard) : items;
+  if (itemsCopy === REACHES)
+    return false;
+  const oldValuesCopy = oldValues !== undefined ? copyOf(oldValues, guard) : oldValues;
+  if (oldValuesCopy === REACHES)
+    return false;
+  if (isObject2(newValue))
+    event.newValue = newCopy;
+  if (isObject2(oldValue))
+    event.oldValue = oldCopy;
+  if (isObject2(value))
+    event.value = valueCopy;
+  if (items !== undefined)
+    event.items = itemsCopy;
+  if (oldValues !== undefined)
+    event.oldValues = oldValuesCopy;
+  return true;
+}
+function copyOf(value, guard) {
+  return guard === undefined ? cloneTree(value) : cloneTreeUnless(value, guard);
+}
+function writeThenCopy(container, event, write) {
+  const restore = contentsRestorer(container);
+  const result = write();
+  try {
+    copyPayload(event);
+  } catch (error) {
+    restore();
+    throw error;
   }
-  if (live.oldValues !== undefined)
-    event.oldValues = cloneTree(live.oldValues);
+  return result;
+}
+function contentsRestorer(container) {
+  if (container instanceof Map) {
+    const entries = [...container];
+    return () => {
+      container.clear();
+      for (const [key, entry] of entries)
+        container.set(key, entry);
+    };
+  }
+  if (container instanceof Set) {
+    const members = [...container];
+    return () => {
+      container.clear();
+      for (const member of members)
+        container.add(member);
+    };
+  }
+  const keys = Reflect.ownKeys(container);
+  const descriptors = keys.map((key) => Reflect.getOwnPropertyDescriptor(container, key));
+  return () => {
+    if (Array.isArray(container))
+      container.length = 0;
+    const current = Reflect.ownKeys(container);
+    for (let i = 0;i < current.length; i++)
+      Reflect.deleteProperty(container, current[i]);
+    for (let i = 0;i < keys.length; i++)
+      Reflect.defineProperty(container, keys[i], descriptors[i]);
+  };
 }
 function addPlace(node, parent, key) {
   const places = node.places;
@@ -3756,6 +3836,14 @@ function unwrapItems(items) {
       items[i] = unwrapForStore(items[i]);
   }
 }
+function restoreOrder(target, before) {
+  for (let i = 0;i < before.length; i++) {
+    if (i in before)
+      target[i] = before[i];
+    else
+      delete target[i];
+  }
+}
 function evictRemoved(removed) {
   for (let i = 0;i < removed.length; i++) {
     if (isObject3(removed[i]))
@@ -3799,16 +3887,22 @@ function wrapArray(arr, node) {
               }
             }
             if (changed) {
-              relinkReorder(node, target, before, prop === "fill" ? [args[0]] : undefined);
               const located = locate(node);
-              if (located !== undefined) {
-                dispatch(located, {
-                  action: "replace",
-                  path: located.paths[0],
-                  oldValue: before,
-                  newValue: target
-                });
+              const event = located && {
+                action: "replace",
+                path: located.paths[0],
+                oldValue: before,
+                newValue: target
+              };
+              try {
+                copyPayload(event);
+              } catch (error) {
+                restoreOrder(target, before);
+                throw error;
               }
+              relinkReorder(node, target, before, prop === "fill" ? [args[0]] : undefined);
+              if (event !== undefined)
+                dispatch(located, event);
               trigger(target, Symbol.iterator);
               evictRemoved(before);
             }
@@ -3821,19 +3915,19 @@ function wrapArray(arr, node) {
           methodCache[prop] = function(...items) {
             unwrapItems(items);
             const oldLength = target.length;
-            const result = target.push(...items);
+            const located = items.length > 0 ? locate(node) : undefined;
+            const event = located && {
+              action: "array-push",
+              path: located.paths[0],
+              key: oldLength,
+              items
+            };
+            const result = copyPayload(event, target) ? target.push(...items) : writeThenCopy(target, event, () => target.push(...items));
             const newLength = target.length;
             if (items.length > 0) {
               relinkArray(node, target, oldLength, undefined, items);
-              const located = locate(node);
-              if (located !== undefined) {
-                dispatch(located, {
-                  action: "array-push",
-                  path: located.paths[0],
-                  key: oldLength,
-                  items
-                });
-              }
+              if (event !== undefined)
+                dispatch(located, event);
               trigger(target, Symbol.iterator);
               if (oldLength !== newLength) {
                 trigger(target, "length");
@@ -3850,19 +3944,19 @@ function wrapArray(arr, node) {
             const oldLength = target.length;
             const poppedIndex = oldLength - 1;
             const oldValue = target[poppedIndex];
-            const result = target.pop();
+            const located = locate(node);
+            const event = located && {
+              action: "array-pop",
+              path: located.paths[0],
+              key: poppedIndex,
+              oldValue
+            };
+            const result = copyPayload(event, target) ? target.pop() : writeThenCopy(target, event, () => target.pop());
             const newLength = target.length;
             if (isObject3(oldValue))
               detachPlace(oldValue, node, poppedIndex);
-            const located = locate(node);
-            if (located !== undefined) {
-              dispatch(located, {
-                action: "array-pop",
-                path: located.paths[0],
-                key: poppedIndex,
-                oldValue
-              });
-            }
+            if (event !== undefined)
+              dispatch(located, event);
             if (isObject3(oldValue))
               evictDeep(oldValue);
             trigger(target, Symbol.iterator);
@@ -3879,18 +3973,18 @@ function wrapArray(arr, node) {
               return;
             const oldLength = target.length;
             const oldValue = target[0];
-            const result = target.shift();
+            const located = locate(node);
+            const event = located && {
+              action: "array-shift",
+              path: located.paths[0],
+              key: 0,
+              oldValue
+            };
+            const result = copyPayload(event, target) ? target.shift() : writeThenCopy(target, event, () => target.shift());
             const newLength = target.length;
             relinkArray(node, target, 0, [oldValue]);
-            const located = locate(node);
-            if (located !== undefined) {
-              dispatch(located, {
-                action: "array-shift",
-                path: located.paths[0],
-                key: 0,
-                oldValue
-              });
-            }
+            if (event !== undefined)
+              dispatch(located, event);
             if (isObject3(oldValue))
               evictDeep(oldValue);
             trigger(target, Symbol.iterator);
@@ -3905,19 +3999,19 @@ function wrapArray(arr, node) {
           methodCache[prop] = function(...items) {
             unwrapItems(items);
             const oldLength = target.length;
-            const result = target.unshift(...items);
+            const located = items.length > 0 ? locate(node) : undefined;
+            const event = located && {
+              action: "array-unshift",
+              path: located.paths[0],
+              key: 0,
+              items
+            };
+            const result = copyPayload(event, target) ? target.unshift(...items) : writeThenCopy(target, event, () => target.unshift(...items));
             const newLength = target.length;
             if (items.length > 0) {
               relinkArray(node, target, 0, undefined, items);
-              const located = locate(node);
-              if (located !== undefined) {
-                dispatch(located, {
-                  action: "array-unshift",
-                  path: located.paths[0],
-                  key: 0,
-                  items
-                });
-              }
+              if (event !== undefined)
+                dispatch(located, event);
               trigger(target, Symbol.iterator);
               if (oldLength !== newLength) {
                 trigger(target, "length");
@@ -3934,21 +4028,22 @@ function wrapArray(arr, node) {
             const actualDeleteCount = args.length === 0 ? 0 : args.length === 1 ? oldLength - actualStart : Math.min(Math.max(toIntegerOrInfinity(args[1]), 0), oldLength - actualStart);
             const items = args.length > 2 ? args.slice(2) : [];
             unwrapItems(items);
-            const deletedItems = target.splice(actualStart, actualDeleteCount, ...items);
+            const changes = actualDeleteCount > 0 || items.length > 0;
+            const located = changes ? locate(node) : undefined;
+            const event = located && {
+              action: "array-splice",
+              path: located.paths[0],
+              key: actualStart,
+              deleteCount: actualDeleteCount,
+              items: items.length > 0 ? items : undefined,
+              oldValues: actualDeleteCount > 0 ? target.slice(actualStart, actualStart + actualDeleteCount) : undefined
+            };
+            const deletedItems = copyPayload(event, target) ? target.splice(actualStart, actualDeleteCount, ...items) : writeThenCopy(target, event, () => target.splice(actualStart, actualDeleteCount, ...items));
             const newLength = target.length;
-            if (actualDeleteCount > 0 || items.length > 0) {
+            if (changes) {
               relinkArray(node, target, actualStart, deletedItems, items);
-              const located = locate(node);
-              if (located !== undefined) {
-                dispatch(located, {
-                  action: "array-splice",
-                  path: located.paths[0],
-                  key: actualStart,
-                  deleteCount: actualDeleteCount,
-                  items: items.length > 0 ? items : undefined,
-                  oldValues: deletedItems.length > 0 ? deletedItems : undefined
-                });
-              }
+              if (event !== undefined)
+                dispatch(located, event);
               evictRemoved(deletedItems);
               trigger(target, Symbol.iterator);
               if (oldLength !== newLength) {
@@ -4041,9 +4136,13 @@ function wrapArray(arr, node) {
         return true;
       const truncated = prop === "length" && Number(value) < target.length ? target.slice(Number(value)) : undefined;
       const descriptor = Reflect.getOwnPropertyDescriptor(target, prop);
-      const result = Reflect.set(target, prop, value, receiver);
       const isNumericIndex = typeof prop === "number" || typeof prop === "string" && !isNaN(parseInt(String(prop)));
-      if (result && (!descriptor || !descriptor.set || isNumericIndex)) {
+      const emits = !descriptor || !descriptor.set || isNumericIndex;
+      const grows = prop === "length" && Number(value) > Number(oldValue);
+      const located = emits ? grows ? locate(node) : locate(node, prop) : undefined;
+      const event = located === undefined || grows ? undefined : { action: "set", path: located.paths[0], oldValue, newValue: value };
+      const result = copyPayload(event, target) ? Reflect.set(target, prop, value, receiver) : writeThenCopy(target, event, () => Reflect.set(target, prop, value, receiver));
+      if (result && emits) {
         if (truncated !== undefined) {
           relinkArray(node, target, target.length, truncated);
         } else if (prop !== "length") {
@@ -4053,27 +4152,18 @@ function wrapArray(arr, node) {
           if (isObject3(value))
             attachValue(value, node, key);
         }
-        if (Array.isArray(target) && prop === "length" && Number(value) > Number(oldValue)) {
-          const oldLength = Number(oldValue);
-          const newLength = Number(value);
-          const located = locate(node);
+        if (grows) {
           if (located !== undefined) {
+            const oldLength = Number(oldValue);
+            const newLength = Number(value);
             for (let i = oldLength;i < newLength; i++) {
               const index = String(i);
               const paths = located.paths.map((path) => [...path, index]);
               dispatch({ root: located.root, paths }, { action: "set", path: paths[0], newValue: undefined });
             }
           }
-        } else {
-          const located = locate(node, prop);
-          if (located !== undefined) {
-            dispatch(located, {
-              action: "set",
-              path: located.paths[0],
-              oldValue,
-              newValue: value
-            });
-          }
+        } else if (event !== undefined) {
+          dispatch(located, event);
         }
         if (isObject3(oldValue) && oldValue !== value) {
           evictDeep(oldValue);
@@ -4087,14 +4177,14 @@ function wrapArray(arr, node) {
     deleteProperty(target, prop) {
       const oldValue = target[prop];
       const hadProperty = Object.prototype.hasOwnProperty.call(target, prop);
-      const result = Reflect.deleteProperty(target, prop);
+      const located = hadProperty ? locate(node, prop) : undefined;
+      const event = located && { action: "delete", path: located.paths[0], oldValue };
+      const result = copyPayload(event, target) ? Reflect.deleteProperty(target, prop) : writeThenCopy(target, event, () => Reflect.deleteProperty(target, prop));
       if (hadProperty && result) {
         if (isObject3(oldValue))
           detachPlace(oldValue, node, placeKey(prop));
-        const located = locate(node, prop);
-        if (located !== undefined) {
-          dispatch(located, { action: "delete", path: located.paths[0], oldValue });
-        }
+        if (event !== undefined)
+          dispatch(located, event);
         trigger(target, prop);
         if (isObject3(oldValue))
           evictDeep(oldValue);
@@ -4144,22 +4234,25 @@ function wrapMap(map, node) {
             return receiver;
           if (oldValue && typeof oldValue === "object" && value2 && typeof value2 === "object" && deepEqual(oldValue, value2))
             return receiver;
-          target.set(key, value2);
+          const located = locate(node);
+          const event = located && {
+            action: "map-set",
+            path: located.paths[0],
+            key,
+            oldValue,
+            newValue: value2
+          };
+          if (copyPayload(event, target))
+            target.set(key, value2);
+          else
+            writeThenCopy(target, event, () => target.set(key, value2));
           const newSize = target.size;
           if (isObject4(oldValue))
             detachPlace(oldValue, node, key);
           if (isObject4(value2))
             attachValue(value2, node, key);
-          const located = locate(node);
-          if (located !== undefined) {
-            dispatch(located, {
-              action: "map-set",
-              path: located.paths[0],
-              key,
-              oldValue,
-              newValue: value2
-            });
-          }
+          if (event !== undefined)
+            dispatch(located, event);
           if (!existed) {
             trigger(target, Symbol.iterator);
             if (oldSize !== newSize) {
@@ -4181,20 +4274,20 @@ function wrapMap(map, node) {
             return false;
           const oldValue = target.get(key);
           const oldSize = target.size;
-          const result = target.delete(key);
+          const located = locate(node);
+          const event = located && {
+            action: "map-delete",
+            path: located.paths[0],
+            key,
+            oldValue
+          };
+          const result = copyPayload(event, target) ? target.delete(key) : writeThenCopy(target, event, () => target.delete(key));
           const newSize = target.size;
           if (result) {
             if (isObject4(oldValue))
               detachPlace(oldValue, node, key);
-            const located = locate(node);
-            if (located !== undefined) {
-              dispatch(located, {
-                action: "map-delete",
-                path: located.paths[0],
-                key,
-                oldValue
-              });
-            }
+            if (event !== undefined)
+              dispatch(located, event);
             trigger(target, Symbol.iterator);
             if (oldSize !== newSize) {
               trigger(target, "size");
@@ -4335,18 +4428,21 @@ function wrapSet(set, node) {
           const existed = target.has(value2);
           const oldSize = target.size;
           if (!existed) {
-            target.add(value2);
+            const located = locate(node);
+            const event = located && {
+              action: "set-add",
+              path: located.paths[0],
+              value: value2
+            };
+            if (copyPayload(event, target))
+              target.add(value2);
+            else
+              writeThenCopy(target, event, () => target.add(value2));
             const newSize = target.size;
             if (isObject5(value2))
               attachValue(value2, node, undefined);
-            const located = locate(node);
-            if (located !== undefined) {
-              dispatch(located, {
-                action: "set-add",
-                path: located.paths[0],
-                value: value2
-              });
-            }
+            if (event !== undefined)
+              dispatch(located, event);
             trigger(target, Symbol.iterator);
             if (oldSize !== newSize) {
               trigger(target, "size");
@@ -4362,20 +4458,20 @@ function wrapSet(set, node) {
           const oldSize = target.size;
           if (existed) {
             const oldValue = value2;
-            const result = target.delete(value2);
+            const located = locate(node);
+            const event = located && {
+              action: "set-delete",
+              path: located.paths[0],
+              value: value2,
+              oldValue
+            };
+            const result = copyPayload(event, target) ? target.delete(value2) : writeThenCopy(target, event, () => target.delete(value2));
             const newSize = target.size;
             if (result) {
               if (isObject5(value2))
                 detachPlace(value2, node, undefined);
-              const located = locate(node);
-              if (located !== undefined) {
-                dispatch(located, {
-                  action: "set-delete",
-                  path: located.paths[0],
-                  value: value2,
-                  oldValue
-                });
-              }
+              if (event !== undefined)
+                dispatch(located, event);
               trigger(target, Symbol.iterator);
               if (oldSize !== newSize) {
                 trigger(target, "size");
@@ -4592,21 +4688,22 @@ function wrapObject(obj, node, options) {
       if (!options?.async && isObject6(oldValue) && isObject6(value) && deepEqual(oldValue, value))
         return true;
       const descriptor = Reflect.getOwnPropertyDescriptor(target, prop);
-      const result = Reflect.set(target, prop, value, receiver);
-      if (result && (!descriptor || !descriptor.set)) {
+      const emits = !descriptor || !descriptor.set;
+      const located = emits ? locate(node, prop) : undefined;
+      const event = located && {
+        action: "set",
+        path: located.paths[0],
+        oldValue,
+        newValue: value
+      };
+      const result = copyPayload(event, target) ? Reflect.set(target, prop, value, receiver) : writeThenCopy(target, event, () => Reflect.set(target, prop, value, receiver));
+      if (result && emits) {
         if (isObject6(oldValue))
           detachPlace(oldValue, node, prop);
         if (isObject6(value))
           attachValue(value, node, prop);
-        const located = locate(node, prop);
-        if (located !== undefined) {
-          dispatch(located, {
-            action: "set",
-            path: located.paths[0],
-            oldValue,
-            newValue: value
-          });
-        }
+        if (event !== undefined)
+          dispatch(located, event);
         trigger(target, prop);
         if (isObject6(oldValue)) {
           evictDeep(oldValue);
@@ -4617,18 +4714,18 @@ function wrapObject(obj, node, options) {
     deleteProperty(target, prop) {
       const oldValue = target[prop];
       const hadProperty = Object.prototype.hasOwnProperty.call(target, prop);
-      const result = Reflect.deleteProperty(target, prop);
+      const located = hadProperty ? locate(node, prop) : undefined;
+      const event = located && {
+        action: "delete",
+        path: located.paths[0],
+        oldValue
+      };
+      const result = copyPayload(event, target) ? Reflect.deleteProperty(target, prop) : writeThenCopy(target, event, () => Reflect.deleteProperty(target, prop));
       if (hadProperty && result) {
         if (isObject6(oldValue))
           detachPlace(oldValue, node, prop);
-        const located = locate(node, prop);
-        if (located !== undefined) {
-          dispatch(located, {
-            action: "delete",
-            path: located.paths[0],
-            oldValue
-          });
-        }
+        if (event !== undefined)
+          dispatch(located, event);
         trigger(target, prop);
         if (isObject6(oldValue)) {
           evictDeep(oldValue);
