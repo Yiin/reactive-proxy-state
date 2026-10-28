@@ -64,7 +64,7 @@ var require_shared_cjs = __commonJS((exports2) => {
     }
   };
   var hasOwnProperty = Object.prototype.hasOwnProperty;
-  var hasOwn = (val, key) => hasOwnProperty.call(val, key);
+  var hasOwn2 = (val, key) => hasOwnProperty.call(val, key);
   var isArray = Array.isArray;
   var isMap = (val) => toTypeString(val) === "[object Map]";
   var isSet = (val) => toTypeString(val) === "[object Set]";
@@ -533,7 +533,7 @@ var require_shared_cjs = __commonJS((exports2) => {
   exports2.getEscapedCssVarName = getEscapedCssVarName;
   exports2.getGlobalThis = getGlobalThis;
   exports2.hasChanged = hasChanged;
-  exports2.hasOwn = hasOwn;
+  exports2.hasOwn = hasOwn2;
   exports2.hyphenate = hyphenate;
   exports2.includeBooleanAttr = includeBooleanAttr;
   exports2.invokeArrayFns = invokeArrayFns;
@@ -2393,7 +2393,6 @@ function unwrapForStore(value) {
   }
   return value;
 }
-var deepEqualCache = new WeakMap;
 var MAX_CACHE_SIZE = 1000;
 var pathCache = new WeakMap;
 var pathCacheSize = new WeakMap;
@@ -2405,10 +2404,11 @@ var proxyStats = {
   maps: 0,
   sets: 0,
   objects: 0,
-  staleEvicted: 0
+  staleEvicted: 0,
+  detachedWrites: 0
 };
 function getProxyStats() {
-  return { ...proxyStats };
+  return { ...proxyStats, pathConcatCacheSize: 0 };
 }
 function resetProxyStats() {
   proxyStats.created = 0;
@@ -2417,6 +2417,7 @@ function resetProxyStats() {
   proxyStats.sets = 0;
   proxyStats.objects = 0;
   proxyStats.staleEvicted = 0;
+  proxyStats.detachedWrites = 0;
 }
 function cleanupPathCache(root) {
   const cache = pathCache.get(root);
@@ -2432,11 +2433,11 @@ function cleanupPathCache(root) {
     pathCacheSize.set(root, MAX_CACHE_SIZE - entriesToRemove);
   }
 }
-function deepEqual(a, b, seen = new WeakMap) {
+function deepEqual(a, b, seen) {
   if (a === b)
     return true;
   if (a == null || b == null)
-    return a === b;
+    return false;
   if (typeof a !== typeof b)
     return false;
   if (a instanceof Date && b instanceof Date)
@@ -2445,45 +2446,75 @@ function deepEqual(a, b, seen = new WeakMap) {
     return false;
   if (Array.isArray(a) !== Array.isArray(b))
     return false;
-  if (seen.has(a))
-    return seen.get(a) === b;
-  seen.set(a, b);
-  if (deepEqualCache.has(a) && deepEqualCache.get(a)?.has(b)) {
-    return deepEqualCache.get(a).get(b);
+  if (seen !== undefined) {
+    if (seen.has(a))
+      return seen.get(a) === b;
+    seen.set(a, b);
   }
-  if (!deepEqualCache.has(a)) {
-    deepEqualCache.set(a, new WeakMap);
-  }
-  let result;
   if (Array.isArray(a)) {
-    result = a.length === b.length && a.every((val, idx) => deepEqual(val, b[idx], seen));
-  } else if (a instanceof Map && b instanceof Map) {
-    result = a.size === b.size;
-    if (result) {
-      for (const [key, value] of a) {
-        if (!b.has(key) || !deepEqual(value, b.get(key), seen)) {
-          result = false;
-          break;
-        }
-      }
+    if (a.length !== b.length)
+      return false;
+    for (let i = 0;i < a.length; i++) {
+      const left = a[i];
+      if (left === undefined && !(i in a))
+        continue;
+      const right = b[i];
+      if (left === right)
+        continue;
+      if (isObject(left) && isObject(right))
+        seen ??= startSeen(a, b);
+      if (!deepEqual(left, right, seen))
+        return false;
     }
-  } else if (a instanceof Set && b instanceof Set) {
-    result = a.size === b.size;
-    if (result) {
-      for (const value of a) {
-        if (!b.has(value)) {
-          result = false;
-          break;
-        }
-      }
-    }
-  } else {
-    const keysA = Object.keys(a);
-    const keysB = Object.keys(b);
-    result = keysA.length === keysB.length && keysA.every((key) => Object.prototype.hasOwnProperty.call(b, key) && deepEqual(a[key], b[key], seen));
+    return true;
   }
-  deepEqualCache.get(a).set(b, result);
-  return result;
+  if (a instanceof Map && b instanceof Map) {
+    if (a.size !== b.size)
+      return false;
+    for (const [key, left] of a) {
+      if (!b.has(key))
+        return false;
+      const right = b.get(key);
+      if (left === right)
+        continue;
+      if (isObject(left) && isObject(right))
+        seen ??= startSeen(a, b);
+      if (!deepEqual(left, right, seen))
+        return false;
+    }
+    return true;
+  }
+  if (a instanceof Set && b instanceof Set) {
+    if (a.size !== b.size)
+      return false;
+    for (const value of a) {
+      if (!b.has(value))
+        return false;
+    }
+    return true;
+  }
+  const keysA = Object.keys(a);
+  if (keysA.length !== Object.keys(b).length)
+    return false;
+  for (let i = 0;i < keysA.length; i++) {
+    const key = keysA[i];
+    if (!hasOwn.call(b, key))
+      return false;
+    const left = a[key];
+    const right = b[key];
+    if (left === right)
+      continue;
+    if (isObject(left) && isObject(right))
+      seen ??= startSeen(a, b);
+    if (!deepEqual(left, right, seen))
+      return false;
+  }
+  return true;
+}
+function startSeen(a, b) {
+  const seen = new WeakMap;
+  seen.set(a, b);
+  return seen;
 }
 function setInPathCache(root, pathKey, value) {
   if (!pathCache.has(root)) {
@@ -2553,59 +2584,81 @@ function traverse(value, seen = new Set) {
   return value;
 }
 function cloneTree(value) {
-  return cloneTreeInto(value, [], []);
-}
-function cloneTreeInto(value, ancestors, copies) {
-  if (value === null || typeof value !== "object") {
+  if (value === null || typeof value !== "object")
     return value;
+  const base = cloneAncestors.length;
+  try {
+    return cloneTreeInto(value, base);
+  } finally {
+    cloneAncestors.length = base;
+    cloneCopies.length = base;
   }
-  if (value instanceof Date) {
-    return new Date(value.getTime());
-  }
+}
+var cloneAncestors = [];
+var cloneCopies = [];
+var hasOwn = Object.prototype.hasOwnProperty;
+var isEnumerable = Object.prototype.propertyIsEnumerable;
+function cloneChild(value, base) {
+  return value === null || typeof value !== "object" ? value : cloneTreeInto(value, base);
+}
+function cloneTreeInto(value, base) {
   const identity = toRaw(value);
-  const cycle = ancestors.lastIndexOf(identity);
-  if (cycle !== -1)
-    return copies[cycle];
+  for (let i = cloneAncestors.length - 1;i >= base; i--) {
+    if (cloneAncestors[i] === identity)
+      return cloneCopies[i];
+  }
   let copy;
   if (Array.isArray(value)) {
-    copy = new Array(value.length);
-    ancestors.push(identity);
-    copies.push(copy);
-    for (let i = 0;i < value.length; i++) {
-      copy[i] = cloneTreeInto(value[i], ancestors, copies);
-    }
-  } else if (value instanceof Map) {
-    copy = new Map;
-    ancestors.push(identity);
-    copies.push(copy);
-    value.forEach((entry, key) => {
-      copy.set(cloneTreeInto(key, ancestors, copies), cloneTreeInto(entry, ancestors, copies));
-    });
-  } else if (value instanceof Set) {
-    copy = new Set;
-    ancestors.push(identity);
-    copies.push(copy);
-    value.forEach((entry) => {
-      copy.add(cloneTreeInto(entry, ancestors, copies));
-    });
+    const length = value.length;
+    copy = new Array(length);
+    cloneAncestors.push(identity);
+    cloneCopies.push(copy);
+    for (let i = 0;i < length; i++)
+      copy[i] = cloneChild(value[i], base);
   } else {
-    copy = Object.create(Object.getPrototypeOf(value));
-    ancestors.push(identity);
-    copies.push(copy);
+    const prototype = Object.getPrototypeOf(value);
+    if (prototype === Object.prototype) {
+      copy = {};
+    } else if (value instanceof Date) {
+      return new Date(value.getTime());
+    } else if (value instanceof Map) {
+      copy = new Map;
+      cloneAncestors.push(identity);
+      cloneCopies.push(copy);
+      value.forEach((entry, key) => {
+        copy.set(cloneChild(key, base), cloneChild(entry, base));
+      });
+      cloneAncestors.pop();
+      cloneCopies.pop();
+      return copy;
+    } else if (value instanceof Set) {
+      copy = new Set;
+      cloneAncestors.push(identity);
+      cloneCopies.push(copy);
+      value.forEach((entry) => {
+        copy.add(cloneChild(entry, base));
+      });
+      cloneAncestors.pop();
+      cloneCopies.pop();
+      return copy;
+    } else {
+      copy = Object.create(prototype);
+    }
+    cloneAncestors.push(identity);
+    cloneCopies.push(copy);
     for (const key in value) {
-      if (Object.prototype.hasOwnProperty.call(value, key)) {
-        copy[key] = cloneTreeInto(value[key], ancestors, copies);
-      }
+      if (hasOwn.call(value, key))
+        copy[key] = cloneChild(value[key], base);
     }
     const symbolKeys = Object.getOwnPropertySymbols(value);
-    for (const symbolKey of symbolKeys) {
-      if (Object.prototype.propertyIsEnumerable.call(value, symbolKey)) {
-        copy[symbolKey] = cloneTreeInto(value[symbolKey], ancestors, copies);
-      }
+    for (let i = 0;i < symbolKeys.length; i++) {
+      const symbolKey = symbolKeys[i];
+      if (isEnumerable.call(value, symbolKey))
+        copy[symbolKey] = cloneChild(value[symbolKey], base);
     }
   }
-  ancestors.pop();
-  copies.pop();
+  cloneAncestors.pop();
+  cloneCopies.pop();
   return copy;
 }
 function deepClone(value, seen = new WeakMap) {
@@ -2901,7 +2954,21 @@ function updateState(root, event) {
   }
 }
 // src/location.ts
+class Place {
+  parentRef;
+  parentId;
+  key;
+  constructor(parent, key) {
+    this.parentRef = new WeakRef(parent);
+    this.parentId = parent.id;
+    this.key = key;
+  }
+  get parent() {
+    return this.parentRef.deref();
+  }
+}
 var nodes = new WeakMap;
+var nodeCount = 0;
 var FAST_CHAIN_LIMIT = 256;
 function isObject2(value) {
   return value !== null && typeof value === "object";
@@ -2910,45 +2977,52 @@ function ensureLocationNode(raw) {
   let node = nodes.get(raw);
   if (node === undefined) {
     node = {
+      id: ++nodeCount,
       raw,
       kind: raw instanceof Map ? 1 /* Map */ : raw instanceof Set ? 2 /* Set */ : 0 /* Plain */,
       places: [],
       root: undefined,
       scope: undefined,
       evicted: undefined,
-      relinked: 0
+      relinked: 0,
+      lostLink: false
     };
     nodes.set(raw, node);
   }
   return node;
 }
-function holds(place, raw) {
-  const container = place.parent.raw;
-  switch (place.parent.kind) {
+function holdsIn(parent, key, raw) {
+  if (parent === undefined)
+    return false;
+  const container = parent.raw;
+  switch (parent.kind) {
     case 1 /* Map */:
-      return container.get(place.key) === raw;
+      return container.get(key) === raw;
     case 2 /* Set */:
       return container.has(raw);
     default:
-      return container[place.key] === raw;
+      return container[key] === raw;
   }
 }
-function segment(place, raw) {
-  if (place.parent.kind === 2 /* Set */) {
+function holds(place, raw) {
+  return holdsIn(place.parent, place.key, raw);
+}
+function segment(parent, key, raw) {
+  if (parent.kind === 2 /* Set */) {
     let index = 0;
-    for (const member of place.parent.raw) {
+    for (const member of parent.raw) {
       if (member === raw)
         break;
       index++;
     }
     return String(index);
   }
-  return String(place.key);
+  return String(key);
 }
 function samePlace(place, parent, key) {
-  return place.parent === parent && (parent.kind === 2 /* Set */ || place.key === key);
+  return place.parentId === parent.id && (parent.kind === 2 /* Set */ || place.key === key);
 }
-function find(node, tail, firstOnly) {
+function chain(node, tail) {
   let reversed;
   let current = node;
   for (let steps = 0;steps < FAST_CHAIN_LIMIT; steps++) {
@@ -2956,22 +3030,23 @@ function find(node, tail, firstOnly) {
     const root = current.root;
     if (root !== undefined) {
       if (places.length !== 0)
-        break;
-      return [{ root, path: buildPath(root.path, reversed, tail) }];
+        return;
+      return { root, paths: [buildPath(root.path, reversed, tail)] };
     }
-    if (places.length !== 1) {
-      if (places.length === 0)
-        return [];
-      break;
-    }
+    if (places.length !== 1)
+      return places.length === 0 ? null : undefined;
     const place = places[0];
-    if (!holds(place, current.raw)) {
+    const parent = place.parent;
+    if (!holdsIn(parent, place.key, current.raw)) {
       places.length = 0;
-      return [];
+      return null;
     }
-    (reversed ??= []).push(segment(place, current.raw));
-    current = place.parent;
+    (reversed ??= []).push(segment(parent, place.key, current.raw));
+    current = parent;
   }
+  return;
+}
+function findAll(node, tail, firstOnly) {
   const out = [];
   collect(node, tail === undefined ? [] : [String(tail)], new Set, out, firstOnly);
   return out;
@@ -3000,20 +3075,31 @@ function collect(node, suffix, visiting, out, firstOnly) {
   let stale = false;
   for (let i = 0;i < places.length && !(firstOnly && out.length > 0); i++) {
     const place = places[i];
-    if (!holds(place, node.raw)) {
+    const parent = place.parent;
+    if (!holdsIn(parent, place.key, node.raw)) {
       stale = true;
       continue;
     }
-    collect(place.parent, [segment(place, node.raw), ...suffix], visiting, out, firstOnly);
+    collect(parent, [segment(parent, place.key, node.raw), ...suffix], visiting, out, firstOnly);
   }
   if (stale)
     node.places = places.filter((place) => holds(place, node.raw));
   visiting.delete(node);
 }
 function locate(node, tail) {
-  const found = find(node, tail, false);
-  if (found.length === 0)
+  const single = chain(node, tail);
+  if (single !== undefined) {
+    if (single === null) {
+      proxyStats.detachedWrites++;
+      return;
+    }
+    return single.root.emit === undefined ? undefined : single;
+  }
+  const found = findAll(node, tail, false);
+  if (found.length === 0) {
+    proxyStats.detachedWrites++;
     return;
+  }
   let root = found[0].root;
   for (let i = 1;i < found.length; i++) {
     if (found[i].root !== root) {
@@ -3033,27 +3119,42 @@ function locate(node, tail) {
   return { root, paths };
 }
 function isAttached(node) {
-  return find(node, undefined, true).length > 0;
+  const single = chain(node, undefined);
+  if (single !== undefined)
+    return single !== null;
+  return findAll(node, undefined, true).length > 0;
 }
 function dispatch(target, event) {
   const { root, paths } = target;
   const emit = root.emit;
+  const live = paths.length > 1 ? { ...event } : event;
   for (let i = 0;i < paths.length; i++) {
-    const path = paths[i];
-    if (i === 0) {
-      event.path = path;
-      emit(event);
-      continue;
-    }
-    const copy = { ...event, path };
-    if ("newValue" in event)
-      copy.newValue = cloneTree(event.newValue);
-    if ("value" in event)
-      copy.value = cloneTree(event.value);
-    if (event.items !== undefined)
-      copy.items = cloneTree(event.items);
+    const copy = i === 0 ? event : { ...live };
+    copy.path = paths[i];
+    snapshotPayload(copy, live);
     emit(copy);
   }
+}
+function snapshotPayload(event, live) {
+  if (isObject2(live.newValue))
+    event.newValue = cloneTree(live.newValue);
+  if (isObject2(live.oldValue))
+    event.oldValue = cloneTree(live.oldValue);
+  if (isObject2(live.value))
+    event.value = cloneTree(live.value);
+  const items = live.items;
+  if (items !== undefined) {
+    if (event === live) {
+      for (let i = 0;i < items.length; i++) {
+        if (isObject2(items[i]))
+          items[i] = cloneTree(items[i]);
+      }
+    } else {
+      event.items = cloneTree(items);
+    }
+  }
+  if (live.oldValues !== undefined)
+    event.oldValues = cloneTree(live.oldValues);
 }
 function addPlace(node, parent, key) {
   const places = node.places;
@@ -3061,17 +3162,33 @@ function addPlace(node, parent, key) {
     if (samePlace(places[i], parent, key))
       return false;
   }
-  places.push({ parent, key });
+  places.push(new Place(parent, key));
   return true;
 }
 function prunePlaces(node) {
   let places = node.places.filter((place) => holds(place, node.raw));
   if (places.length > 1) {
     const live = places.filter((place) => isAttached(place.parent));
-    if (live.length > 0)
+    if (live.length > 0 && live.length < places.length) {
+      for (let i = 0;i < places.length; i++) {
+        if (!live.includes(places[i]))
+          markLostLink(places[i].parent);
+      }
       places = live;
+    }
   }
   node.places = places;
+}
+function markLostLink(node) {
+  if (node.lostLink)
+    return;
+  node.lostLink = true;
+  const places = node.places;
+  for (let i = 0;i < places.length; i++) {
+    const parent = places[i].parent;
+    if (parent !== undefined)
+      markLostLink(parent);
+  }
 }
 function notePlace(node, parent, key) {
   const places = node.places;
@@ -3092,57 +3209,84 @@ function detachPlace(value, parent, key) {
     }
   }
 }
-function adopt(raw, touched, seen) {
-  const existing = nodes.get(raw);
-  if (existing !== undefined)
-    return existing;
-  if (seen.has(raw))
-    return;
-  seen.add(raw);
-  if (raw["__v_skip" /* SKIP */] || raw["__v_isReactive" /* IS_REACTIVE */])
-    return;
-  let node;
+function newWalk(touched, aliases) {
+  return { touched, seen: new Set, repeated: undefined, aliases, relinked: [] };
+}
+function adopt(raw, walk) {
+  let node = nodes.get(raw);
+  if (node !== undefined && !node.lostLink)
+    return node;
+  if (walk.seen.has(raw)) {
+    if (node === undefined)
+      (walk.repeated ??= new Set).add(raw);
+    return node;
+  }
+  walk.seen.add(raw);
+  if (node !== undefined) {
+    walk.relinked.push(node);
+  } else {
+    if (raw["__v_skip" /* SKIP */] || raw["__v_isReactive" /* IS_REACTIVE */])
+      return;
+    if (walk.aliases?.has(raw))
+      node = ensureLocationNode(raw);
+  }
+  return adoptChildren(raw, node, walk);
+}
+function adoptChildren(raw, node, walk) {
   if (Array.isArray(raw)) {
     for (let i = 0;i < raw.length; i++) {
       const child = raw[i];
       if (child !== null && typeof child === "object")
-        node = adoptChild(raw, node, i, child, touched, seen);
+        node = adoptChild(raw, node, i, child, walk);
     }
     return node;
   }
   if (raw instanceof Map) {
     for (const [key, child] of raw) {
       if (child !== null && typeof child === "object")
-        node = adoptChild(raw, node, key, child, touched, seen);
+        node = adoptChild(raw, node, key, child, walk);
     }
     return node;
   }
   if (raw instanceof Set) {
     for (const child of raw) {
       if (child !== null && typeof child === "object")
-        node = adoptChild(raw, node, undefined, child, touched, seen);
+        node = adoptChild(raw, node, undefined, child, walk);
     }
     return node;
   }
   if (raw instanceof Date || ArrayBuffer.isView(raw))
-    return;
+    return node;
   for (const key in raw) {
     if (!Object.prototype.hasOwnProperty.call(raw, key))
       continue;
     const child = raw[key];
     if (child !== null && typeof child === "object")
-      node = adoptChild(raw, node, key, child, touched, seen);
+      node = adoptChild(raw, node, key, child, walk);
   }
   return node;
 }
-function adoptChild(container, containerNode, key, child, touched, seen) {
-  const childNode = adopt(child, touched, seen);
+function adoptChild(container, containerNode, key, child, walk) {
+  const childNode = adopt(child, walk);
   if (childNode === undefined)
     return containerNode;
   containerNode ??= ensureLocationNode(container);
   if (addPlace(childNode, containerNode, key))
-    touched.push(childNode);
+    walk.touched.push(childNode);
   return containerNode;
+}
+function adoptAll(touched, visit) {
+  let walk = newWalk(touched);
+  visit(walk);
+  if (walk.repeated !== undefined) {
+    const first = walk;
+    walk = newWalk(touched, first.repeated);
+    visit(walk);
+    for (let i = 0;i < first.relinked.length; i++)
+      first.relinked[i].lostLink = false;
+  }
+  for (let i = 0;i < walk.relinked.length; i++)
+    walk.relinked[i].lostLink = false;
 }
 function pruneTouched(touched) {
   for (let i = 0;i < touched.length; i++) {
@@ -3150,22 +3294,86 @@ function pruneTouched(touched) {
       prunePlaces(touched[i]);
   }
 }
+function hasObjectChild(raw) {
+  if (Array.isArray(raw)) {
+    for (let i = 0;i < raw.length; i++)
+      if (isObject2(raw[i]))
+        return true;
+    return false;
+  }
+  if (Object.getPrototypeOf(raw) !== Object.prototype) {
+    if (raw instanceof Map || raw instanceof Set) {
+      for (const child of raw.values())
+        if (isObject2(child))
+          return true;
+      return false;
+    }
+    if (raw instanceof Date || ArrayBuffer.isView(raw))
+      return false;
+  }
+  for (const key in raw) {
+    if (Object.prototype.hasOwnProperty.call(raw, key) && isObject2(raw[key]))
+      return true;
+  }
+  return false;
+}
+function insertedNeedWalk(inserted) {
+  for (let i = 0;i < inserted.length; i++) {
+    const value = inserted[i];
+    if (!isObject2(value))
+      continue;
+    const node = nodes.get(value);
+    if (node !== undefined) {
+      if (node.lostLink)
+        return true;
+      continue;
+    }
+    if (hasObjectChild(value) || inserted.indexOf(value, i + 1) !== -1)
+      return true;
+  }
+  return false;
+}
 function attachValue(value, parent, key) {
+  const existing = nodes.get(value);
+  if (existing !== undefined && !existing.lostLink) {
+    if (addPlace(existing, parent, key) && existing.places.length > 1)
+      prunePlaces(existing);
+    return;
+  }
+  if (existing === undefined && !hasObjectChild(value))
+    return;
   const touched = [];
-  const node = adopt(value, touched, new Set);
-  if (node !== undefined && addPlace(node, parent, key))
-    touched.push(node);
+  adoptAll(touched, (walk) => {
+    const node = adopt(value, walk);
+    if (node !== undefined && addPlace(node, parent, key))
+      touched.push(node);
+  });
+  pruneTouched(touched);
+}
+function adoptRoot(node) {
+  const touched = [];
+  adoptAll(touched, (walk) => {
+    walk.seen.add(node.raw);
+    adoptChildren(node.raw, node, walk);
+  });
   pruneTouched(touched);
 }
 function relinkArray(arrayNode, array, from, removed, inserted) {
+  relink(arrayNode, array, from, removed, inserted, false);
+}
+function relinkReorder(arrayNode, array, removed, inserted) {
+  relink(arrayNode, array, 0, removed, inserted, true);
+}
+function relink(arrayNode, array, from, removed, inserted, findAliases) {
   const touched = [];
-  if (inserted !== undefined) {
-    const seen = new Set;
-    for (let i = 0;i < inserted.length; i++) {
-      const value = inserted[i];
-      if (isObject2(value))
-        adopt(value, touched, seen);
-    }
+  if (inserted !== undefined && insertedNeedWalk(inserted)) {
+    adoptAll(touched, (walk) => {
+      for (let i = 0;i < inserted.length; i++) {
+        const value = inserted[i];
+        if (isObject2(value))
+          adopt(value, walk);
+      }
+    });
   }
   if (removed !== undefined) {
     for (let i = 0;i < removed.length; i++) {
@@ -3178,23 +3386,35 @@ function relinkArray(arrayNode, array, from, removed, inserted) {
     }
   }
   const call = ++relinkCalls;
+  let firstIndex;
   for (let i = from;i < array.length; i++) {
     const value = array[i];
     if (!isObject2(value))
       continue;
-    const node = nodes.get(value);
-    if (node === undefined)
-      continue;
-    if (node.relinked !== call) {
+    let node = nodes.get(value);
+    if (node === undefined) {
+      if (!findAliases)
+        continue;
+      const first = (firstIndex ??= new Map).get(value);
+      if (first === undefined) {
+        firstIndex.set(value, i);
+        continue;
+      }
+      if (value["__v_skip" /* SKIP */])
+        continue;
+      node = ensureLocationNode(value);
+      node.relinked = call;
+      node.places.push(new Place(arrayNode, first));
+    } else if (node.relinked !== call) {
       node.relinked = call;
       const places = node.places;
-      if (places.length === 1 && places[0].parent === arrayNode && typeof places[0].key === "number" && places[0].key >= from) {
+      if (places.length === 1 && places[0].parentId === arrayNode.id && typeof places[0].key === "number" && places[0].key >= from) {
         places[0].key = i;
         continue;
       }
       stripIndexes(node, arrayNode, from);
     }
-    node.places.push({ parent: arrayNode, key: i });
+    node.places.push(new Place(arrayNode, i));
     if (node.places.length > 1)
       touched.push(node);
   }
@@ -3205,7 +3425,7 @@ function stripIndexes(node, arrayNode, from) {
   const places = node.places;
   for (let i = places.length - 1;i >= 0; i--) {
     const place = places[i];
-    if (place.parent === arrayNode && typeof place.key === "number" && place.key >= from) {
+    if (place.parentId === arrayNode.id && typeof place.key === "number" && place.key >= from) {
       places.splice(i, 1);
     }
   }
@@ -3219,7 +3439,7 @@ function evictDeep(value, parent) {
     return;
   const node = nodes.get(value);
   if (node !== undefined) {
-    const onlyUnderParent = parent !== undefined && node.root === undefined && node.places.length === 1 && node.places[0].parent === parent;
+    const onlyUnderParent = parent !== undefined && node.root === undefined && node.places.length === 1 && node.places[0].parentId === parent.id;
     if (!onlyUnderParent && isAttached(node))
       return;
     node.evicted = new WeakRef(proxy);
@@ -3450,6 +3670,15 @@ function placeKey(prop) {
   const index = arrayIndex(prop);
   return index >= 0 ? index : prop;
 }
+function toIntegerOrInfinity(value) {
+  const number = Number(value);
+  if (number !== number || number === 0)
+    return 0;
+  return Math.trunc(number);
+}
+function clampIndex(relative, length) {
+  return relative < 0 ? Math.max(length + relative, 0) : Math.min(relative, length);
+}
 function unwrapItems(items) {
   for (let i = 0;i < items.length; i++) {
     if (isObject3(items[i]))
@@ -3499,14 +3728,14 @@ function wrapArray(arr, node) {
               }
             }
             if (changed) {
-              relinkArray(node, target, 0, before, prop === "fill" ? [args[0]] : undefined);
+              relinkReorder(node, target, before, prop === "fill" ? [args[0]] : undefined);
               const located = locate(node);
               if (located !== undefined) {
                 dispatch(located, {
                   action: "replace",
                   path: located.paths[0],
                   oldValue: before,
-                  newValue: cloneTree(target)
+                  newValue: target
                 });
               }
               trigger(target, Symbol.iterator);
@@ -3628,14 +3857,13 @@ function wrapArray(arr, node) {
           return methodCache[prop];
         case "splice":
           track(target, "length");
-          methodCache[prop] = function(start, deleteCount, ...items) {
-            unwrapItems(items);
+          methodCache[prop] = function(...args) {
             const oldLength = target.length;
-            const actualStart = start < 0 ? Math.max(target.length + start, 0) : Math.min(start, target.length);
-            const deleteCountNum = deleteCount === undefined ? target.length - actualStart : Number(deleteCount);
-            const actualDeleteCount = Math.min(deleteCountNum, target.length - actualStart);
-            const deletedItems = target.slice(actualStart, actualStart + actualDeleteCount);
-            const result = target.splice(start, deleteCountNum, ...items);
+            const actualStart = args.length === 0 ? 0 : clampIndex(toIntegerOrInfinity(args[0]), oldLength);
+            const actualDeleteCount = args.length === 0 ? 0 : args.length === 1 ? oldLength - actualStart : Math.min(Math.max(toIntegerOrInfinity(args[1]), 0), oldLength - actualStart);
+            const items = args.length > 2 ? args.slice(2) : [];
+            unwrapItems(items);
+            const deletedItems = target.splice(actualStart, actualDeleteCount, ...items);
             const newLength = target.length;
             if (actualDeleteCount > 0 || items.length > 0) {
               relinkArray(node, target, actualStart, deletedItems, items);
@@ -3656,7 +3884,7 @@ function wrapArray(arr, node) {
                 trigger(target, "length");
               }
             }
-            return result;
+            return deletedItems;
           };
           return methodCache[prop];
         case "find": {
@@ -3731,7 +3959,7 @@ function wrapArray(arr, node) {
       const oldValue = target[prop];
       if (oldValue === value && Reflect.has(target, prop))
         return true;
-      if (isObject3(oldValue) && isObject3(value) && deepEqual(oldValue, value, new WeakMap))
+      if (isObject3(oldValue) && isObject3(value) && deepEqual(oldValue, value))
         return true;
       const truncated = prop === "length" && Number(value) < target.length ? target.slice(Number(value)) : undefined;
       const descriptor = Reflect.getOwnPropertyDescriptor(target, prop);
@@ -3750,10 +3978,12 @@ function wrapArray(arr, node) {
         if (Array.isArray(target) && prop === "length" && Number(value) > Number(oldValue)) {
           const oldLength = Number(oldValue);
           const newLength = Number(value);
-          for (let i = oldLength;i < newLength; i++) {
-            const located = locate(node, String(i));
-            if (located !== undefined) {
-              dispatch(located, { action: "set", path: located.paths[0], newValue: undefined });
+          const located = locate(node);
+          if (located !== undefined) {
+            for (let i = oldLength;i < newLength; i++) {
+              const index = String(i);
+              const paths = located.paths.map((path) => [...path, index]);
+              dispatch({ root: located.root, paths }, { action: "set", path: paths[0], newValue: undefined });
             }
           }
         } else {
@@ -3763,7 +3993,7 @@ function wrapArray(arr, node) {
               action: "set",
               path: located.paths[0],
               oldValue,
-              newValue: isObject3(value) ? cloneTree(value) : value
+              newValue: value
             });
           }
         }
@@ -3834,7 +4064,7 @@ function wrapMap(map, node) {
           const oldSize = target.size;
           if (oldValue === value2)
             return receiver;
-          if (oldValue && typeof oldValue === "object" && value2 && typeof value2 === "object" && deepEqual(oldValue, value2, new WeakMap))
+          if (oldValue && typeof oldValue === "object" && value2 && typeof value2 === "object" && deepEqual(oldValue, value2))
             return receiver;
           target.set(key, value2);
           const newSize = target.size;
@@ -3849,7 +4079,7 @@ function wrapMap(map, node) {
               path: located.paths[0],
               key,
               oldValue,
-              newValue: isObject4(value2) ? cloneTree(value2) : value2
+              newValue: value2
             });
           }
           if (!existed) {
@@ -4214,7 +4444,7 @@ function reactive(obj, emit, path = [], options) {
       const initialEvent = {
         action: "replace",
         path: [],
-        newValue: obj
+        newValue: cloneTree(obj)
       };
       emit(initialEvent);
     } catch (error) {
@@ -4224,6 +4454,8 @@ function reactive(obj, emit, path = [], options) {
   const node = ensureLocationNode(obj);
   node.root = { emit, path };
   node.scope = node.root;
+  if (emit)
+    adoptRoot(node);
   return createProxy(obj, node, options);
 }
 function wrapChild(raw, parent, key, options) {
@@ -4278,7 +4510,7 @@ function wrapObject(obj, node, options) {
       const oldValue = target[prop];
       if (oldValue === value)
         return true;
-      if (!options?.async && isObject6(oldValue) && isObject6(value) && deepEqual(oldValue, value, new WeakMap))
+      if (!options?.async && isObject6(oldValue) && isObject6(value) && deepEqual(oldValue, value))
         return true;
       const descriptor = Reflect.getOwnPropertyDescriptor(target, prop);
       const result = Reflect.set(target, prop, value, receiver);
@@ -4293,7 +4525,7 @@ function wrapObject(obj, node, options) {
             action: "set",
             path: located.paths[0],
             oldValue,
-            newValue: isObject6(value) ? cloneTree(value) : value
+            newValue: value
           });
         }
         trigger(target, prop);

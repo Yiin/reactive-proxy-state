@@ -19,8 +19,14 @@ export declare const proxyStats: {
     objects: number;
     /** Number of old proxied values evicted when replaced via set trap */
     staleEvicted: number;
+    /**
+     * Writes through a proxy whose object is in no tree (it was removed, or
+     * never placed). They change the object and emit nothing.
+     */
+    detachedWrites: number;
 };
 export declare function getProxyStats(): {
+    pathConcatCacheSize: number;
     created: number;
     arrays: number;
     maps: number;
@@ -28,6 +34,11 @@ export declare function getProxyStats(): {
     objects: number;
     /** Number of old proxied values evicted when replaced via set trap */
     staleEvicted: number;
+    /**
+     * Writes through a proxy whose object is in no tree (it was removed, or
+     * never placed). They change the object and emit nothing.
+     */
+    detachedWrites: number;
 };
 export declare function resetProxyStats(): void;
 export declare function deepEqual(a: any, b: any, seen?: WeakMap<any, any>): boolean;
