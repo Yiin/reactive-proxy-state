@@ -2359,7 +2359,9 @@ __export(exports_src, {
   createBridgeEmitter: () => createBridgeEmitter,
   computed: () => computed,
   cleanupEffect: () => cleanupEffect,
-  activeEffect: () => activeEffect
+  activeEffect: () => activeEffect,
+  SnapshotLimitError: () => SnapshotLimitError,
+  SNAPSHOT_SHARED_COPY_LIMIT: () => SNAPSHOT_SHARED_COPY_LIMIT
 });
 module.exports = __toCommonJS(exports_src);
 
@@ -2583,16 +2585,100 @@ function traverse(value, seen = new Set) {
   }
   return value;
 }
+var SNAPSHOT_SHARED_COPY_LIMIT = 1e5;
+
+class SnapshotLimitError extends RangeError {
+  constructor(extraCopies) {
+    super(`reactive-proxy-state: a snapshot would copy shared objects more than ` + `${SNAPSHOT_SHARED_COPY_LIMIT} extra times (counted ${extraCopies} before stopping; ` + `an object is copied once per place it holds)`);
+    this.name = "SnapshotLimitError";
+  }
+}
+var SNAPSHOT_CHECK_AFTER = 1e4;
 function cloneTree(value) {
   if (value === null || typeof value !== "object")
     return value;
   const base = cloneAncestors.length;
+  const outerTop = cloneTop;
+  const outerCountdown = cloneCountdown;
+  cloneTop = value;
+  cloneCountdown = SNAPSHOT_CHECK_AFTER;
   try {
     return cloneTreeInto(value, base);
   } finally {
     cloneAncestors.length = base;
     cloneCopies.length = base;
+    cloneTop = outerTop;
+    cloneCountdown = outerCountdown;
   }
+}
+var cloneTop;
+var cloneCountdown = 0;
+function countCopy() {
+  if (--cloneCountdown === 0)
+    checkSharedCopies(cloneTop);
+}
+function checkSharedCopies(value) {
+  const walk = { extra: 0, low: Infinity, depth: new Map, sizes: new Map, distinct: new Set };
+  walkCopies(value, 0, walk);
+  if (walk.extra > SNAPSHOT_SHARED_COPY_LIMIT) {
+    throw new SnapshotLimitError(walk.extra);
+  }
+}
+function walkCopies(value, depth, walk) {
+  const identity = toRaw(value);
+  const ancestor = walk.depth.get(identity);
+  if (ancestor !== undefined) {
+    walk.low = ancestor;
+    return 0;
+  }
+  walk.low = Infinity;
+  const known = walk.sizes.get(identity);
+  if (known !== undefined) {
+    walk.extra += known;
+    return known;
+  }
+  if (walk.distinct.has(identity))
+    walk.extra++;
+  else
+    walk.distinct.add(identity);
+  if (identity instanceof Date || walk.extra > SNAPSHOT_SHARED_COPY_LIMIT)
+    return 1;
+  walk.depth.set(identity, depth);
+  let size = 1;
+  let low = Infinity;
+  const child = (entry) => {
+    if (entry === null || typeof entry !== "object" || walk.extra > SNAPSHOT_SHARED_COPY_LIMIT)
+      return;
+    size += walkCopies(entry, depth + 1, walk);
+    if (walk.low < low)
+      low = walk.low;
+  };
+  if (Array.isArray(identity)) {
+    for (let i = 0;i < identity.length; i++)
+      child(identity[i]);
+  } else if (identity instanceof Map) {
+    identity.forEach((entry, key) => {
+      child(key);
+      child(entry);
+    });
+  } else if (identity instanceof Set) {
+    identity.forEach(child);
+  } else {
+    for (const key in identity) {
+      if (hasOwn.call(identity, key))
+        child(identity[key]);
+    }
+    const symbolKeys = Object.getOwnPropertySymbols(identity);
+    for (let i = 0;i < symbolKeys.length; i++) {
+      if (isEnumerable.call(identity, symbolKeys[i]))
+        child(identity[symbolKeys[i]]);
+    }
+  }
+  walk.depth.delete(identity);
+  if (low >= depth)
+    walk.sizes.set(identity, size);
+  walk.low = low;
+  return size;
 }
 var cloneAncestors = [];
 var cloneCopies = [];
@@ -2607,6 +2693,7 @@ function cloneTreeInto(value, base) {
     if (cloneAncestors[i] === identity)
       return cloneCopies[i];
   }
+  countCopy();
   let copy;
   if (Array.isArray(value)) {
     const length = value.length;
@@ -3213,12 +3300,20 @@ function detachPlace(value, parent, key) {
     }
   }
 }
-function newWalk(touched, aliases) {
-  return { touched, seen: new Set, repeated: undefined, aliases, relinked: [] };
+function newWalk(touched, first) {
+  return {
+    touched,
+    seen: new Set,
+    repeated: undefined,
+    aliases: first?.repeated,
+    created: undefined,
+    revisit: first?.created,
+    relinked: []
+  };
 }
 function adopt(raw, walk) {
   let node = nodes.get(raw);
-  if (node !== undefined && !node.lostLink)
+  if (node !== undefined && !node.lostLink && walk.revisit?.has(raw) !== true)
     return node;
   if (walk.seen.has(raw)) {
     if (node === undefined)
@@ -3227,14 +3322,18 @@ function adopt(raw, walk) {
   }
   walk.seen.add(raw);
   if (node !== undefined) {
-    walk.relinked.push(node);
-  } else {
-    if (raw["__v_skip" /* SKIP */] || raw["__v_isReactive" /* IS_REACTIVE */])
-      return;
-    if (walk.aliases?.has(raw))
-      node = ensureLocationNode(raw);
+    if (node.lostLink)
+      walk.relinked.push(node);
+    return adoptChildren(raw, node, walk);
   }
-  return adoptChildren(raw, node, walk);
+  if (raw["__v_skip" /* SKIP */] || raw["__v_isReactive" /* IS_REACTIVE */])
+    return;
+  if (walk.aliases?.has(raw))
+    node = ensureLocationNode(raw);
+  node = adoptChildren(raw, node, walk);
+  if (node !== undefined && walk.aliases === undefined)
+    (walk.created ??= new Set).add(raw);
+  return node;
 }
 function adoptChildren(raw, node, walk) {
   if (Array.isArray(raw)) {
@@ -3284,7 +3383,7 @@ function adoptAll(touched, visit) {
   visit(walk);
   if (walk.repeated !== undefined) {
     const first = walk;
-    walk = newWalk(touched, first.repeated);
+    walk = newWalk(touched, first);
     visit(walk);
     for (let i = 0;i < first.relinked.length; i++)
       first.relinked[i].lostLink = false;
@@ -3322,6 +3421,7 @@ function hasObjectChild(raw) {
   return false;
 }
 function insertedNeedWalk(inserted) {
+  let fresh;
   for (let i = 0;i < inserted.length; i++) {
     const value = inserted[i];
     if (!isObject2(value))
@@ -3332,8 +3432,15 @@ function insertedNeedWalk(inserted) {
         return true;
       continue;
     }
-    if (hasObjectChild(value) || inserted.indexOf(value, i + 1) !== -1)
+    if (hasObjectChild(value))
       return true;
+    if (inserted.length > 1) {
+      if (fresh === undefined)
+        fresh = new Set;
+      else if (fresh.has(value))
+        return true;
+      fresh.add(value);
+    }
   }
   return false;
 }
@@ -3677,7 +3784,7 @@ function placeKey(prop) {
   return index >= 0 ? index : prop;
 }
 function toIntegerOrInfinity(value) {
-  const number = Number(value);
+  const number = +value;
   if (number !== number || number === 0)
     return 0;
   return Math.trunc(number);
@@ -4461,6 +4568,8 @@ function reactive(obj, emit, path = [], options) {
       };
       emit(initialEvent);
     } catch (error) {
+      if (error instanceof SnapshotLimitError)
+        throw error;
       console.error("Failed to emit initial reactive state:", error);
     }
   }

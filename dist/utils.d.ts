@@ -57,10 +57,29 @@ export declare function evictDescendantsFromPathCache(root: object, pathKey: str
  */
 export declare function traverse(value: any, seen?: Set<any>): any;
 /**
+ * The most copies one snapshot may make beyond the first copy of each
+ * object. A snapshot copies a shared object once per place, so a graph
+ * that shares objects at many places (each level holding the one below
+ * twice) grows exponentially: 22 objects become 4,194,303 copies. Such a
+ * snapshot throws a `RangeError` instead. A tree, however large, makes no
+ * extra copies and is never refused.
+ */
+export declare const SNAPSHOT_SHARED_COPY_LIMIT = 100000;
+/** A snapshot over `SNAPSHOT_SHARED_COPY_LIMIT`. */
+export declare class SnapshotLimitError extends RangeError {
+    constructor(extraCopies: number);
+}
+/**
  * Deep clone for event payloads. Unlike `deepClone`, an object that appears
  * at several places in `value` is copied once per place, so the result is a
  * tree: a replica holds one copy per place, and a write through a shared
- * object emits one event per place. Cycles are kept.
+ * object emits one event per place. Copies may not share objects, because a
+ * wire that keeps identity (structuredClone, an in-process listener) would
+ * then hold one object where the source has several places, and apply each
+ * per-place event to it again. Cycles are kept.
+ *
+ * Throws a `SnapshotLimitError` (a `RangeError`) when the copy would make more than
+ * `SNAPSHOT_SHARED_COPY_LIMIT` extra copies of shared objects.
  */
 export declare function cloneTree<T>(value: T): T;
 /**

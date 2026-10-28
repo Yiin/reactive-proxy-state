@@ -1,5 +1,5 @@
 export * from './types';
-export { deepClone, deepEqual, getProxyStats, resetProxyStats, toRaw } from './utils';
+export { SNAPSHOT_SHARED_COPY_LIMIT, SnapshotLimitError, deepClone, deepEqual, getProxyStats, resetProxyStats, toRaw } from './utils';
 export * from './state';
 export * from './reactive';
 export * from './watch';
