@@ -304,8 +304,8 @@ function chain(node: LocationNode, tail: PropertyKey | undefined): Target | null
     const parent = place.parent;
     if (!holdsIn(parent, place.key, current.raw)) {
       dropped(place);
-      places.length = 0;
-      current.index = undefined;
+      // a new array: an index made for the old one no longer applies
+      current.places = [];
       return null;
     }
     (reversed ??= []).push(segment(parent, place.key, current.raw));
@@ -847,7 +847,9 @@ function prunePlaces(node: LocationNode): void {
   if (count > WIDE && count < 2 * node.pruned) return;
   let places = keepPlaces(node.places, (place) => holds(place, node.raw));
   if (places.length > 1) {
-    const live: boolean[] = new Array(places.length);
+    // isAttached prunes nothing, so one scratch array serves every call
+    const live = pruneScratch;
+    live.length = places.length;
     let attached = 0;
     // places in one container (an array that holds the object at many indexes) ask once
     let parent: LocationNode | undefined;
@@ -873,9 +875,12 @@ function prunePlaces(node: LocationNode): void {
       places = kept;
     }
   }
+  pruneScratch.length = 0;
   node.places = places;
   node.pruned = places.length;
 }
+
+const pruneScratch: boolean[] = [];
 
 /** The places that pass `keep`; the others are dropped. */
 function keepPlaces(places: Place[], keep: (place: Place) => boolean): Place[] {
@@ -1530,8 +1535,8 @@ function relink(
         typeof places[0].key === "number" &&
         places[0].key >= from
       ) {
+        // a node with one place has no index (see `WIDE`)
         places[0].key = i;
-        node.index = undefined;
         node.relinkedPlaces = 0;
         left--;
         continue;
