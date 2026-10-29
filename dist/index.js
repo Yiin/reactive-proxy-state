@@ -2536,20 +2536,20 @@ class UnsupportedStateError extends TypeError {
   }
 }
 var SNAPSHOT_CHECK_AFTER = SNAPSHOT_SHARED_COPY_LIMIT + 1;
-function cloneTree(value) {
-  return copyTree(value, undefined, undefined, false);
+function cloneTree(value, named) {
+  return copyTree(value, undefined, undefined, false, named);
 }
 var REACHES = Symbol("reaches");
-function cloneTreeUnless(value, container) {
-  return copyUnless(value, container, false);
+function cloneTreeUnless(value, container, named) {
+  return copyUnless(value, container, false, named);
 }
-function cloneStored(value, container) {
-  return copyUnless(value, container, true);
+function cloneStored(value, container, named) {
+  return copyUnless(value, container, true, named);
 }
 var copiedFresh = false;
-function copyUnless(value, container, checkFresh) {
+function copyUnless(value, container, checkFresh, named) {
   try {
-    return copyTree(value, container, undefined, checkFresh);
+    return copyTree(value, container, undefined, checkFresh, named);
   } catch (error) {
     if (error === reachedContainer) {
       copiedFresh = false;
@@ -2558,11 +2558,11 @@ function copyUnless(value, container, checkFresh) {
     throw error;
   }
 }
-function cloneTreeAfter(value, container, contents) {
-  return copyTree(value, container, contents, false);
+function cloneTreeAfter(value, container, contents, named) {
+  return copyTree(value, container, contents, false, named);
 }
 var reachedContainer = new Error("reactive-proxy-state: internal, a copy reached its container");
-function copyTree(value, container, contents, checkFresh) {
+function copyTree(value, container, contents, checkFresh, named) {
   if (value === null || typeof value !== "object") {
     if (checkFresh)
       copiedFresh = true;
@@ -2570,11 +2570,12 @@ function copyTree(value, container, contents, checkFresh) {
   }
   const top = toRaw(value);
   if (top === value && top !== container) {
-    const small = copySmall(value, container, checkFresh);
+    const small = copySmall(value, container, checkFresh, named);
     if (small !== undefined)
       return small;
   }
   const base = cloneAncestors.length;
+  const workBase = cloneWork.length;
   const outerTop = cloneTop;
   const outerCountdown = cloneCountdown;
   const outerContainer = cloneContainer;
@@ -2582,6 +2583,10 @@ function copyTree(value, container, contents, checkFresh) {
   const outerFresh = cloneFresh;
   const outerFirst = cloneFirst;
   const outerSeen = cloneSeen;
+  const outerBase = cloneBase;
+  const outerIndex = cloneIndex;
+  const outerNamed = cloneNamed;
+  const outerUnnamed = cloneUnnamed;
   cloneTop = top;
   cloneCountdown = SNAPSHOT_CHECK_AFTER;
   cloneContainer = container;
@@ -2589,14 +2594,19 @@ function copyTree(value, container, contents, checkFresh) {
   cloneFresh = checkFresh && locationNodes.get(top) === undefined;
   cloneFirst = undefined;
   cloneSeen = undefined;
+  cloneBase = base;
+  cloneIndex = undefined;
+  cloneNamed = named !== 0 /* None */;
+  cloneUnnamed = named === 1 /* Below */ ? top : undefined;
   try {
-    const copy = cloneTreeInto(value, base);
+    const copy = cloneEntry(value, 0);
     if (checkFresh)
       copiedFresh = cloneFresh;
     return copy;
   } finally {
     cloneAncestors.length = base;
     cloneCopies.length = base;
+    cloneWork.length = workBase;
     cloneTop = outerTop;
     cloneCountdown = outerCountdown;
     cloneContainer = outerContainer;
@@ -2604,6 +2614,10 @@ function copyTree(value, container, contents, checkFresh) {
     cloneFresh = outerFresh;
     cloneFirst = outerFirst;
     cloneSeen = outerSeen;
+    cloneBase = outerBase;
+    cloneIndex = outerIndex;
+    cloneNamed = outerNamed;
+    cloneUnnamed = outerUnnamed;
   }
 }
 var cloneTop;
@@ -2613,7 +2627,9 @@ var cloneContents;
 var cloneFresh = false;
 var cloneFirst;
 var cloneSeen;
-function copySmall(value, container, checkFresh) {
+var cloneNamed = false;
+var cloneUnnamed;
+function copySmall(value, container, checkFresh, named) {
   if (!Array.isArray(value)) {
     const copy2 = copyLeaf(value);
     if (copy2 !== undefined && checkFresh)
@@ -2623,12 +2639,15 @@ function copySmall(value, container, checkFresh) {
   const length = value.length;
   if (length > 8)
     return;
+  if (named === 2 /* All */ && namedKeys(value) !== undefined)
+    return;
   const copy = new Array(length);
   let fresh = checkFresh && locationNodes.get(value) === undefined;
   for (let i = 0;i < length; i++) {
     const item = value[i];
     if (item === null || typeof item !== "object") {
-      copy[i] = item;
+      if (item !== undefined || i in value)
+        copy[i] = item;
       continue;
     }
     if (item === container || toRaw(item) !== item)
@@ -2654,7 +2673,10 @@ function copyLeaf(value) {
     const entry = value[key];
     if (entry !== null && typeof entry === "object")
       return;
-    copy[key] = entry;
+    if (key === "__proto__")
+      setData(copy, key, entry);
+    else
+      copy[key] = entry;
   }
   if (Object.getOwnPropertySymbols(value).length !== 0)
     return;
@@ -2699,20 +2721,67 @@ function noteFresh(identity) {
   if (seen.size === size)
     cloneFresh = false;
 }
+function namedKeys(array) {
+  const keys = Object.keys(array);
+  let start = keys.length;
+  while (start > 0 && !isIndexKey(keys[start - 1]))
+    start--;
+  return start === keys.length ? undefined : keys.slice(start);
+}
+function isIndexKey(key) {
+  const length = key.length;
+  if (length === 0 || length > 10)
+    return false;
+  const first = key.charCodeAt(0);
+  if (first < 48 || first > 57 || first === 48 && length > 1)
+    return false;
+  for (let i = 1;i < length; i++) {
+    const code = key.charCodeAt(i);
+    if (code < 48 || code > 57)
+      return false;
+  }
+  return length < 10 || Number(key) < 4294967295;
+}
+function setData(object, key, value) {
+  Object.defineProperty(object, key, { value, writable: true, enumerable: true, configurable: true });
+}
 function checkSharedCopies(value) {
   const walk = { extra: 0, low: Infinity, marks: new Map };
-  walkCopies(value, 0, walk);
+  walkCopies(value, walk);
   if (walk.extra > SNAPSHOT_SHARED_COPY_LIMIT)
     throw new SnapshotLimitError(walk.extra);
 }
-function walkEntry(entry, depth, walk) {
-  if (entry === null || typeof entry !== "object") {
-    walk.low = Infinity;
-    return 0;
+function walkCopies(top, walk) {
+  const frames = [];
+  enterCopies(top, 0, walk, frames);
+  while (frames.length > 0) {
+    const frame = frames[frames.length - 1];
+    if (frame.next < frame.entries.length && walk.extra <= SNAPSHOT_SHARED_COPY_LIMIT) {
+      const entry = frame.entries[frame.next++];
+      if (entry === null || typeof entry !== "object") {
+        walk.low = Infinity;
+        continue;
+      }
+      const size = enterCopies(entry, frame.depth + 1, walk, frames);
+      if (frames[frames.length - 1] !== frame)
+        continue;
+      frame.size += size;
+      if (walk.low < frame.low)
+        frame.low = walk.low;
+      continue;
+    }
+    frames.pop();
+    walk.marks.set(frame.identity, frame.low > frame.depth ? frame.size : -1);
+    walk.low = frame.low;
+    const below = frames[frames.length - 1];
+    if (below !== undefined) {
+      below.size += frame.size;
+      if (frame.low < below.low)
+        below.low = frame.low;
+    }
   }
-  return walkCopies(entry, depth, walk);
 }
-function walkCopies(value, depth, walk) {
+function enterCopies(value, depth, walk, frames) {
   const identity = toRaw(value);
   const source = identity === cloneContainer ? readsOf(identity) : identity;
   const marks = walk.marks;
@@ -2736,145 +2805,240 @@ function walkCopies(value, depth, walk) {
     return 1;
   }
   marks.set(identity, -(depth + 2));
-  const below = depth + 1;
-  let size = 1;
-  let low = Infinity;
+  frames.push({ identity, depth, entries: entriesOf(source, identity), next: 0, size: 1, low: Infinity });
+  return 0;
+}
+function entriesOf(source, identity) {
   if (Array.isArray(source)) {
-    for (let i = 0;i < source.length && walk.extra <= SNAPSHOT_SHARED_COPY_LIMIT; i++) {
-      size += walkEntry(source[i], below, walk);
-      if (walk.low < low)
-        low = walk.low;
-    }
-  } else if (source instanceof Map) {
-    for (const [key, entry] of source) {
-      size += walkEntry(key, below, walk);
-      if (walk.low < low)
-        low = walk.low;
-      size += walkEntry(entry, below, walk);
-      if (walk.low < low)
-        low = walk.low;
-      if (walk.extra > SNAPSHOT_SHARED_COPY_LIMIT)
-        break;
-    }
+    const names = cloneNamed && identity !== cloneUnnamed ? namedKeys(source) : undefined;
+    if (names === undefined)
+      return source;
+    const entries2 = source.slice();
+    for (let i = 0;i < names.length; i++)
+      entries2.push(source[names[i]]);
+    return entries2;
+  }
+  const entries = [];
+  if (source instanceof Map) {
+    for (const [key, entry] of source)
+      entries.push(key, entry);
   } else if (source instanceof Set) {
-    for (const entry of source) {
-      size += walkEntry(entry, below, walk);
-      if (walk.low < low)
-        low = walk.low;
-      if (walk.extra > SNAPSHOT_SHARED_COPY_LIMIT)
-        break;
-    }
+    for (const entry of source)
+      entries.push(entry);
   } else {
-    for (const key in source) {
-      if (!hasOwn.call(source, key))
-        continue;
-      size += walkEntry(source[key], below, walk);
-      if (walk.low < low)
-        low = walk.low;
-      if (walk.extra > SNAPSHOT_SHARED_COPY_LIMIT)
-        break;
-    }
+    for (const key in source)
+      if (hasOwn.call(source, key))
+        entries.push(source[key]);
     const symbolKeys = Object.getOwnPropertySymbols(source);
     for (let i = 0;i < symbolKeys.length; i++) {
-      if (!isEnumerable.call(source, symbolKeys[i]))
-        continue;
-      size += walkEntry(source[symbolKeys[i]], below, walk);
-      if (walk.low < low)
-        low = walk.low;
+      if (isEnumerable.call(source, symbolKeys[i]))
+        entries.push(source[symbolKeys[i]]);
     }
   }
-  marks.set(identity, low > depth ? size : -1);
-  walk.low = low;
-  return size;
+  return entries;
 }
 var cloneAncestors = [];
 var cloneCopies = [];
+var cloneBase = 0;
+var cloneIndex;
+var DEEP_PATH = 64;
+var cloneWork = [];
+var FILL_DEPTH = 256;
 var hasOwn = Object.prototype.hasOwnProperty;
 var isEnumerable = Object.prototype.propertyIsEnumerable;
-function cloneChild(value, base) {
+function enterPath(identity, copy, depth) {
+  cloneAncestors.push(identity);
+  cloneCopies.push(copy);
+  if (depth < DEEP_PATH)
+    return;
+  if (cloneIndex !== undefined) {
+    cloneIndex.set(identity, copy);
+    return;
+  }
+  cloneIndex = new Map;
+  for (let i = cloneBase;i < cloneAncestors.length; i++)
+    cloneIndex.set(cloneAncestors[i], cloneCopies[i]);
+}
+function leavePath(length) {
+  const ancestors = cloneAncestors;
+  const index = cloneIndex;
+  while (ancestors.length > length) {
+    const identity = ancestors.pop();
+    cloneCopies.pop();
+    if (index !== undefined)
+      index.delete(identity);
+  }
+  if (index !== undefined && length - cloneBase <= DEEP_PATH)
+    cloneIndex = undefined;
+}
+function cloneValue(value, depth) {
   if (value === null || typeof value !== "object")
     return value;
   if (cloneFresh)
     noteFresh(toRaw(value));
-  return cloneTreeInto(value, base);
+  return cloneEntry(value, depth);
 }
-function cloneTreeInto(value, base) {
+function cloneEntry(value, depth) {
   const identity = toRaw(value);
   if (identity === cloneContainer)
     value = readsOf(identity);
-  for (let i = cloneAncestors.length - 1;i >= base; i--) {
-    if (cloneAncestors[i] === identity)
-      return cloneCopies[i];
+  if (depth > DEEP_PATH) {
+    const ancestor = cloneIndex.get(identity);
+    if (ancestor !== undefined)
+      return ancestor;
+  } else {
+    const ancestors = cloneAncestors;
+    for (let i = ancestors.length - 1, stop = ancestors.length - depth;i >= stop; i--) {
+      if (ancestors[i] === identity)
+        return cloneCopies[i];
+    }
   }
   countCopy();
-  let pushed = false;
+  let copy;
+  let kind;
   if (Array.isArray(value)) {
-    const length = value.length;
-    const copy2 = new Array(length);
+    copy = new Array(value.length);
+    kind = 1 /* Array */;
+  } else {
+    const prototype = Object.getPrototypeOf(value);
+    if (prototype === Object.prototype) {
+      copy = {};
+      kind = 0 /* Object */;
+    } else if (value instanceof Date) {
+      return new Date(value.getTime());
+    } else if (value instanceof Map) {
+      copy = new Map;
+      kind = 2 /* Map */;
+    } else if (value instanceof Set) {
+      copy = new Set;
+      kind = 3 /* Set */;
+    } else {
+      copy = Object.create(prototype);
+      kind = 0 /* Object */;
+    }
+  }
+  if (depth >= FILL_DEPTH - 1) {
+    cloneDeep(kind, value, identity, copy, depth);
+    return copy;
+  }
+  const below = depth + 1;
+  let pushed = false;
+  if (kind === 0 /* Object */) {
+    for (const key in value) {
+      if (!hasOwn.call(value, key))
+        continue;
+      let child = value[key];
+      if (child !== null && typeof child === "object") {
+        if (!pushed) {
+          pushed = true;
+          enterPath(identity, copy, depth);
+        }
+        if (cloneFresh)
+          noteFresh(toRaw(child));
+        child = cloneEntry(child, below);
+      }
+      if (key === "__proto__")
+        setData(copy, key, child);
+      else
+        copy[key] = child;
+    }
+    const symbolKeys = Object.getOwnPropertySymbols(value);
+    if (symbolKeys.length !== 0)
+      pushed = fillSymbols(value, identity, copy, depth, symbolKeys, pushed);
+  } else if (kind === 1 /* Array */) {
+    const length = copy.length;
     for (let i = 0;i < length; i++) {
       const child = value[i];
       if (child === null || typeof child !== "object") {
-        copy2[i] = child;
+        if (child !== undefined || i in value)
+          copy[i] = child;
         continue;
       }
       if (!pushed) {
         pushed = true;
-        cloneAncestors.push(identity);
-        cloneCopies.push(copy2);
+        enterPath(identity, copy, depth);
       }
-      copy2[i] = cloneChild(child, base);
+      if (cloneFresh)
+        noteFresh(toRaw(child));
+      copy[i] = cloneEntry(child, below);
     }
-    if (pushed) {
+    if (cloneNamed && identity !== cloneUnnamed)
+      pushed = fillNamed(value, identity, copy, depth, pushed);
+  } else {
+    pushed = kind === 2 /* Map */ ? fillMap(value, identity, copy, depth) : fillSet(value, identity, copy, depth);
+  }
+  if (pushed) {
+    if (depth < DEEP_PATH) {
       cloneAncestors.pop();
       cloneCopies.pop();
+    } else {
+      leavePath(cloneAncestors.length - 1);
     }
-    return copy2;
   }
-  const prototype = Object.getPrototypeOf(value);
-  let copy;
-  if (prototype === Object.prototype) {
-    copy = {};
-  } else if (value instanceof Date) {
-    return new Date(value.getTime());
-  } else if (value instanceof Map) {
-    const map = new Map;
-    cloneAncestors.push(identity);
-    cloneCopies.push(map);
-    value.forEach((entry, key) => {
-      map.set(cloneChild(key, base), cloneChild(entry, base));
-    });
-    cloneAncestors.pop();
-    cloneCopies.pop();
-    return map;
-  } else if (value instanceof Set) {
-    const set = new Set;
-    cloneAncestors.push(identity);
-    cloneCopies.push(set);
-    value.forEach((entry) => {
-      set.add(cloneChild(entry, base));
-    });
-    cloneAncestors.pop();
-    cloneCopies.pop();
-    return set;
-  } else {
-    copy = Object.create(prototype);
+  return copy;
+}
+function cloneDeep(kind, value, identity, copy, depth) {
+  const pathLength = cloneAncestors.length;
+  if (depth >= FILL_DEPTH) {
+    cloneWork.push(kind, value, identity, copy, pathLength);
+    return;
   }
+  const workBase = cloneWork.length;
+  fill(kind, value, identity, copy, depth);
+  fillWaiting(workBase);
+  leavePath(pathLength);
+}
+function fill(kind, value, identity, copy, depth) {
+  if (kind === 0 /* Object */)
+    fillObject(value, identity, copy, depth);
+  else if (kind === 1 /* Array */)
+    fillArray(value, identity, copy, depth);
+  else if (kind === 2 /* Map */)
+    fillMap(value, identity, copy, depth);
+  else
+    fillSet(value, identity, copy, depth);
+}
+function fillWaiting(workBase) {
+  const work = cloneWork;
+  while (work.length > workBase) {
+    const at = work.length - 5;
+    const kind = work[at];
+    const value = work[at + 1];
+    const identity = work[at + 2];
+    const copy = work[at + 3];
+    const pathLength = work[at + 4];
+    work.length = at;
+    if (cloneAncestors.length !== pathLength)
+      leavePath(pathLength);
+    fill(kind, value, identity, copy, FILL_DEPTH);
+  }
+}
+function fillObject(value, identity, copy, depth) {
+  const below = depth + 1;
+  let pushed = false;
   for (const key in value) {
     if (!hasOwn.call(value, key))
       continue;
-    const child = value[key];
-    if (child === null || typeof child !== "object") {
+    let child = value[key];
+    if (child !== null && typeof child === "object") {
+      if (!pushed) {
+        pushed = true;
+        enterPath(identity, copy, depth);
+      }
+      if (cloneFresh)
+        noteFresh(toRaw(child));
+      child = cloneEntry(child, below);
+    }
+    if (key === "__proto__")
+      setData(copy, key, child);
+    else
       copy[key] = child;
-      continue;
-    }
-    if (!pushed) {
-      pushed = true;
-      cloneAncestors.push(identity);
-      cloneCopies.push(copy);
-    }
-    copy[key] = cloneChild(child, base);
   }
   const symbolKeys = Object.getOwnPropertySymbols(value);
+  return symbolKeys.length === 0 ? pushed : fillSymbols(value, identity, copy, depth, symbolKeys, pushed);
+}
+function fillSymbols(value, identity, copy, depth, symbolKeys, pushed) {
+  const below = depth + 1;
   for (let i = 0;i < symbolKeys.length; i++) {
     const symbolKey = symbolKeys[i];
     if (!isEnumerable.call(value, symbolKey))
@@ -2882,16 +3046,63 @@ function cloneTreeInto(value, base) {
     const child = value[symbolKey];
     if (child !== null && typeof child === "object" && !pushed) {
       pushed = true;
-      cloneAncestors.push(identity);
-      cloneCopies.push(copy);
+      enterPath(identity, copy, depth);
     }
-    copy[symbolKey] = cloneChild(child, base);
+    copy[symbolKey] = cloneValue(child, below);
   }
-  if (pushed) {
-    cloneAncestors.pop();
-    cloneCopies.pop();
+  return pushed;
+}
+function fillArray(value, identity, copy, depth) {
+  const below = depth + 1;
+  let pushed = false;
+  const length = copy.length;
+  for (let i = 0;i < length; i++) {
+    const child = value[i];
+    if (child === null || typeof child !== "object") {
+      if (child !== undefined || i in value)
+        copy[i] = child;
+      continue;
+    }
+    if (!pushed) {
+      pushed = true;
+      enterPath(identity, copy, depth);
+    }
+    if (cloneFresh)
+      noteFresh(toRaw(child));
+    copy[i] = cloneEntry(child, below);
   }
-  return copy;
+  return cloneNamed && identity !== cloneUnnamed ? fillNamed(value, identity, copy, depth, pushed) : pushed;
+}
+function fillNamed(value, identity, copy, depth, pushed) {
+  const names = namedKeys(value);
+  if (names === undefined)
+    return pushed;
+  const below = depth + 1;
+  for (let i = 0;i < names.length; i++) {
+    const child = value[names[i]];
+    if (child !== null && typeof child === "object" && !pushed) {
+      pushed = true;
+      enterPath(identity, copy, depth);
+    }
+    setData(copy, names[i], cloneValue(child, below));
+  }
+  return pushed;
+}
+function fillMap(value, identity, copy, depth) {
+  const below = depth + 1;
+  enterPath(identity, copy, depth);
+  value.forEach((entry, key) => {
+    copy.set(cloneValue(key, below), cloneValue(entry, below));
+  });
+  return true;
+}
+function fillSet(value, identity, copy, depth) {
+  const below = depth + 1;
+  enterPath(identity, copy, depth);
+  value.forEach((entry) => {
+    copy.add(cloneValue(entry, below));
+  });
+  return true;
 }
 function deepClone(value, seen = new WeakMap) {
   if (value === null || typeof value !== "object") {
@@ -3314,7 +3525,40 @@ function chain(node, tail) {
 }
 function findAll(node, tail, firstOnly) {
   const out = [];
-  collect(node, tail === undefined ? [] : [String(tail)], new Set, out, firstOnly);
+  const segments = [];
+  const visiting = new Set;
+  const frames = [];
+  const enter = (entered) => {
+    visiting.add(entered);
+    const root = entered.root;
+    if (root !== undefined)
+      out.push({ root, path: buildPath(root.path, segments, tail) });
+    frames.push({ node: entered, places: entered.places, next: 0, stale: false });
+  };
+  enter(node);
+  while (frames.length > 0) {
+    const frame = frames[frames.length - 1];
+    const current = frame.node;
+    if (frame.next < frame.places.length && !(firstOnly && out.length > 0)) {
+      const place = frame.places[frame.next++];
+      const parent = place.parent;
+      if (!holdsIn(parent, place.key, current.raw)) {
+        frame.stale = true;
+        continue;
+      }
+      if (visiting.has(parent))
+        continue;
+      segments.push(segment(parent, place.key, current.raw));
+      enter(parent);
+      continue;
+    }
+    frames.pop();
+    if (frame.stale)
+      current.places = keepPlaces(frame.places, (place) => holds(place, current.raw));
+    visiting.delete(current);
+    if (frames.length > 0)
+      segments.pop();
+  }
   return out;
 }
 function buildPath(base, reversed, tail) {
@@ -3328,29 +3572,6 @@ function buildPath(base, reversed, tail) {
   if (tail !== undefined)
     path[index] = String(tail);
   return path;
-}
-function collect(node, suffix, visiting, out, firstOnly) {
-  if (visiting.has(node))
-    return;
-  visiting.add(node);
-  const root = node.root;
-  if (root !== undefined) {
-    out.push({ root, path: [...root.path, ...suffix] });
-  }
-  const places = node.places;
-  let stale = false;
-  for (let i = 0;i < places.length && !(firstOnly && out.length > 0); i++) {
-    const place = places[i];
-    const parent = place.parent;
-    if (!holdsIn(parent, place.key, node.raw)) {
-      stale = true;
-      continue;
-    }
-    collect(parent, [segment(parent, place.key, node.raw), ...suffix], visiting, out, firstOnly);
-  }
-  if (stale)
-    node.places = keepPlaces(places, (place) => holds(place, node.raw));
-  visiting.delete(node);
 }
 function locate(node, tail) {
   const single = chain(node, tail);
@@ -3430,20 +3651,23 @@ function dispatch(target, event) {
       deliver(root, [event]);
     return;
   }
+  const removesValue = event.action === "set-delete";
   const events = [event];
   for (let i = 1;i < paths.length; i++) {
     const copy = { ...event, path: paths[i] };
     if (isObject2(event.newValue))
-      copy.newValue = cloneTree(event.newValue);
-    if (isObject2(event.value))
-      copy.value = cloneTree(event.value);
+      copy.newValue = cloneTree(event.newValue, 0 /* None */);
+    if (isObject2(event.value) && !removesValue)
+      copy.value = cloneTree(event.value, 2 /* All */);
     if (event.items !== undefined)
-      copy.items = cloneTree(event.items);
+      copy.items = cloneTree(event.items, 1 /* Below */);
     if (root.async) {
       if (isObject2(event.oldValue))
-        copy.oldValue = cloneTree(event.oldValue);
+        copy.oldValue = cloneTree(event.oldValue, 2 /* All */);
       if (event.oldValues !== undefined)
-        copy.oldValues = cloneTree(event.oldValues);
+        copy.oldValues = cloneTree(event.oldValues, 1 /* Below */);
+      if (removesValue)
+        copy.value = copy.oldValue;
     }
     events.push(copy);
   }
@@ -3462,56 +3686,64 @@ function deliver(root, events) {
     for (let i = 0;i < events.length; i++)
       queue.events.push(events[i]);
   }
-  try {
-    while (queue.next < queue.events.length)
+  let failed = false;
+  let failure;
+  while (queue.next < queue.events.length) {
+    try {
       emit(queue.events[queue.next++]);
-  } catch (error) {
-    queue.events.length = 0;
-    queue.next = 0;
-    throw error;
-  } finally {
-    if (root.undelivered === queue && queue.next === queue.events.length)
-      root.undelivered = undefined;
+    } catch (error) {
+      if (!failed) {
+        failed = true;
+        failure = error;
+      }
+    }
   }
+  if (root.undelivered === queue)
+    root.undelivered = undefined;
+  if (failed)
+    throw failure;
 }
 function copyPayload(event, target, container, held) {
   if (event === undefined)
     return 1 /* Done */;
   const removed = target.root.async;
   const { newValue, oldValue, value, items, oldValues } = event;
+  const stored = event.action !== "set-delete";
   let fresh = true;
   let newCopy = newValue;
   if (isObject2(newValue)) {
-    newCopy = held === undefined ? cloneStored(newValue, container) : cloneTreeUnless(newValue, container);
+    newCopy = held === undefined ? cloneStored(newValue, container, 0 /* None */) : cloneTreeUnless(newValue, container, 0 /* None */);
     if (newCopy === REACHES)
       return 0 /* Reaches */;
     fresh = held === undefined && copiedFresh;
   }
   let valueCopy = value;
-  if (isObject2(value)) {
-    valueCopy = cloneStored(value, container);
+  if (isObject2(value) && stored) {
+    valueCopy = cloneStored(value, container, 2 /* All */);
     if (valueCopy === REACHES)
       return 0 /* Reaches */;
     fresh &&= copiedFresh;
   }
   let itemsCopy = items;
   if (items !== undefined && holdsObject(items)) {
-    itemsCopy = cloneStored(items, container);
+    itemsCopy = cloneStored(items, container, 1 /* Below */);
     if (itemsCopy === REACHES)
       return 0 /* Reaches */;
     fresh &&= copiedFresh;
   }
   if (removed) {
-    const oldCopy = isObject2(oldValue) ? cloneTreeUnless(oldValue, container) : oldValue;
+    const oldCopy = isObject2(oldValue) ? cloneTreeUnless(oldValue, container, 2 /* All */) : oldValue;
     if (oldCopy === REACHES)
       return 0 /* Reaches */;
-    const oldValuesCopy = oldValues !== undefined && holdsObject(oldValues) ? cloneTreeUnless(oldValues, container) : oldValues;
+    const oldValuesCopy = oldValues !== undefined && holdsObject(oldValues) ? cloneTreeUnless(oldValues, container, 1 /* Below */) : oldValues;
     if (oldValuesCopy === REACHES)
       return 0 /* Reaches */;
     if (isObject2(oldValue))
       event.oldValue = oldCopy;
     if (oldValues !== undefined)
       event.oldValues = oldValuesCopy;
+    if (!stored)
+      valueCopy = event.oldValue;
   }
   if (isObject2(newValue))
     event.newValue = newCopy;
@@ -3528,11 +3760,12 @@ function copyPayloadReaching(event, target, container, after) {
 function copyPayloadAfter(event, target, container, after) {
   const { newValue, oldValue, value, items, oldValues } = event;
   const removed = target.root.async;
-  const newCopy = isObject2(newValue) ? cloneTreeAfter(newValue, container, after) : newValue;
-  const oldCopy = removed && isObject2(oldValue) ? cloneTreeAfter(oldValue, container, after) : oldValue;
-  const valueCopy = isObject2(value) ? cloneTreeAfter(value, container, after) : value;
-  const itemsCopy = items !== undefined && holdsObject(items) ? cloneTreeAfter(items, container, after) : items;
-  const oldValuesCopy = removed && oldValues !== undefined && holdsObject(oldValues) ? cloneTreeAfter(oldValues, container, after) : oldValues;
+  const stored = event.action !== "set-delete";
+  const newCopy = isObject2(newValue) ? cloneTreeAfter(newValue, container, after, 0 /* None */) : newValue;
+  const oldCopy = removed && isObject2(oldValue) ? cloneTreeAfter(oldValue, container, after, 2 /* All */) : oldValue;
+  const valueCopy = !isObject2(value) ? value : stored ? cloneTreeAfter(value, container, after, 2 /* All */) : oldCopy;
+  const itemsCopy = items !== undefined && holdsObject(items) ? cloneTreeAfter(items, container, after, 1 /* Below */) : items;
+  const oldValuesCopy = removed && oldValues !== undefined && holdsObject(oldValues) ? cloneTreeAfter(oldValues, container, after, 1 /* Below */) : oldValues;
   if (isObject2(newValue))
     event.newValue = newCopy;
   if (isObject2(oldValue))
@@ -3577,7 +3810,9 @@ function enumerableData(object, key) {
   return descriptor.value;
 }
 function refuseAccessors(event, removed, container, after) {
-  const pending = [event.newValue, event.value];
+  const pending = [event.newValue];
+  if (event.action !== "set-delete")
+    pending.push(event.value);
   if (event.items !== undefined)
     pending.push(event.items);
   if (removed) {
@@ -3614,9 +3849,6 @@ function refuseAccessors(event, removed, container, after) {
       }
     }
   }
-}
-function setData(copy, key, value) {
-  Object.defineProperty(copy, key, { value, writable: true, enumerable: true, configurable: true });
 }
 function addPlace(node, parent, key) {
   const places = node.places;
@@ -3657,11 +3889,16 @@ function markLostLink(node) {
   if (node.lostLink)
     return;
   node.lostLink = true;
-  const places = node.places;
-  for (let i = 0;i < places.length; i++) {
-    const parent = places[i].parent;
-    if (parent !== undefined)
-      markLostLink(parent);
+  const pending = [node];
+  while (pending.length > 0) {
+    const places = pending.pop().places;
+    for (let i = 0;i < places.length; i++) {
+      const parent = places[i].parent;
+      if (parent !== undefined && !parent.lostLink) {
+        parent.lostLink = true;
+        pending.push(parent);
+      }
+    }
   }
 }
 function notePlace(node, parent, key) {
@@ -3697,7 +3934,75 @@ function newWalk(touched, former, held, first) {
     held
   };
 }
-function adopt(raw, walk) {
+function adoptFrame(raw, node, unknown, key) {
+  let kind = 3 /* Object */;
+  let keys;
+  let entries;
+  if (Array.isArray(raw))
+    kind = 0 /* Array */;
+  else if (raw instanceof Map) {
+    kind = 1 /* Map */;
+    entries = raw.entries();
+  } else if (raw instanceof Set) {
+    kind = 2 /* Set */;
+    entries = raw.values();
+  } else if (raw instanceof Date || ArrayBuffer.isView(raw))
+    kind = 4 /* None */;
+  else
+    keys = Object.keys(raw);
+  return { raw, node, unknown, key, kind, next: 0, keys, entries, childKey: undefined };
+}
+function nextChild(frame) {
+  const raw = frame.raw;
+  switch (frame.kind) {
+    case 0 /* Array */:
+      while (frame.next < raw.length) {
+        const index = frame.next++;
+        const child = raw[index];
+        if (isObject2(child)) {
+          frame.childKey = index;
+          return child;
+        }
+      }
+      return;
+    case 1 /* Map */:
+      for (;; ) {
+        const step = frame.entries.next();
+        if (step.done)
+          return;
+        const child = step.value[1];
+        if (isObject2(child)) {
+          frame.childKey = step.value[0];
+          return child;
+        }
+      }
+    case 2 /* Set */:
+      for (;; ) {
+        const step = frame.entries.next();
+        if (step.done)
+          return;
+        if (isObject2(step.value)) {
+          frame.childKey = undefined;
+          return step.value;
+        }
+      }
+    case 3 /* Object */: {
+      const keys = frame.keys;
+      while (frame.next < keys.length) {
+        const key = keys[frame.next++];
+        const child = raw[key];
+        if (isObject2(child)) {
+          frame.childKey = key;
+          return child;
+        }
+      }
+      return;
+    }
+    default:
+      return;
+  }
+}
+function enterAdopt(raw, key, walk, frames) {
   let node = nodes.get(raw);
   if (node !== undefined && !node.lostLink && walk.revisit?.has(raw) !== true) {
     if (attachedBefore(node, walk.former))
@@ -3716,7 +4021,8 @@ function adopt(raw, walk) {
   if (node !== undefined) {
     if (node.lostLink)
       walk.relinked.push(node);
-    return adoptChildren(raw, node, walk);
+    frames.push(adoptFrame(raw, node, false, key));
+    return node;
   }
   if (raw["__v_skip" /* SKIP */] || raw["__v_isReactive" /* IS_REACTIVE */])
     return;
@@ -3724,53 +4030,40 @@ function adopt(raw, walk) {
     node = ensureLocationNode(raw);
   if (walk.held?.has(raw))
     return node;
-  node = adoptChildren(raw, node, walk);
-  if (node !== undefined && walk.aliases === undefined)
-    (walk.created ??= new Set).add(raw);
+  frames.push(adoptFrame(raw, node, true, key));
   return node;
 }
-function adoptChildren(raw, node, walk) {
-  if (Array.isArray(raw)) {
-    for (let i = 0;i < raw.length; i++) {
-      const child = raw[i];
-      if (child !== null && typeof child === "object")
-        node = adoptChild(raw, node, i, child, walk);
-    }
-    return node;
-  }
-  if (raw instanceof Map) {
-    for (const [key, child] of raw) {
-      if (child !== null && typeof child === "object")
-        node = adoptChild(raw, node, key, child, walk);
-    }
-    return node;
-  }
-  if (raw instanceof Set) {
-    for (const child of raw) {
-      if (child !== null && typeof child === "object")
-        node = adoptChild(raw, node, undefined, child, walk);
-    }
-    return node;
-  }
-  if (raw instanceof Date || ArrayBuffer.isView(raw))
-    return node;
-  for (const key in raw) {
-    if (!Object.prototype.hasOwnProperty.call(raw, key))
-      continue;
-    const child = raw[key];
-    if (child !== null && typeof child === "object")
-      node = adoptChild(raw, node, key, child, walk);
-  }
-  return node;
-}
-function adoptChild(container, containerNode, key, child, walk) {
-  const childNode = adopt(child, walk);
+function placeChild(frame, key, childNode, walk) {
   if (childNode === undefined)
-    return containerNode;
-  containerNode ??= ensureLocationNode(container);
-  if (addPlace(childNode, containerNode, key))
+    return;
+  frame.node ??= ensureLocationNode(frame.raw);
+  if (addPlace(childNode, frame.node, key))
     walk.touched.push(childNode);
-  return containerNode;
+}
+function walkFrames(frames, walk) {
+  for (;; ) {
+    const frame = frames[frames.length - 1];
+    const child = nextChild(frame);
+    if (child !== undefined) {
+      const depth = frames.length;
+      const childNode = enterAdopt(child, frame.childKey, walk, frames);
+      if (frames.length === depth)
+        placeChild(frame, frame.childKey, childNode, walk);
+      continue;
+    }
+    frames.pop();
+    const node = frame.node;
+    if (frame.unknown && node !== undefined && walk.aliases === undefined)
+      (walk.created ??= new Set).add(frame.raw);
+    if (frames.length === 0)
+      return node;
+    placeChild(frames[frames.length - 1], frame.key, node, walk);
+  }
+}
+function adopt(raw, walk) {
+  const frames = [];
+  const node = enterAdopt(raw, undefined, walk, frames);
+  return frames.length === 0 ? node : walkFrames(frames, walk);
 }
 function adoptAll(touched, former, held, visit) {
   let walk = newWalk(touched, former, held);
@@ -3888,7 +4181,7 @@ function adoptRoot(node) {
   const touched = [];
   adoptAll(touched, undefined, undefined, (walk) => {
     walk.seen.add(node.raw);
-    adoptChildren(node.raw, node, walk);
+    walkFrames([adoptFrame(node.raw, node, false, undefined)], walk);
   });
   pruneTouched(touched);
 }
@@ -3994,44 +4287,47 @@ function stripIndexes(node, arrayNode, from) {
 function evictDeep(value, parent) {
   if (value == null || typeof value !== "object")
     return;
-  value = toRaw(value);
-  const proxy = globalSeen.get(value);
-  if (proxy === undefined)
+  const pending = [];
+  pushProxied(value, parent, pending);
+  while (pending.length > 0) {
+    const raw = pending.pop();
+    const container = pending.pop();
+    const proxy = globalSeen.get(raw);
+    if (proxy === undefined)
+      continue;
+    const node = nodes.get(raw);
+    if (node !== undefined) {
+      const onlyUnderParent = container !== undefined && node.root === undefined && node.places.length === 1 && node.places[0].parentId === container.id;
+      if (!onlyUnderParent && isAttached(node))
+        continue;
+      node.proxy = undefined;
+      node.evicted = new WeakRef(proxy);
+    }
+    globalSeen.delete(raw);
+    wrapperCache.delete(raw);
+    proxyStats.staleEvicted++;
+    if (Array.isArray(raw)) {
+      for (let i = 0;i < raw.length; i++)
+        pushProxied(raw[i], node, pending);
+    } else if (raw instanceof Map) {
+      for (const child of raw.values())
+        pushProxied(child, node, pending);
+    } else if (raw instanceof Set) {
+      for (const child of raw)
+        pushProxied(child, node, pending);
+    } else {
+      const keys = Object.keys(raw);
+      for (let i = 0;i < keys.length; i++)
+        pushProxied(raw[keys[i]], node, pending);
+    }
+  }
+}
+function pushProxied(value, container, pending) {
+  if (value === null || typeof value !== "object")
     return;
-  const node = nodes.get(value);
-  if (node !== undefined) {
-    const onlyUnderParent = parent !== undefined && node.root === undefined && node.places.length === 1 && node.places[0].parentId === parent.id;
-    if (!onlyUnderParent && isAttached(node))
-      return;
-    node.proxy = undefined;
-    node.evicted = new WeakRef(proxy);
-  }
-  globalSeen.delete(value);
-  wrapperCache.delete(value);
-  proxyStats.staleEvicted++;
-  if (Array.isArray(value)) {
-    for (let i = 0;i < value.length; i++) {
-      if (value[i] != null && typeof value[i] === "object")
-        evictDeep(value[i], node);
-    }
-  } else if (value instanceof Map) {
-    for (const child of value.values()) {
-      if (child != null && typeof child === "object")
-        evictDeep(child, node);
-    }
-  } else if (value instanceof Set) {
-    for (const child of value) {
-      if (child != null && typeof child === "object")
-        evictDeep(child, node);
-    }
-  } else {
-    const keys = Object.keys(value);
-    for (let i = 0;i < keys.length; i++) {
-      const child = value[keys[i]];
-      if (child != null && typeof child === "object")
-        evictDeep(child, node);
-    }
-  }
+  const raw = toRaw(value);
+  if (globalSeen.get(raw) !== undefined)
+    pending.push(container, raw);
 }
 function restoreEvicted(node) {
   const proxy = node.evicted?.deref();
@@ -4251,14 +4547,14 @@ function unwrapItems(items) {
 function planReorder(target, prop, method, args) {
   const length = target.length;
   if (prop === "fill" || prop === "copyWithin") {
-    const fill = prop === "fill";
-    const to = fill ? 0 : clampIndex(toIntegerOrInfinity(args[0]), length);
+    const fill2 = prop === "fill";
+    const to = fill2 ? 0 : clampIndex(toIntegerOrInfinity(args[0]), length);
     const start = clampIndex(toIntegerOrInfinity(args[1]), length);
     const end = args[2] === undefined ? length : clampIndex(toIntegerOrInfinity(args[2]), length);
     const after2 = target.slice();
-    method.call(after2, fill ? args[0] : to, start, end);
+    method.call(after2, fill2 ? args[0] : to, start, end);
     const size = after2.length;
-    if (fill)
+    if (fill2)
       return { after: after2, first: Math.min(start, size), last: Math.min(end, size), skip: -1 };
     const from = Math.min(to, size);
     const count = Math.min(Math.min(end, size) - Math.min(start, size), size - from);
@@ -5130,9 +5426,20 @@ function createAsyncEmit(emit) {
       queueMicrotask(() => {
         flushScheduled = false;
         const batch = queue.splice(0);
+        let failed = false;
+        let failure;
         for (const queuedEvent of batch) {
-          emit(queuedEvent);
+          try {
+            emit(queuedEvent);
+          } catch (error) {
+            if (!failed) {
+              failed = true;
+              failure = error;
+            }
+          }
         }
+        if (failed)
+          throw failure;
       });
     }
   };
@@ -5150,7 +5457,7 @@ function reactive(obj, emit, path = [], options) {
   let fresh = false;
   if (emit && path.length === 0) {
     try {
-      const newValue = cloneStored(obj, undefined);
+      const newValue = cloneStored(obj, undefined, 2 /* All */);
       fresh = copiedFresh;
       emit({ action: "replace", path: [], newValue });
     } catch (error) {

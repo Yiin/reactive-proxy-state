@@ -124,11 +124,12 @@ export declare function isAttached(node: LocationNode): boolean;
 /**
  * Send `event` to every path of `target`. Its payload holds copies already
  * (`copyPayload` or `copyPayloadAfter`, made before the write). Every
- * further path gets copies of those copies, all made before the first emit,
- * so a listener that changes a payload cannot change another, and two
- * remote places never share one object. The first path gets `event` itself.
- * What the write removed is copied per path only where `copyPayload` copied
- * it (an async root); otherwise every path carries the removed value itself.
+ * further path gets copies of the stored values (`newValue`, `value`,
+ * `items`), all made before the first emit, so a listener that changes one
+ * cannot change another, and two remote places never share one object.
+ * The first path gets `event` itself. What the write removed is copied per
+ * path only where `copyPayload` copied it (an async root); otherwise every
+ * path carries the removed value itself, shared by the events.
  */
 export declare function dispatch(target: Target, event: StateEvent): void;
 /**
@@ -143,8 +144,10 @@ export declare function dispatch(target: Target, event: StateEvent): void;
  * before it returns, and a write made while nothing waits is delivered at
  * once, inside the listener call that made it.
  *
- * An `emit` that throws drops the events of this root not delivered yet; the
- * error reaches the write that was delivering them.
+ * An `emit` that throws does not stop the others: every event in the queue
+ * is delivered once, each for a write that already changed the state, then
+ * the first error reaches the write that was delivering them. A listener
+ * that called that write may catch it and go on.
  */
 export declare function deliver(root: LocationRoot, events: StateEvent[]): void;
 /** What `copyPayload` did. */
@@ -172,10 +175,13 @@ export declare const enum Copied {
  *
  * What the write stores (`newValue`, `value`, `items`) is always copied: it
  * stays in the tree, where later writes change it, and a replica needs it
- * as it was. What the write removes (`oldValue`, `oldValues`) is copied only
- * for an async root (`target.root.async`), whose events wait for a
- * microtask. A synchronous root delivers the event before the write
- * returns, and sends the removed value itself, as 1.0.44 did.
+ * as it was. What the write removes (`oldValue`, `oldValues`, and the
+ * `value` of a `set-delete`) is copied only for an async root
+ * (`target.root.async`), whose events wait for a microtask. A synchronous
+ * root delivers the event before the write returns, and sends the removed
+ * value itself, as 1.0.44 did, so it never refuses a removal. A `newValue`
+ * keeps each array's items only; the other fields keep its named
+ * properties too (see `Named`).
  *
  * A payload that reaches `container` would be copied as `container` is
  * before the write. Then nothing is copied and the result is
@@ -211,11 +217,6 @@ export declare function copyPayloadAfter(event: StateEvent, target: Target, cont
  * is refused (an `UnsupportedStateError`) without being read.
  */
 export declare function shallowCopy(container: object): any;
-/**
- * `copy[key] = value` on an object `shallowCopy` made, as an own enumerable
- * data property: no setter of the copy's prototype runs.
- */
-export declare function setData(copy: object, key: PropertyKey, value: unknown): void;
 /**
  * Record that a proxy read found `raw` at `parent[key]`. Called on every read
  * of a nested object, so the common case (place already known) is one compare.

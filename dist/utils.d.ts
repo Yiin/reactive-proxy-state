@@ -79,46 +79,73 @@ export declare class UnsupportedStateError extends TypeError {
     constructor(problem: string);
 }
 /**
+ * Which arrays of a payload copy keep their named (non-index) properties.
+ * Finding them costs a key list per array, so only the payloads 1.0.44 sent
+ * as the value itself keep them: the initial replace, inserted values and
+ * what a write removes. A later `newValue` keeps each array's items, as
+ * 1.0.44's copy did.
+ */
+export declare const enum Named {
+    /** No array: its items only. */
+    None = 0,
+    /** Every array below the top value, an array the library made (`items`, `oldValues`). */
+    Below = 1,
+    /** Every array. */
+    All = 2
+}
+/**
  * Deep clone for event payloads. Unlike `deepClone`, an object that appears
  * at several places in `value` is copied once per place, so the result is a
  * tree: a replica holds one copy per place, and a write through a shared
  * object emits one event per place. Copies may not share objects, because a
  * wire that keeps identity (structuredClone, an in-process listener) would
  * then hold one object where the source has several places, and apply each
- * per-place event to it again. Cycles are kept.
+ * per-place event to it again. Cycles are kept. Every own enumerable data
+ * property is copied as an own data property (also `__proto__`), and an
+ * array's holes stay holes; `named` says which arrays keep their named
+ * properties. Levels deeper than `FILL_DEPTH` take no stack frame, so any
+ * depth fits.
  *
  * Throws a `SnapshotLimitError` (a `RangeError`) when the copy would make more than
  * `SNAPSHOT_SHARED_COPY_LIMIT` extra copies of shared objects.
  */
-export declare function cloneTree<T>(value: T): T;
+export declare function cloneTree<T>(value: T, named: Named): T;
 /** What `cloneTreeUnless` returns for a value that reaches the object it names. */
 export declare const REACHES: unique symbol;
 /**
- * `cloneTree(value)`, or `REACHES` as soon as the copy (or its measure)
- * meets `container`. A `SnapshotLimitError` thrown first is measured on
- * objects other than `container`.
+ * `cloneTree(value, named)`, or `REACHES` as soon as the copy (or its
+ * measure) meets `container`. A `SnapshotLimitError` thrown first is
+ * measured on objects other than `container`.
  */
-export declare function cloneTreeUnless<T>(value: T, container: object): T | typeof REACHES;
+export declare function cloneTreeUnless<T>(value: T, container: object, named: Named): T | typeof REACHES;
 /**
- * `cloneTreeUnless(value, container)` for a value about to be stored (the
- * new value of a write, inserted items, a new root; `container` may be
+ * `cloneTreeUnless(value, container, named)` for a value about to be stored
+ * (the new value of a write, inserted items, a new root; `container` may be
  * undefined). It also finds whether the value is fresh: no object in it has
  * a location node, and no object sits at two places in it (an alias or a
  * cycle). `copiedFresh` says so when the call returns. The place walk of a
  * store finds nothing to do in a fresh value, so the store skips it (see
  * `attachValue`). The check stops at the first object that is not fresh.
  */
-export declare function cloneStored<T>(value: T, container: object | undefined): T | typeof REACHES;
+export declare function cloneStored<T>(value: T, container: object | undefined, named: Named): T | typeof REACHES;
 /** Whether the value the last `cloneStored` call copied is fresh; set when it returns. */
 export declare let copiedFresh: boolean;
 /**
- * The copy `cloneTree(value)` makes once `container` holds what `contents`
- * holds: wherever the copy (and its measure) meets `container`, it reads
- * `contents` instead, a shallow copy of `container` of the same kind. So a
- * payload is copied, or refused, as it will be after a write to `container`,
- * before that write is made.
+ * The copy `cloneTree(value, named)` makes once `container` holds what
+ * `contents` holds: wherever the copy (and its measure) meets `container`,
+ * it reads `contents` instead, a shallow copy of `container` of the same
+ * kind. So a payload is copied, or refused, as it will be after a write to
+ * `container`, before that write is made.
  */
-export declare function cloneTreeAfter<T>(value: T, container: object, contents: object): T;
+export declare function cloneTreeAfter<T>(value: T, container: object, contents: object, named: Named): T;
+/**
+ * The own enumerable keys of `array` that are not array indexes ("extra",
+ * "-1", "01"), or undefined when it has none. Indexes come first in key
+ * order, so the named keys are the ones after the last index.
+ */
+export declare function namedKeys(array: object): string[] | undefined;
+/** `object[key] = value` as an own enumerable data property: no setter runs, and `__proto__` stays a key. */
+export declare function setData(object: object, key: PropertyKey, value: unknown): void;
 /**
  * creates a deep clone of a value.
  * includes cycle detection using a weakmap.
