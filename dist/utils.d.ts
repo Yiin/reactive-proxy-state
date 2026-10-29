@@ -143,9 +143,12 @@ export declare function cloneTreeAfter<T>(value: T, container: object, contents:
  * "-1", "01"), or undefined when it has none. Indexes come first in key
  * order, so the named keys are the ones after the last index.
  */
-export declare function namedKeys(array: object): string[] | undefined;
+export declare function namedKeys(array: object): (string | symbol)[] | undefined;
 /** `object[key] = value` as an own enumerable data property: no setter runs, and `__proto__` stays a key. */
 export declare function setData(object: object, key: PropertyKey, value: unknown): void;
+export declare function keepCollectionIdentity(source: unknown, copy: unknown): void;
+/** The member this replica holds for a source key or member, without comparing its contents. */
+export declare function collectionMember(collection: Map<unknown, unknown> | Set<unknown>, member: unknown): unknown;
 /**
  * creates a deep clone of a value.
  * includes cycle detection using a weakmap.

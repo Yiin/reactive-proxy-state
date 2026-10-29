@@ -2722,7 +2722,13 @@ function namedKeys(array) {
   let start = keys.length;
   while (start > 0 && !isIndexKey(keys[start - 1]))
     start--;
-  return start === keys.length ? undefined : keys.slice(start);
+  const symbols = Object.getOwnPropertySymbols(array);
+  let names = start === keys.length ? undefined : keys.slice(start);
+  for (let i = 0;i < symbols.length; i++) {
+    if (isEnumerable.call(array, symbols[i]))
+      (names ??= []).push(symbols[i]);
+  }
+  return names;
 }
 function isIndexKey(key) {
   const length = key.length;
@@ -2794,7 +2800,7 @@ function enterCopies(value, depth, walk, frames) {
     }
     walk.extra++;
   }
-  if (walk.extra > SNAPSHOT_SHARED_COPY_LIMIT || source instanceof Date) {
+  if (walk.extra > SNAPSHOT_SHARED_COPY_LIMIT) {
     if (mark === undefined)
       marks.set(identity, 1);
     walk.low = Infinity;
@@ -2821,15 +2827,14 @@ function entriesOf(source, identity) {
   } else if (source instanceof Set) {
     for (const entry of source)
       entries.push(entry);
-  } else {
-    for (const key in source)
-      if (hasOwn.call(source, key))
-        entries.push(source[key]);
-    const symbolKeys = Object.getOwnPropertySymbols(source);
-    for (let i = 0;i < symbolKeys.length; i++) {
-      if (isEnumerable.call(source, symbolKeys[i]))
-        entries.push(source[symbolKeys[i]]);
-    }
+  }
+  for (const key in source)
+    if (hasOwn.call(source, key))
+      entries.push(source[key]);
+  const symbolKeys = Object.getOwnPropertySymbols(source);
+  for (let i = 0;i < symbolKeys.length; i++) {
+    if (isEnumerable.call(source, symbolKeys[i]))
+      entries.push(source[symbolKeys[i]]);
   }
   return entries;
 }
@@ -2904,7 +2909,8 @@ function cloneEntry(value, depth, named) {
       copy = {};
       kind = 0 /* Object */;
     } else if (value instanceof Date) {
-      return new Date(value.getTime());
+      copy = new Date(value.getTime());
+      kind = 0 /* Object */;
     } else if (value instanceof Map) {
       copy = new Map;
       kind = 2 /* Map */;
@@ -3091,17 +3097,61 @@ function fillMap(value, identity, copy, depth, named) {
   const below = depth + 1;
   enterPath(identity, copy, depth);
   value.forEach((entry, key) => {
-    copy.set(cloneValue(key, below, named), cloneValue(entry, below, named));
+    const keyCopy = cloneValue(key, below, named);
+    if (key !== null && typeof key === "object")
+      keepCollectionIdentity(key, keyCopy);
+    copy.set(keyCopy, cloneValue(entry, below, named));
   });
+  fillCollectionProperties(value, copy, below, named);
   return true;
 }
 function fillSet(value, identity, copy, depth, named) {
   const below = depth + 1;
   enterPath(identity, copy, depth);
   value.forEach((entry) => {
-    copy.add(cloneValue(entry, below, named));
+    const entryCopy = cloneValue(entry, below, named);
+    if (entry !== null && typeof entry === "object")
+      keepCollectionIdentity(entry, entryCopy);
+    copy.add(entryCopy);
   });
+  fillCollectionProperties(value, copy, below, named);
   return true;
+}
+function fillCollectionProperties(value, copy, depth, named) {
+  for (const key in value) {
+    if (hasOwn.call(value, key))
+      setData(copy, key, cloneValue(value[key], depth, named));
+  }
+  const symbols = Object.getOwnPropertySymbols(value);
+  for (let i = 0;i < symbols.length; i++) {
+    if (isEnumerable.call(value, symbols[i]))
+      setData(copy, symbols[i], cloneValue(value[symbols[i]], depth, named));
+  }
+}
+var collectionIdentities = new WeakMap;
+function keepCollectionIdentity(source, copy) {
+  if (source === null || typeof source !== "object" || copy === null || typeof copy !== "object")
+    return;
+  const raw = toRaw(source);
+  let identity = collectionIdentities.get(raw);
+  if (identity === undefined) {
+    identity = {};
+    collectionIdentities.set(raw, identity);
+  }
+  collectionIdentities.set(copy, identity);
+}
+function collectionMember(collection, member) {
+  collection = toRaw(collection);
+  if (member === null || typeof member !== "object" || collection.has(member))
+    return member;
+  const identity = collectionIdentities.get(toRaw(member));
+  if (identity === undefined)
+    return member;
+  for (const candidate of collection.keys()) {
+    if (candidate !== null && typeof candidate === "object" && collectionIdentities.get(toRaw(candidate)) === identity)
+      return candidate;
+  }
+  return member;
 }
 function deepClone(value, seen = new WeakMap) {
   if (value === null || typeof value !== "object") {
@@ -3263,14 +3313,14 @@ var actionHandlers = {
       console.warn(`expected map at path ${event.path.join(".")}`);
       return;
     }
-    targetMap.set(event.key, event.newValue);
+    targetMap.set(collectionMember(targetMap, event.key), event.newValue);
   },
   "map-delete": function(targetMap, _parentKeyIgnored, event) {
     if (!(targetMap instanceof Map)) {
       console.warn(`expected map at path ${event.path.join(".")}`);
       return;
     }
-    targetMap.delete(event.key);
+    targetMap.delete(collectionMember(targetMap, event.key));
   },
   "map-clear": function(targetMap, _parentKeyIgnored, event) {
     if (!(targetMap instanceof Map)) {
@@ -3284,14 +3334,14 @@ var actionHandlers = {
       console.warn(`expected set at path ${event.path.join(".")}`);
       return;
     }
-    targetSet.add(event.value);
+    targetSet.add(collectionMember(targetSet, event.value));
   },
   "set-delete": function(targetSet, _keyIgnored, event) {
     if (!(targetSet instanceof Set)) {
       console.warn(`expected set at path ${event.path.join(".")}`);
       return;
     }
-    targetSet.delete(event.value);
+    targetSet.delete(collectionMember(targetSet, event.value));
   },
   "set-clear": function(targetSet, _keyIgnored, event) {
     if (!(targetSet instanceof Set)) {
@@ -3655,9 +3705,11 @@ function dispatch(target, event) {
   for (let i = 1;i < paths.length; i++) {
     const copy = { ...event, path: paths[i] };
     if (isObject2(event.newValue))
-      copy.newValue = cloneTree(event.newValue, 0 /* None */);
-    if (isObject2(event.value) && !removesValue)
+      copy.newValue = cloneTree(event.newValue, event.action === "replace" ? 1 /* Below */ : 0 /* None */);
+    if (isObject2(event.value) && !removesValue) {
       copy.value = cloneTree(event.value, 2 /* All */);
+      keepCollectionIdentity(event.value, copy.value);
+    }
     if (event.items !== undefined)
       copy.items = cloneTree(event.items, 1 /* Below */);
     if (root.async) {
@@ -3665,8 +3717,10 @@ function dispatch(target, event) {
         copy.oldValue = cloneTree(event.oldValue, 2 /* All */);
       if (event.oldValues !== undefined)
         copy.oldValues = cloneTree(event.oldValues, 1 /* Below */);
-      if (removesValue)
+      if (removesValue) {
         copy.value = copy.oldValue;
+        keepCollectionIdentity(event.value, copy.value);
+      }
     }
     events.push(copy);
   }
@@ -3711,7 +3765,7 @@ function copyPayload(event, target, container, held) {
   let fresh = true;
   let newCopy = newValue;
   if (isObject2(newValue)) {
-    newCopy = held === undefined ? cloneStored(newValue, container, 0 /* None */) : cloneTreeUnless(newValue, container, 0 /* None */);
+    newCopy = held === undefined ? cloneStored(newValue, container, event.action === "replace" ? 1 /* Below */ : 0 /* None */) : cloneTreeUnless(newValue, container, event.action === "replace" ? 1 /* Below */ : 0 /* None */);
     if (newCopy === REACHES)
       return 0 /* Reaches */;
     fresh = held === undefined && copiedFresh;
@@ -3746,8 +3800,10 @@ function copyPayload(event, target, container, held) {
   }
   if (isObject2(newValue))
     event.newValue = newCopy;
-  if (isObject2(value))
+  if (isObject2(value)) {
+    keepCollectionIdentity(value, valueCopy);
     event.value = valueCopy;
+  }
   if (items !== undefined)
     event.items = itemsCopy;
   return fresh ? 2 /* Fresh */ : 1 /* Done */;
@@ -3760,7 +3816,7 @@ function copyPayloadAfter(event, target, container, after) {
   const { newValue, oldValue, value, items, oldValues } = event;
   const removed = target.root.async;
   const stored = event.action !== "set-delete";
-  const newCopy = isObject2(newValue) ? cloneTreeAfter(newValue, container, after, 0 /* None */) : newValue;
+  const newCopy = isObject2(newValue) ? cloneTreeAfter(newValue, container, after, event.action === "replace" ? 1 /* Below */ : 0 /* None */) : newValue;
   const oldCopy = removed && isObject2(oldValue) ? cloneTreeAfter(oldValue, container, after, 2 /* All */) : oldValue;
   const valueCopy = !isObject2(value) ? value : stored ? cloneTreeAfter(value, container, after, 2 /* All */) : oldCopy;
   const itemsCopy = items !== undefined && holdsObject(items) ? cloneTreeAfter(items, container, after, 1 /* Below */) : items;
@@ -3769,8 +3825,10 @@ function copyPayloadAfter(event, target, container, after) {
     event.newValue = newCopy;
   if (isObject2(oldValue))
     event.oldValue = oldCopy;
-  if (isObject2(value))
+  if (isObject2(value)) {
+    keepCollectionIdentity(value, valueCopy);
     event.value = valueCopy;
+  }
   if (items !== undefined)
     event.items = itemsCopy;
   if (oldValues !== undefined)
@@ -3783,13 +3841,7 @@ function holdsObject(values) {
   return false;
 }
 function shallowCopy(container) {
-  if (Array.isArray(container))
-    return container.slice();
-  if (container instanceof Map)
-    return new Map(container);
-  if (container instanceof Set)
-    return new Set(container);
-  const copy = Object.create(Object.getPrototypeOf(container));
+  const copy = Array.isArray(container) ? container.slice() : container instanceof Map ? new Map(container) : container instanceof Set ? new Set(container) : Object.create(Object.getPrototypeOf(container));
   const keys = Reflect.ownKeys(container);
   for (let i = 0;i < keys.length; i++) {
     const value = enumerableData(container, keys[i]);
@@ -3839,13 +3891,12 @@ function refuseAccessors(event, removed, container, after) {
     } else if (value instanceof Set) {
       for (const item of value)
         pending.push(item);
-    } else if (!(value instanceof Date)) {
-      const keys = Reflect.ownKeys(value);
-      for (let i = 0;i < keys.length; i++) {
-        const item = enumerableData(value, keys[i]);
-        if (item !== NOT_ENUMERABLE)
-          pending.push(item);
-      }
+    }
+    const keys = Reflect.ownKeys(value);
+    for (let i = 0;i < keys.length; i++) {
+      const item = enumerableData(value, keys[i]);
+      if (item !== NOT_ENUMERABLE)
+        pending.push(item);
     }
   }
 }
@@ -5425,13 +5476,11 @@ function createAsyncEmit(emit) {
     if (!flushScheduled) {
       flushScheduled = true;
       queueMicrotask(() => {
-        flushScheduled = false;
-        const batch = queue.splice(0);
         let failed = false;
         let failure;
-        for (const queuedEvent of batch) {
+        for (let next = 0;next < queue.length; next++) {
           try {
-            emit(queuedEvent);
+            emit(queue[next]);
           } catch (error) {
             if (!failed) {
               failed = true;
@@ -5439,6 +5488,8 @@ function createAsyncEmit(emit) {
             }
           }
         }
+        queue.length = 0;
+        flushScheduled = false;
         if (failed)
           throw failure;
       });
