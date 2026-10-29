@@ -15,10 +15,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # The Bun version that built and tested the committed dist. Another
+      # version bundles different code, so change it only with a rebuilt dist.
       - name: Setup Bun
         uses: oven-sh/setup-bun@v1
         with:
-          bun-version: latest
+          bun-version: 1.3.9
 
       - name: Setup Node
         uses: actions/setup-node@v4
@@ -38,6 +40,11 @@ jobs:
 
       - name: Build
         run: bun run build
+
+      # What npm publish ships: ES module import, CommonJS require, and the
+      # native array cases on both bundles.
+      - name: Smoke-test the built bundles
+        run: node scripts/dist-smoke.mjs
 
       # No token: auth comes from the OIDC id-token via the trusted publisher
       # configured on npmjs.com (Yiin/reactive-proxy-state, release.yml).
