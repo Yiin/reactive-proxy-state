@@ -16,15 +16,27 @@ function copyInto(value: any, ancestors: object[]): any {
   if (ancestors.includes(value)) throw new Error("copyTree: cycle");
   ancestors.push(value);
   let copy: any;
-  if (Array.isArray(value)) copy = value.map((item) => copyInto(item, ancestors));
-  else if (value instanceof Map) copy = new Map([...value].map(([key, item]) => [key, copyInto(item, ancestors)]));
+  if (Array.isArray(value)) {
+    copy = value.map((item) => copyInto(item, ancestors));
+    for (const key of namedKeys(value)) defineData(copy, key, copyInto(value[key], ancestors));
+  } else if (value instanceof Map) copy = new Map([...value].map(([key, item]) => [key, copyInto(item, ancestors)]));
   else if (value instanceof Set) copy = new Set([...value].map((item) => copyInto(item, ancestors)));
   else {
     copy = {};
-    for (const key of Object.keys(value)) copy[key] = copyInto(value[key], ancestors);
+    for (const key of Object.keys(value)) defineData(copy, key, copyInto(value[key], ancestors));
   }
   ancestors.pop();
   return copy;
+}
+
+/** The own enumerable keys of an array that are not indexes ("extra", "-1"). */
+export function namedKeys(array: readonly unknown[]): string[] {
+  return Object.keys(array).filter((key) => String(Number(key) >>> 0) !== key || Number(key) === 4294967295);
+}
+
+/** `object[key] = value` as an own data property, also for `__proto__`. */
+function defineData(object: object, key: PropertyKey, value: unknown): void {
+  Object.defineProperty(object, key, { value, writable: true, enumerable: true, configurable: true });
 }
 
 /** A stable text form of a tree, for comparing source and replica. */
@@ -38,12 +50,17 @@ function normalize(value: any): any {
   if (Array.isArray(value)) {
     const out: any[] = [];
     for (let i = 0; i < value.length; i++) out.push(i in value ? normalize(value[i]) : "<hole>");
-    return out;
+    // named properties of an array, when it has any
+    const named = namedKeys(value);
+    if (named.length === 0) return out;
+    const props: any = {};
+    for (const key of named.sort()) defineData(props, key, normalize(value[key]));
+    return { array: out, props };
   }
   if (value instanceof Map) return { map: [...value].map(([key, item]) => [key, normalize(item)]) };
   if (value instanceof Set) return { set: [...value].map(normalize) };
   const out: any = {};
-  for (const key of Object.keys(value).sort()) out[key] = normalize(value[key]);
+  for (const key of Object.keys(value).sort()) defineData(out, key, normalize(value[key]));
   return out;
 }
 

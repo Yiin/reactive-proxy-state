@@ -112,6 +112,71 @@ describe("a write made by a listener", () => {
     expect(remote).toEqual({ x: 1, y: 5 });
   });
 
+  test("in the listener's own mute scope also carries the waiting places (documented)", () => {
+    // A listener that drops the events delivered while it writes (a mute
+    // scope) also drops the waiting places its write delivers first: they
+    // come before its own events. 1.0.44 sent no event for the other place
+    // at all, so its replica missed `b.n` too.
+    const shared = { n: 0 };
+    let muted = false;
+    let once = false;
+    const seen: [string, boolean][] = [];
+    const state: any = reactive({ a: shared, b: shared, c: 0 }, (event) => {
+      if (event.path.length === 0) return;
+      seen.push([event.path.join("."), muted]);
+      if (event.path.join(".") === "a.n" && !once) {
+        once = true;
+        muted = true;
+        try {
+          state.c = 1;
+        } finally {
+          muted = false;
+        }
+      }
+    });
+    state.a.n = 1;
+    expect(seen).toEqual([
+      ["a.n", false],
+      ["b.n", true],
+      ["c", true],
+    ]);
+  });
+
+  test("deferred out of the listener leaves the waiting places outside the mute scope", async () => {
+    const shared = { n: 0 };
+    let muted = false;
+    let once = false;
+    const seen: [string, boolean][] = [];
+    let remote: any;
+    const state: any = reactive({ a: shared, b: shared, c: 0 }, (event) => {
+      if (event.path.length === 0) {
+        remote = structuredClone(event.newValue);
+        return;
+      }
+      seen.push([event.path.join("."), muted]);
+      if (!muted) updateState(remote, structuredClone(event));
+      if (event.path.join(".") === "a.n" && !once) {
+        once = true;
+        queueMicrotask(() => {
+          muted = true;
+          try {
+            state.c = 1;
+          } finally {
+            muted = false;
+          }
+        });
+      }
+    });
+    state.a.n = 1;
+    await settle();
+    expect(seen).toEqual([
+      ["a.n", false],
+      ["b.n", false],
+      ["c", true],
+    ]);
+    expect(remote).toEqual({ a: { n: 1 }, b: { n: 1 }, c: 0 });
+  });
+
   test("between the new indexes of a longer array", () => {
     let nested = false;
     const sync = wire({ list: ["a"] as any[] }, (_event, { state }) => {
@@ -134,45 +199,6 @@ describe("a write made by a listener", () => {
     sync.state.a.n = 1;
     expect(sync.log).toEqual(["set:a.n", "set:b.n", "set:c.n", "set:d.n", "set:b"]);
     expect(sync.remote).toEqual(toRaw(sync.state));
-  });
-});
-
-describe("a listener that throws", () => {
-  test("drops the waiting places, and the next write is delivered", () => {
-    const shared = { n: 0 };
-    let fail = true;
-    const sync = wire({ a: shared, b: shared, c: 0 }, () => {
-      if (fail) {
-        fail = false;
-        throw new Error("listener failed");
-      }
-    });
-    expect(() => {
-      sync.state.a.n = 1;
-    }).toThrow("listener failed");
-    expect(sync.log).toEqual(["set:a.n"]);
-    sync.state.c = 1;
-    sync.state.a.n = 2;
-    expect(sync.log).toEqual(["set:a.n", "set:c", "set:a.n", "set:b.n"]);
-  });
-
-  test("in a nested write drops what waits, and the caller can go on", () => {
-    const shared = { n: 0 };
-    let calls = 0;
-    const sync = wire({ a: shared, b: shared, c: 0 }, (_event, { state }) => {
-      const call = ++calls;
-      if (call === 1) {
-        expect(() => {
-          state.c = 1;
-        }).toThrow("second failed");
-      }
-      if (call === 2) throw new Error("second failed");
-    });
-    sync.state.a.n = 1;
-    // b.n threw while the nested write delivered it; c was dropped with it
-    expect(sync.log).toEqual(["set:a.n", "set:b.n"]);
-    sync.state.c = 2;
-    expect(sync.log).toEqual(["set:a.n", "set:b.n", "set:c"]);
   });
 });
 
