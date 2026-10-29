@@ -1094,7 +1094,12 @@ function fillCollectionProperties(value: any, copy: object, depth: number, named
 
 // Only collection members need identity across separate payload copies.
 // Tokens do not retain the source object. Weak keys release removed copies.
-const collectionIdentities = new WeakMap<object, object>();
+const collectionIdentityKey = Symbol.for('@yiin/reactive-proxy-state.collection-identities');
+const collectionIdentities: WeakMap<object, object> =
+    Reflect.get(globalThis, collectionIdentityKey) ?? new WeakMap<object, object>();
+if (!Reflect.has(globalThis, collectionIdentityKey)) {
+    Object.defineProperty(globalThis, collectionIdentityKey, { value: collectionIdentities });
+}
 
 export function keepCollectionIdentity(source: unknown, copy: unknown): void {
     if (source === null || typeof source !== 'object' || copy === null || typeof copy !== 'object') return;

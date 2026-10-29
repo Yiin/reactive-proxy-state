@@ -16,9 +16,9 @@ A wide graph can reach the limit with only two distinct objects. An array contai
 
 1.0.44 could deliver these graphs without exponential work. Its initial event and inserted items used the original objects. Its assignment copy reused an object's first copy. A consumer that converts the shared graph to a tree, such as JSON serialization, still expands the repeated paths. The new limit bounds that tree expansion inside the library.
 
-Collection copies retain membership through weak identity tokens. `updateState` uses those tokens to find an object Map key or Set member in the replica. Two different objects with equal contents have different tokens. Tokens do not hold their source objects alive. They survive further payload copies and forwarding through another reactive root in the same loaded library instance.
+Collection copies retain membership through weak identity tokens. `updateState` uses those tokens to find an object Map key or Set member in the replica. Two different objects with equal contents have different tokens. Tokens do not hold their source objects alive. They survive further payload copies and forwarding through another reactive root in the same JavaScript realm, including separate ESM and CJS instances.
 
-The tokens are internal to that library instance. They are not a wire format. A separate module instance or a transport that copies each event independently needs its own stable member identifiers. 1.0.44 also failed object-member deletion when independent transport copies broke identity. Copying an event with JSON or `structuredClone` does not preserve the new tokens.
+The tokens are internal to the JavaScript realm. They are not a wire format. A transport that copies each event independently needs its own stable member identifiers. 1.0.44 also failed object-member deletion when independent transport copies broke identity. Copying an event with JSON or `structuredClone` does not preserve the new tokens.
 
 The copied Map keys and Set members are distinct objects from the source members. Calling `replicaSet.has(sourceMember)` directly does not resolve tokens. Use events through `updateState` to synchronize membership. Direct member identity across roots is part of the copy difference above.
 
