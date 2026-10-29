@@ -6,6 +6,7 @@ import {
   UnsupportedStateError,
   cloneStored,
   cloneTree,
+  keepCollectionIdentity,
   cloneTreeAfter,
   cloneTreeUnless,
   copiedFresh,
@@ -447,13 +448,19 @@ export function dispatch(target: Target, event: StateEvent): void {
   for (let i = 1; i < paths.length; i++) {
     // copies of copies: a tree with cycles only, so they cannot pass the limit
     const copy = { ...event, path: paths[i] };
-    if (isObject(event.newValue)) copy.newValue = cloneTree(event.newValue, Named.None);
-    if (isObject(event.value) && !removesValue) copy.value = cloneTree(event.value, Named.All);
+    if (isObject(event.newValue)) copy.newValue = cloneTree(event.newValue, event.action === "replace" ? Named.Below : Named.None);
+    if (isObject(event.value) && !removesValue) {
+      copy.value = cloneTree(event.value, Named.All);
+      keepCollectionIdentity(event.value, copy.value);
+    }
     if (event.items !== undefined) copy.items = cloneTree(event.items, Named.Below);
     if (root.async) {
       if (isObject(event.oldValue)) copy.oldValue = cloneTree(event.oldValue, Named.All);
       if (event.oldValues !== undefined) copy.oldValues = cloneTree(event.oldValues, Named.Below);
-      if (removesValue) copy.value = copy.oldValue;
+      if (removesValue) {
+        copy.value = copy.oldValue;
+        keepCollectionIdentity(event.value, copy.value);
+      }
     }
     events.push(copy);
   }
@@ -565,8 +572,8 @@ export function copyPayload(
     // finding the copy fresh (see `heldItems`)
     newCopy =
       held === undefined
-        ? cloneStored(newValue, container, Named.None)
-        : cloneTreeUnless(newValue, container, Named.None);
+        ? cloneStored(newValue, container, event.action === "replace" ? Named.Below : Named.None)
+        : cloneTreeUnless(newValue, container, event.action === "replace" ? Named.Below : Named.None);
     if (newCopy === REACHES) return Copied.Reaches;
     fresh = held === undefined && copiedFresh;
   }
@@ -595,7 +602,10 @@ export function copyPayload(
     if (!stored) valueCopy = event.oldValue;
   }
   if (isObject(newValue)) event.newValue = newCopy;
-  if (isObject(value)) event.value = valueCopy;
+  if (isObject(value)) {
+    keepCollectionIdentity(value, valueCopy);
+    event.value = valueCopy;
+  }
   if (items !== undefined) event.items = itemsCopy as any[];
   return fresh ? Copied.Fresh : Copied.Done;
 }
@@ -623,7 +633,7 @@ export function copyPayloadAfter(event: StateEvent, target: Target, container: o
   const { newValue, oldValue, value, items, oldValues } = event;
   const removed = target.root.async;
   const stored = event.action !== "set-delete";
-  const newCopy = isObject(newValue) ? cloneTreeAfter(newValue, container, after, Named.None) : newValue;
+  const newCopy = isObject(newValue) ? cloneTreeAfter(newValue, container, after, event.action === "replace" ? Named.Below : Named.None) : newValue;
   const oldCopy = removed && isObject(oldValue) ? cloneTreeAfter(oldValue, container, after, Named.All) : oldValue;
   const valueCopy = !isObject(value)
     ? value
@@ -638,7 +648,10 @@ export function copyPayloadAfter(event: StateEvent, target: Target, container: o
       : oldValues;
   if (isObject(newValue)) event.newValue = newCopy;
   if (isObject(oldValue)) event.oldValue = oldCopy;
-  if (isObject(value)) event.value = valueCopy;
+  if (isObject(value)) {
+    keepCollectionIdentity(value, valueCopy);
+    event.value = valueCopy;
+  }
   if (items !== undefined) event.items = itemsCopy;
   if (oldValues !== undefined) event.oldValues = oldValuesCopy;
 }
@@ -657,10 +670,10 @@ function holdsObject(values: readonly unknown[]): boolean {
  * is refused (an `UnsupportedStateError`) without being read.
  */
 export function shallowCopy(container: object): any {
-  if (Array.isArray(container)) return container.slice();
-  if (container instanceof Map) return new Map(container);
-  if (container instanceof Set) return new Set(container);
-  const copy = Object.create(Object.getPrototypeOf(container));
+  const copy = Array.isArray(container) ? container.slice()
+    : container instanceof Map ? new Map(container)
+    : container instanceof Set ? new Set(container)
+    : Object.create(Object.getPrototypeOf(container));
   const keys = Reflect.ownKeys(container);
   for (let i = 0; i < keys.length; i++) {
     const value = enumerableData(container, keys[i]);
@@ -713,12 +726,11 @@ function refuseAccessors(event: StateEvent, removed: boolean, container: object,
       for (const [key, item] of value) pending.push(key, item);
     } else if (value instanceof Set) {
       for (const item of value) pending.push(item);
-    } else if (!(value instanceof Date)) {
-      const keys = Reflect.ownKeys(value);
-      for (let i = 0; i < keys.length; i++) {
-        const item = enumerableData(value, keys[i]);
-        if (item !== NOT_ENUMERABLE) pending.push(item);
-      }
+    }
+    const keys = Reflect.ownKeys(value);
+    for (let i = 0; i < keys.length; i++) {
+      const item = enumerableData(value, keys[i]);
+      if (item !== NOT_ENUMERABLE) pending.push(item);
     }
   }
 }

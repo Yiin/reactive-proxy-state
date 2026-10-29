@@ -146,7 +146,7 @@ describe("an array's named properties", () => {
     expect(sync.events.at(-1)!.oldValue.extra).toBe(2);
   });
 
-  test("are not in a newValue, which carries the items, as 1.0.44's copy did", () => {
+  test("are omitted by assignment copies but kept in reordered items", () => {
     const events: StateEvent[] = [];
     const state: any = reactive({ x: 0, rows: [[1], [2]] }, (event) => events.push(event));
     const value = withName([1], "extra", { n: 1 });
@@ -155,6 +155,6 @@ describe("an array's named properties", () => {
     expect(toRaw(state).x).toBe(value);
     withName(toRaw(state).rows[0], "extra", 1);
     state.rows.reverse();
-    expect(Object.keys(events.at(-1)!.newValue[1])).toEqual(["0"]);
+    expect(Object.keys(events.at(-1)!.newValue[1])).toEqual(["0", "extra"]);
   });
 });

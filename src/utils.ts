@@ -595,11 +595,16 @@ function noteFresh(identity: object): void {
  * "-1", "01"), or undefined when it has none. Indexes come first in key
  * order, so the named keys are the ones after the last index.
  */
-export function namedKeys(array: object): string[] | undefined {
+export function namedKeys(array: object): (string | symbol)[] | undefined {
     const keys = Object.keys(array);
     let start = keys.length;
     while (start > 0 && !isIndexKey(keys[start - 1])) start--;
-    return start === keys.length ? undefined : keys.slice(start);
+    const symbols = Object.getOwnPropertySymbols(array);
+    let names: (string | symbol)[] | undefined = start === keys.length ? undefined : keys.slice(start);
+    for (let i = 0; i < symbols.length; i++) {
+        if (isEnumerable.call(array, symbols[i])) (names ??= []).push(symbols[i]);
+    }
+    return names;
 }
 
 /** Is `key` an array index: "0", or digits without a leading zero, below 2^32 - 1? */
@@ -713,7 +718,7 @@ function enterCopies(value: object, depth: number, walk: CopyWalk, frames: CopyF
         }
         walk.extra++; // met before, counted again here
     }
-    if (walk.extra > SNAPSHOT_SHARED_COPY_LIMIT || source instanceof Date) {
+    if (walk.extra > SNAPSHOT_SHARED_COPY_LIMIT) {
         if (mark === undefined) marks.set(identity, 1);
         walk.low = Infinity;
         return 1;
@@ -737,12 +742,11 @@ function entriesOf(source: any, identity: object): readonly unknown[] {
         for (const [key, entry] of source) entries.push(key, entry);
     } else if (source instanceof Set) {
         for (const entry of source) entries.push(entry);
-    } else {
-        for (const key in source) if (hasOwn.call(source, key)) entries.push(source[key]);
-        const symbolKeys = Object.getOwnPropertySymbols(source);
-        for (let i = 0; i < symbolKeys.length; i++) {
-            if (isEnumerable.call(source, symbolKeys[i])) entries.push(source[symbolKeys[i]]);
-        }
+    }
+    for (const key in source) if (hasOwn.call(source, key)) entries.push(source[key]);
+    const symbolKeys = Object.getOwnPropertySymbols(source);
+    for (let i = 0; i < symbolKeys.length; i++) {
+        if (isEnumerable.call(source, symbolKeys[i])) entries.push(source[symbolKeys[i]]);
     }
     return entries;
 }
@@ -849,7 +853,8 @@ function cloneEntry(value: any, depth: number, named: Named): any {
             copy = {};
             kind = Fill.Object;
         } else if (value instanceof Date) {
-            return new Date(value.getTime());
+            copy = new Date(value.getTime());
+            kind = Fill.Object;
         } else if (value instanceof Map) {
             copy = new Map();
             kind = Fill.Map;
@@ -1057,8 +1062,11 @@ function fillMap(value: any, identity: object, copy: Map<unknown, unknown>, dept
     const below = depth + 1;
     enterPath(identity, copy, depth);
     value.forEach((entry: unknown, key: unknown) => {
-        copy.set(cloneValue(key, below, named), cloneValue(entry, below, named));
+        const keyCopy = cloneValue(key, below, named);
+        if (key !== null && typeof key === "object") keepCollectionIdentity(key, keyCopy);
+        copy.set(keyCopy, cloneValue(entry, below, named));
     });
+    fillCollectionProperties(value, copy, below, named);
     return true;
 }
 
@@ -1066,9 +1074,50 @@ function fillSet(value: any, identity: object, copy: Set<unknown>, depth: number
     const below = depth + 1;
     enterPath(identity, copy, depth);
     value.forEach((entry: unknown) => {
-        copy.add(cloneValue(entry, below, named));
+        const entryCopy = cloneValue(entry, below, named);
+        if (entry !== null && typeof entry === "object") keepCollectionIdentity(entry, entryCopy);
+        copy.add(entryCopy);
     });
+    fillCollectionProperties(value, copy, below, named);
     return true;
+}
+
+function fillCollectionProperties(value: any, copy: object, depth: number, named: Named): void {
+    for (const key in value) {
+        if (hasOwn.call(value, key)) setData(copy, key, cloneValue(value[key], depth, named));
+    }
+    const symbols = Object.getOwnPropertySymbols(value);
+    for (let i = 0; i < symbols.length; i++) {
+        if (isEnumerable.call(value, symbols[i])) setData(copy, symbols[i], cloneValue(value[symbols[i]], depth, named));
+    }
+}
+
+// Only collection members need identity across separate payload copies.
+// Tokens do not retain the source object. Weak keys release removed copies.
+const collectionIdentities = new WeakMap<object, object>();
+
+export function keepCollectionIdentity(source: unknown, copy: unknown): void {
+    if (source === null || typeof source !== 'object' || copy === null || typeof copy !== 'object') return;
+    const raw = toRaw(source) as object;
+    let identity = collectionIdentities.get(raw);
+    if (identity === undefined) {
+        identity = {};
+        collectionIdentities.set(raw, identity);
+    }
+    collectionIdentities.set(copy, identity);
+}
+
+/** The member this replica holds for a source key or member, without comparing its contents. */
+export function collectionMember(collection: Map<unknown, unknown> | Set<unknown>, member: unknown): unknown {
+    collection = toRaw(collection);
+    if (member === null || typeof member !== 'object' || collection.has(member)) return member;
+    const identity = collectionIdentities.get(toRaw(member) as object);
+    if (identity === undefined) return member;
+    for (const candidate of collection.keys()) {
+        if (candidate !== null && typeof candidate === 'object' &&
+            collectionIdentities.get(toRaw(candidate) as object) === identity) return candidate;
+    }
+    return member;
 }
 
 /**

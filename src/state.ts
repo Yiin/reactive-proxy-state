@@ -1,6 +1,6 @@
 import { isReactive } from './reactive';
 import { StateEvent } from './types';
-import { pathCache, setInPathCache, evictDescendantsFromPathCache } from './utils';
+import { pathCache, setInPathCache, evictDescendantsFromPathCache, collectionMember } from './utils';
 
 // helper to abstract getting a value from a map or object property
 function getValue(obj: any, key: any): any {
@@ -123,13 +123,13 @@ const actionHandlers: { [key: string]: (target: any, key: any, event: StateEvent
         if (!(targetMap instanceof Map)) {
              console.warn(`expected map at path ${event.path.join('.')}`); return;
         }
-        targetMap.set(event.key, event.newValue);
+        targetMap.set(collectionMember(targetMap, event.key), event.newValue);
     },
     'map-delete': function(targetMap: Map<any, any>, _parentKeyIgnored: any, event: StateEvent) {
          if (!(targetMap instanceof Map)) {
              console.warn(`expected map at path ${event.path.join('.')}`); return;
          }
-        targetMap.delete(event.key);
+        targetMap.delete(collectionMember(targetMap, event.key));
     },
     'map-clear': function(targetMap: Map<any, any>, _parentKeyIgnored: any, event: StateEvent) {
          if (!(targetMap instanceof Map)) {
@@ -141,13 +141,13 @@ const actionHandlers: { [key: string]: (target: any, key: any, event: StateEvent
          if (!(targetSet instanceof Set)) {
              console.warn(`expected set at path ${event.path.join('.')}`); return;
          }
-        targetSet.add(event.value);
+        targetSet.add(collectionMember(targetSet, event.value));
     },
     'set-delete': function(targetSet: Set<any>, _keyIgnored: any, event: StateEvent) {
          if (!(targetSet instanceof Set)) {
              console.warn(`expected set at path ${event.path.join('.')}`); return;
          }
-        targetSet.delete(event.value);
+        targetSet.delete(collectionMember(targetSet, event.value));
     },
     'set-clear': function(targetSet: Set<any>, _keyIgnored: any, event: StateEvent) {
          if (!(targetSet instanceof Set)) {

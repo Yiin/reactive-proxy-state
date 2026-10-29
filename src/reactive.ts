@@ -52,7 +52,7 @@ export function isReactive(value: any): boolean {
  * Wraps an emit function to defer calls to the next microtask.
  * Multiple events queued in the same synchronous tick are flushed
  * in order on a single microtask. An emit that throws does not stop the
- * others: every event of the batch is delivered, then the first error is
+ * others: every queued event, including nested writes, is delivered, then the first error is
  * thrown from the microtask.
  */
 function createAsyncEmit(emit: EmitFunction): EmitFunction {
@@ -64,13 +64,11 @@ function createAsyncEmit(emit: EmitFunction): EmitFunction {
     if (!flushScheduled) {
       flushScheduled = true
       queueMicrotask(() => {
-        flushScheduled = false
-        const batch = queue.splice(0)
         let failed = false
         let failure: unknown
-        for (const queuedEvent of batch) {
+        for (let next = 0; next < queue.length; next++) {
           try {
-            emit(queuedEvent)
+            emit(queue[next])
           } catch (error) {
             if (!failed) {
               failed = true
@@ -78,6 +76,8 @@ function createAsyncEmit(emit: EmitFunction): EmitFunction {
             }
           }
         }
+        queue.length = 0
+        flushScheduled = false
         if (failed) throw failure
       })
     }
