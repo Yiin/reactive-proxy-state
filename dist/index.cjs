@@ -3195,7 +3195,11 @@ function fillCollectionProperties(value, copy, depth, named) {
       setData(copy, symbols[i], cloneValue(value[symbols[i]], depth, named));
   }
 }
-var collectionIdentities = new WeakMap;
+var collectionIdentityKey = Symbol.for("@yiin/reactive-proxy-state.collection-identities");
+var collectionIdentities = Reflect.get(globalThis, collectionIdentityKey) ?? new WeakMap;
+if (!Reflect.has(globalThis, collectionIdentityKey)) {
+  Object.defineProperty(globalThis, collectionIdentityKey, { value: collectionIdentities });
+}
 function keepCollectionIdentity(source, copy) {
   if (source === null || typeof source !== "object" || copy === null || typeof copy !== "object")
     return;

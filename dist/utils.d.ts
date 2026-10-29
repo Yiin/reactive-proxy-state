@@ -82,13 +82,13 @@ export declare class UnsupportedStateError extends TypeError {
  * Which arrays of a payload copy keep their named (non-index) properties.
  * Finding them costs a key list per array, so only the payloads 1.0.44 sent
  * as the value itself keep them: the initial replace, inserted values and
- * what a write removes. A later `newValue` keeps each array's items, as
- * 1.0.44's copy did.
+ * what a write removes. Reorders also keep properties below the reordered
+ * array. Assignment `newValue` copies keep array items only, as in 1.0.44.
  */
 export declare const enum Named {
     /** No array: its items only. */
     None = 0,
-    /** Every array below the top value, an array the library made (`items`, `oldValues`). */
+    /** Arrays below `items`, `oldValues`, or the reordered array. */
     Below = 1,
     /** Every array. */
     All = 2
@@ -139,9 +139,8 @@ export declare let copiedFresh: boolean;
  */
 export declare function cloneTreeAfter<T>(value: T, container: object, contents: object, named: Named): T;
 /**
- * The own enumerable keys of `array` that are not array indexes ("extra",
- * "-1", "01"), or undefined when it has none. Indexes come first in key
- * order, so the named keys are the ones after the last index.
+ * The enumerable string and symbol keys of `array` other than indexes.
+ * Indexes come first among string keys. Undefined when no keys remain.
  */
 export declare function namedKeys(array: object): (string | symbol)[] | undefined;
 /** `object[key] = value` as an own enumerable data property: no setter runs, and `__proto__` stays a key. */
