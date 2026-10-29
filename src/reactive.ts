@@ -52,8 +52,8 @@ export function isReactive(value: any): boolean {
  * Wraps an emit function to defer calls to the next microtask.
  * Multiple events queued in the same synchronous tick are flushed
  * in order on a single microtask. An emit that throws does not stop the
- * others: every queued event, including nested writes, is delivered, then the first error is
- * thrown from the microtask.
+ * others: every queued event, including nested writes, is delivered.
+ * Then the microtask throws the first error.
  */
 function createAsyncEmit(emit: EmitFunction): EmitFunction {
   const queue: StateEvent[] = []

@@ -328,13 +328,13 @@ const SNAPSHOT_CHECK_AFTER = SNAPSHOT_SHARED_COPY_LIMIT + 1;
  * Which arrays of a payload copy keep their named (non-index) properties.
  * Finding them costs a key list per array, so only the payloads 1.0.44 sent
  * as the value itself keep them: the initial replace, inserted values and
- * what a write removes. A later `newValue` keeps each array's items, as
- * 1.0.44's copy did.
+ * what a write removes. Reorders also keep properties below the reordered
+ * array. Assignment `newValue` copies keep array items only, as in 1.0.44.
  */
 export const enum Named {
     /** No array: its items only. */
     None = 0,
-    /** Every array below the top value, an array the library made (`items`, `oldValues`). */
+    /** Arrays below `items`, `oldValues`, or the reordered array. */
     Below = 1,
     /** Every array. */
     All = 2,
@@ -591,9 +591,8 @@ function noteFresh(identity: object): void {
 }
 
 /**
- * The own enumerable keys of `array` that are not array indexes ("extra",
- * "-1", "01"), or undefined when it has none. Indexes come first in key
- * order, so the named keys are the ones after the last index.
+ * The enumerable string and symbol keys of `array` other than indexes.
+ * Indexes come first among string keys. Undefined when no keys remain.
  */
 export function namedKeys(array: object): (string | symbol)[] | undefined {
     const keys = Object.keys(array);
@@ -1094,6 +1093,7 @@ function fillCollectionProperties(value: any, copy: object, depth: number, named
 
 // Only collection members need identity across separate payload copies.
 // Tokens do not retain the source object. Weak keys release removed copies.
+// ESM and CJS instances in the same realm use the same registry.
 const collectionIdentityKey = Symbol.for('@yiin/reactive-proxy-state.collection-identities');
 const collectionIdentities: WeakMap<object, object> =
     Reflect.get(globalThis, collectionIdentityKey) ?? new WeakMap<object, object>();

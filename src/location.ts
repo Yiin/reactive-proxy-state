@@ -542,9 +542,9 @@ export const enum Copied {
  * `value` of a `set-delete`) is copied only for an async root
  * (`target.root.async`), whose events wait for a microtask. A synchronous
  * root delivers the event before the write returns, and sends the removed
- * value itself, as 1.0.44 did, so it never refuses a removal. A `newValue`
- * keeps each array's items only; the other fields keep its named
- * properties too (see `Named`).
+ * value itself, as 1.0.44 did, so it never refuses a removal. Assignment
+ * `newValue` copies keep array items only. Reorders keep properties on
+ * nested arrays; the other fields keep every array's properties (see `Named`).
  *
  * A payload that reaches `container` would be copied as `container` is
  * before the write. Then nothing is copied and the result is
