@@ -1337,9 +1337,10 @@ function stripIndexes(node: LocationNode, arrayNode: LocationNode, from: number)
  */
 export function evictDeep(value: any, parent?: LocationNode): void {
   if (value == null || typeof value !== "object") return;
+  const top = toRaw(value);
+  if (globalSeen.get(top) === undefined) return; // not proxied, skip entire subtree
   // proxied objects to evict, each after the node of the container it was found in
-  const pending: unknown[] = [];
-  pushProxied(value, parent, pending);
+  const pending: unknown[] = [parent, top];
   while (pending.length > 0) {
     const raw: any = pending.pop();
     const container = pending.pop() as LocationNode | undefined;

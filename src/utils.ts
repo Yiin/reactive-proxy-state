@@ -442,7 +442,6 @@ function copyTree(
     const outerBase = cloneBase;
     const outerIndex = cloneIndex;
     const outerNamed = cloneNamed;
-    const outerUnnamed = cloneUnnamed;
     cloneTop = top;
     cloneCountdown = SNAPSHOT_CHECK_AFTER;
     cloneContainer = container;
@@ -452,10 +451,9 @@ function copyTree(
     cloneSeen = undefined;
     cloneBase = base;
     cloneIndex = undefined;
-    cloneNamed = named !== Named.None;
-    cloneUnnamed = named === Named.Below ? top : undefined;
+    cloneNamed = named;
     try {
-        const copy = cloneEntry(value, 0);
+        const copy = cloneEntry(value, 0, named);
         if (checkFresh) copiedFresh = cloneFresh;
         return copy;
     } finally {
@@ -472,7 +470,6 @@ function copyTree(
         cloneBase = outerBase;
         cloneIndex = outerIndex;
         cloneNamed = outerNamed;
-        cloneUnnamed = outerUnnamed;
     }
 }
 
@@ -481,8 +478,8 @@ function copyTree(
 // stops at (see `cloneTreeUnless`) or reads `cloneContents` for (see
 // `cloneTreeAfter`), and, for `cloneStored`, whether every object met so far
 // is fresh, with the first object met below the top, then all of them.
-// `cloneNamed`: arrays keep their named properties, except `cloneUnnamed`
-// (see `Named`).
+// `cloneNamed`: which arrays keep their named properties (see `Named`); the
+// copy passes it along, the limit measure and the deep fills read it here.
 let cloneTop: object | undefined;
 let cloneCountdown = 0;
 let cloneContainer: object | undefined;
@@ -490,8 +487,7 @@ let cloneContents: object | undefined;
 let cloneFresh = false;
 let cloneFirst: object | undefined;
 let cloneSeen: Set<object> | undefined;
-let cloneNamed = false;
-let cloneUnnamed: object | undefined;
+let cloneNamed = Named.None;
 
 /**
  * The copy of a small raw value, made without the stack and the counter of
@@ -730,7 +726,7 @@ function enterCopies(value: object, depth: number, walk: CopyWalk, frames: CopyF
 /** What a copy of `source` (the raw object `identity`, or what is read for it) copies below it, in order. */
 function entriesOf(source: any, identity: object): readonly unknown[] {
     if (Array.isArray(source)) {
-        const names = cloneNamed && identity !== cloneUnnamed ? namedKeys(source) : undefined;
+        const names = keepsNamed(cloneNamed, identity === cloneTop ? 0 : 1) ? namedKeys(source) : undefined;
         if (names === undefined) return source;
         const entries: unknown[] = source.slice();
         for (let i = 0; i < names.length; i++) entries.push((source as any)[names[i]]);
@@ -810,10 +806,15 @@ function leavePath(length: number): void {
 }
 
 /** The copy of `value` at `depth` below the top of the copy (see `cloneEntry`). */
-function cloneValue(value: unknown, depth: number): unknown {
+function cloneValue(value: unknown, depth: number, named: Named): unknown {
     if (value === null || typeof value !== 'object') return value;
     if (cloneFresh) noteFresh(toRaw(value) as object);
-    return cloneEntry(value, depth);
+    return cloneEntry(value, depth, named);
+}
+
+/** Does an array at `depth` keep its named properties in a copy made with `named`? */
+function keepsNamed(named: Named, depth: number): boolean {
+    return named === Named.All || (named === Named.Below && depth > 0);
 }
 
 /**
@@ -823,7 +824,7 @@ function cloneValue(value: unknown, depth: number): unknown {
  * copy is filled now when `depth` is below `FILL_DEPTH`, else it waits in
  * `cloneWork` for the object at the last such depth (see `fillWaiting`).
  */
-function cloneEntry(value: any, depth: number): any {
+function cloneEntry(value: any, depth: number, named: Named): any {
     const identity = toRaw(value) as object;
     if (identity === cloneContainer) value = readsOf(identity);
     if (depth > DEEP_PATH) {
@@ -861,7 +862,7 @@ function cloneEntry(value: any, depth: number): any {
         }
     }
     if (depth >= FILL_DEPTH - 1) {
-        cloneDeep(kind, value, identity, copy, depth);
+        cloneDeep(kind, value, identity, copy, depth, named);
         return copy;
     }
     // Plain objects and arrays are filled here, not in `fillObject` and
@@ -879,13 +880,13 @@ function cloneEntry(value: any, depth: number): any {
                     enterPath(identity, copy, depth);
                 }
                 if (cloneFresh) noteFresh(toRaw(child) as object);
-                child = cloneEntry(child, below);
+                child = cloneEntry(child, below, named);
             }
             if (key === '__proto__') setData(copy, key, child);
             else copy[key] = child;
         }
         const symbolKeys = Object.getOwnPropertySymbols(value);
-        if (symbolKeys.length !== 0) pushed = fillSymbols(value, identity, copy, depth, symbolKeys, pushed);
+        if (symbolKeys.length !== 0) pushed = fillSymbols(value, identity, copy, depth, named, symbolKeys, pushed);
     } else if (kind === Fill.Array) {
         const length = copy.length;
         for (let i = 0; i < length; i++) {
@@ -899,11 +900,12 @@ function cloneEntry(value: any, depth: number): any {
                 enterPath(identity, copy, depth);
             }
             if (cloneFresh) noteFresh(toRaw(child) as object);
-            copy[i] = cloneEntry(child, below);
+            copy[i] = cloneEntry(child, below, named);
         }
-        if (cloneNamed && identity !== cloneUnnamed) pushed = fillNamed(value, identity, copy, depth, pushed);
+        if (keepsNamed(named, depth)) pushed = fillNamed(value, identity, copy, depth, named, pushed);
     } else {
-        pushed = kind === Fill.Map ? fillMap(value, identity, copy, depth) : fillSet(value, identity, copy, depth);
+        pushed =
+            kind === Fill.Map ? fillMap(value, identity, copy, depth, named) : fillSet(value, identity, copy, depth, named);
     }
     if (pushed) {
         // the children took themselves off the path: only this object is left
@@ -922,23 +924,23 @@ function cloneEntry(value: any, depth: number): any {
  * filled now and fills the copies waiting below it (see `fillWaiting`); a
  * deeper copy waits in `cloneWork`.
  */
-function cloneDeep(kind: Fill, value: any, identity: object, copy: any, depth: number): void {
+function cloneDeep(kind: Fill, value: any, identity: object, copy: any, depth: number, named: Named): void {
     const pathLength = cloneAncestors.length;
     if (depth >= FILL_DEPTH) {
         cloneWork.push(kind, value, identity, copy, pathLength);
         return;
     }
     const workBase = cloneWork.length;
-    fill(kind, value, identity, copy, depth);
+    fill(kind, value, identity, copy, depth, named);
     fillWaiting(workBase);
     leavePath(pathLength);
 }
 
-function fill(kind: Fill, value: any, identity: object, copy: any, depth: number): void {
-    if (kind === Fill.Object) fillObject(value, identity, copy, depth);
-    else if (kind === Fill.Array) fillArray(value, identity, copy, depth);
-    else if (kind === Fill.Map) fillMap(value, identity, copy, depth);
-    else fillSet(value, identity, copy, depth);
+function fill(kind: Fill, value: any, identity: object, copy: any, depth: number, named: Named): void {
+    if (kind === Fill.Object) fillObject(value, identity, copy, depth, named);
+    else if (kind === Fill.Array) fillArray(value, identity, copy, depth, named);
+    else if (kind === Fill.Map) fillMap(value, identity, copy, depth, named);
+    else fillSet(value, identity, copy, depth, named);
 }
 
 /**
@@ -959,7 +961,7 @@ function fillWaiting(workBase: number): void {
         const pathLength: number = work[at + 4];
         work.length = at;
         if (cloneAncestors.length !== pathLength) leavePath(pathLength);
-        fill(kind, value, identity, copy, FILL_DEPTH);
+        fill(kind, value, identity, copy, FILL_DEPTH, cloneNamed);
     }
 }
 
@@ -970,7 +972,7 @@ function fillWaiting(workBase: number): void {
 // `cloneEntry` fills shallow plain objects and arrays itself, the way
 // `fillObject` and `fillArray` do; keep the two the same.
 
-function fillObject(value: any, identity: object, copy: any, depth: number): boolean {
+function fillObject(value: any, identity: object, copy: any, depth: number, named: Named): boolean {
     const below = depth + 1;
     let pushed = false;
     for (const key in value) {
@@ -982,13 +984,13 @@ function fillObject(value: any, identity: object, copy: any, depth: number): boo
                 enterPath(identity, copy, depth);
             }
             if (cloneFresh) noteFresh(toRaw(child) as object);
-            child = cloneEntry(child, below);
+            child = cloneEntry(child, below, named);
         }
         if (key === '__proto__') setData(copy, key, child);
         else copy[key] = child;
     }
     const symbolKeys = Object.getOwnPropertySymbols(value);
-    return symbolKeys.length === 0 ? pushed : fillSymbols(value, identity, copy, depth, symbolKeys, pushed);
+    return symbolKeys.length === 0 ? pushed : fillSymbols(value, identity, copy, depth, named, symbolKeys, pushed);
 }
 
 /** The enumerable symbol properties of an object (see `fillObject`). */
@@ -997,6 +999,7 @@ function fillSymbols(
     identity: object,
     copy: any,
     depth: number,
+    named: Named,
     symbolKeys: symbol[],
     pushed: boolean
 ): boolean {
@@ -1009,12 +1012,12 @@ function fillSymbols(
             pushed = true;
             enterPath(identity, copy, depth);
         }
-        copy[symbolKey] = cloneValue(child, below);
+        copy[symbolKey] = cloneValue(child, below, named);
     }
     return pushed;
 }
 
-function fillArray(value: any, identity: object, copy: any[], depth: number): boolean {
+function fillArray(value: any, identity: object, copy: any[], depth: number, named: Named): boolean {
     const below = depth + 1;
     let pushed = false;
     const length = copy.length;
@@ -1029,13 +1032,13 @@ function fillArray(value: any, identity: object, copy: any[], depth: number): bo
             enterPath(identity, copy, depth);
         }
         if (cloneFresh) noteFresh(toRaw(child) as object);
-        copy[i] = cloneEntry(child, below);
+        copy[i] = cloneEntry(child, below, named);
     }
-    return cloneNamed && identity !== cloneUnnamed ? fillNamed(value, identity, copy, depth, pushed) : pushed;
+    return keepsNamed(named, depth) ? fillNamed(value, identity, copy, depth, named, pushed) : pushed;
 }
 
 /** The named properties of an array the copy keeps (see `Named`, `fillArray`). */
-function fillNamed(value: any, identity: object, copy: any, depth: number, pushed: boolean): boolean {
+function fillNamed(value: any, identity: object, copy: any, depth: number, named: Named, pushed: boolean): boolean {
     const names = namedKeys(value);
     if (names === undefined) return pushed;
     const below = depth + 1;
@@ -1045,25 +1048,25 @@ function fillNamed(value: any, identity: object, copy: any, depth: number, pushe
             pushed = true;
             enterPath(identity, copy, depth);
         }
-        setData(copy, names[i], cloneValue(child, below));
+        setData(copy, names[i], cloneValue(child, below, named));
     }
     return pushed;
 }
 
-function fillMap(value: any, identity: object, copy: Map<unknown, unknown>, depth: number): boolean {
+function fillMap(value: any, identity: object, copy: Map<unknown, unknown>, depth: number, named: Named): boolean {
     const below = depth + 1;
     enterPath(identity, copy, depth);
     value.forEach((entry: unknown, key: unknown) => {
-        copy.set(cloneValue(key, below), cloneValue(entry, below));
+        copy.set(cloneValue(key, below, named), cloneValue(entry, below, named));
     });
     return true;
 }
 
-function fillSet(value: any, identity: object, copy: Set<unknown>, depth: number): boolean {
+function fillSet(value: any, identity: object, copy: Set<unknown>, depth: number, named: Named): boolean {
     const below = depth + 1;
     enterPath(identity, copy, depth);
     value.forEach((entry: unknown) => {
-        copy.add(cloneValue(entry, below));
+        copy.add(cloneValue(entry, below, named));
     });
     return true;
 }
