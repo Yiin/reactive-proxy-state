@@ -8,6 +8,7 @@ import {
   globalSeen,
   proxyStats,
   setData,
+  toRaw,
   unwrapForStore,
 } from "./utils";
 import {
@@ -66,14 +67,20 @@ function createAsyncEmit(emit: EmitFunction): EmitFunction {
       queueMicrotask(() => {
         let failed = false
         let failure: unknown
-        for (let next = 0; next < queue.length; next++) {
+        let next = 0
+        while (next < queue.length) {
           try {
-            emit(queue[next])
+            emit(queue[next++])
           } catch (error) {
             if (!failed) {
               failed = true
               failure = error
             }
+          }
+          // a flush that listeners keep growing lets go of what it delivered
+          if (next === FLUSH_CHUNK) {
+            queue.splice(0, next)
+            next = 0
           }
         }
         queue.length = 0
@@ -83,6 +90,9 @@ function createAsyncEmit(emit: EmitFunction): EmitFunction {
     }
   }
 }
+
+/** Delivered events an async flush keeps before it drops them from its queue. */
+const FLUSH_CHUNK = 1024
 
 /**
  * Create a reactive proxy for an object.
@@ -105,6 +115,9 @@ export function reactive<T extends object>(
   // one proxy per raw object
   const existing = globalSeen.get(obj);
   if (existing !== undefined) return existing;
+  // a proxy is never wrapped again: `emit` and `path` are ignored, and the
+  // proxy keeps emitting to its own root
+  if ((obj as any)[ReactiveFlags.IS_REACTIVE]) return obj;
 
   // At the root call, wrap emit with async batching if requested.
   // Every location under this root emits through the wrapped function.
@@ -143,6 +156,7 @@ export function reactive<T extends object>(
 /**
  * The proxy for `raw`, which a read found at `parent[key]`. Records that
  * place, so the proxy's events name where the object is now.
+ * @internal
  */
 export function wrapChild(
   raw: any,
@@ -158,6 +172,9 @@ export function wrapChild(
     return node.proxy;
   }
   if (raw[ReactiveFlags.SKIP]) return raw;
+  // a proxy the state holds where a store could not put its raw object (a
+  // frozen object, a getter) stands for that object: never wrap it again
+  if (raw[ReactiveFlags.IS_REACTIVE]) return wrapChild(toRaw(raw), parent, key, options);
   if (raw instanceof Date) return new Date(raw.getTime()); // dates are not proxied, return copy
   node ??= ensureLocationNode(raw);
   notePlace(node, parent, key);
@@ -165,11 +182,16 @@ export function wrapChild(
   return restoreEvicted(node) ?? createProxy(raw, node, options);
 }
 
-/** The proxy for an object that has no place of its own (a map key). */
+/**
+ * The proxy for an object that has no place of its own (a map key).
+ * @internal
+ */
 export function wrapUnplaced(raw: any): any {
   if (raw[ReactiveFlags.SKIP]) return raw;
   const existing = globalSeen.get(raw);
   if (existing !== undefined) return existing;
+  // a map key that is a proxy stands for its raw object
+  if (raw[ReactiveFlags.IS_REACTIVE]) return wrapUnplaced(toRaw(raw));
   const node = ensureLocationNode(raw);
   return restoreEvicted(node) ?? createProxy(raw, node);
 }

@@ -20,7 +20,7 @@ test("a long async flush releases the events it delivered", async () => {
         Bun.gc(true);
         collected = early.filter((ref) => ref.deref() === undefined).length;
       }
-      if (delivered < TOTAL) state.n++;
+      if (event.action === "set" && delivered < TOTAL) state.n++;
     },
     [],
     { async: true }

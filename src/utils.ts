@@ -16,6 +16,9 @@ export function toRaw<T>(observed: T): T {
 /**
  * Strip proxy refs from spread results before storing in raw state.
  * Prevents unbounded proxy nesting from `{ ...reactiveProxy }` patterns.
+ * The value and its direct children only: the place walk of the store puts
+ * the raw object in place of a proxy deeper down (see `storeRaw` in
+ * location.ts), and a fresh value (see `cloneStored`) holds no proxy.
  */
 export function unwrapForStore(value: any): any {
   // If the value itself is reactive, unwrap it — the raw object's
@@ -63,6 +66,7 @@ export const wrapperCache = new WeakMap<object, object>();
 // raw object -> where it sits in its state tree (see location.ts). Kept here
 // with the other identity maps, so a payload copy can tell whether the value
 // it copies holds objects the tree already knows (see `cloneStored`).
+/** @internal */
 export const locationNodes = new WeakMap<object, LocationNode>();
 
 // ── Instrumentation counters (near-zero overhead) ──
@@ -565,9 +569,14 @@ function countCopy(): void {
     }
 }
 
-/** The copy stays fresh unless `identity` (raw), met below its top, has a location node or was met before. */
-function noteFresh(identity: object): void {
-    if (identity === cloneTop || locationNodes.get(identity) !== undefined) {
+/**
+ * The copy stays fresh unless `value`, met below its top, is a proxy (also
+ * one of another copy of this library: the store puts its raw object in its
+ * place), or its raw object has a location node or was met before.
+ */
+function noteFresh(value: object): void {
+    const identity = toRaw(value) as object;
+    if (identity !== value || identity === cloneTop || locationNodes.get(identity) !== undefined) {
         cloneFresh = false;
         return;
     }
@@ -811,7 +820,7 @@ function leavePath(length: number): void {
 /** The copy of `value` at `depth` below the top of the copy (see `cloneEntry`). */
 function cloneValue(value: unknown, depth: number, named: Named): unknown {
     if (value === null || typeof value !== 'object') return value;
-    if (cloneFresh) noteFresh(toRaw(value) as object);
+    if (cloneFresh) noteFresh(value);
     return cloneEntry(value, depth, named);
 }
 
@@ -883,7 +892,7 @@ function cloneEntry(value: any, depth: number, named: Named): any {
                     pushed = true;
                     enterPath(identity, copy, depth);
                 }
-                if (cloneFresh) noteFresh(toRaw(child) as object);
+                if (cloneFresh) noteFresh(child);
                 child = cloneEntry(child, below, named);
             }
             if (key === '__proto__') setData(copy, key, child);
@@ -903,7 +912,7 @@ function cloneEntry(value: any, depth: number, named: Named): any {
                 pushed = true;
                 enterPath(identity, copy, depth);
             }
-            if (cloneFresh) noteFresh(toRaw(child) as object);
+            if (cloneFresh) noteFresh(child);
             copy[i] = cloneEntry(child, below, named);
         }
         if (keepsNamed(named, depth)) pushed = fillNamed(value, identity, copy, depth, named, pushed);
@@ -987,7 +996,7 @@ function fillObject(value: any, identity: object, copy: any, depth: number, name
                 pushed = true;
                 enterPath(identity, copy, depth);
             }
-            if (cloneFresh) noteFresh(toRaw(child) as object);
+            if (cloneFresh) noteFresh(child);
             child = cloneEntry(child, below, named);
         }
         if (key === '__proto__') setData(copy, key, child);
@@ -1035,7 +1044,7 @@ function fillArray(value: any, identity: object, copy: any[], depth: number, nam
             pushed = true;
             enterPath(identity, copy, depth);
         }
-        if (cloneFresh) noteFresh(toRaw(child) as object);
+        if (cloneFresh) noteFresh(child);
         copy[i] = cloneEntry(child, below, named);
     }
     return keepsNamed(named, depth) ? fillNamed(value, identity, copy, depth, named, pushed) : pushed;
@@ -1062,7 +1071,7 @@ function fillMap(value: any, identity: object, copy: Map<unknown, unknown>, dept
     enterPath(identity, copy, depth);
     Map.prototype.forEach.call(toRaw(value), (entry: unknown, key: unknown) => {
         const keyCopy = cloneValue(key, below, named);
-        if (key !== null && typeof key === "object") keepCollectionIdentity(key, keyCopy);
+        if (key !== null && typeof key === "object") nameMemberCopy(key, keyCopy);
         copy.set(keyCopy, cloneValue(entry, below, named));
     });
     fillCollectionProperties(toRaw(value), copy, below, named);
@@ -1074,7 +1083,7 @@ function fillSet(value: any, identity: object, copy: Set<unknown>, depth: number
     enterPath(identity, copy, depth);
     Set.prototype.forEach.call(toRaw(value), (entry: unknown) => {
         const entryCopy = cloneValue(entry, below, named);
-        if (entry !== null && typeof entry === "object") keepCollectionIdentity(entry, entryCopy);
+        if (entry !== null && typeof entry === "object") nameMemberCopy(entry, entryCopy);
         copy.add(entryCopy);
     });
     fillCollectionProperties(toRaw(value), copy, below, named);
@@ -1091,38 +1100,233 @@ function fillCollectionProperties(value: any, copy: object, depth: number, named
     }
 }
 
-// Only collection members need identity across separate payload copies.
-// Tokens do not retain the source object. Weak keys release removed copies.
-// ESM and CJS instances in the same realm use the same registry.
-const collectionIdentityKey = Symbol.for('@yiin/reactive-proxy-state.collection-identities');
-const collectionIdentities: WeakMap<object, object> =
-    Reflect.get(globalThis, collectionIdentityKey) ?? new WeakMap<object, object>();
+// Collection members across copies. A replica's Set members and Map keys
+// are copies, so an event names its member by a token, not by identity:
+// - `members`: the token of a source member (a Set member or Map key in a
+//   state), one per member, made when a copy or an event first names it;
+// - `copies`: the token of the member each library copy was made from.
+// A copy that goes into a source collection is a member of its own there,
+// with its own token, so it stays apart from the member it was copied from.
+// A replica collection keeps its members by token in `indexes` (see
+// `replicaIndex`), so an event finds its member without a scan. Tokens are
+// plain objects in weak maps: they keep no member alive. ESM and CJS
+// bundles in one realm share these maps.
+interface CollectionIdentities {
+    members: WeakMap<object, object>;
+    copies: WeakMap<object, object>;
+    indexes: WeakMap<object, ReplicaIndex>;
+}
+
+/** A replica collection's members by token, and its size when `updateState` last changed it. */
+interface ReplicaIndex {
+    byToken: Map<object, unknown>;
+    size: number;
+}
+
+const collectionIdentityKey = Symbol.for('@yiin/reactive-proxy-state.collection-identities.v2');
+const collectionIdentities: CollectionIdentities =
+    Reflect.get(globalThis, collectionIdentityKey) ??
+    { members: new WeakMap(), copies: new WeakMap(), indexes: new WeakMap() };
 if (!Reflect.has(globalThis, collectionIdentityKey)) {
     Object.defineProperty(globalThis, collectionIdentityKey, { value: collectionIdentities });
 }
 
-export function keepCollectionIdentity(source: unknown, copy: unknown): void {
-    if (source === null || typeof source !== 'object' || copy === null || typeof copy !== 'object') return;
-    const raw = toRaw(source) as object;
-    let identity = collectionIdentities.get(raw);
-    if (identity === undefined) {
-        identity = {};
-        collectionIdentities.set(raw, identity);
+/** The token of `member`, a source member (raw); made at its first use. */
+export function memberToken(member: object): object {
+    const raw = toRaw(member) as object;
+    let token = collectionIdentities.members.get(raw);
+    if (token === undefined) {
+        token = {};
+        collectionIdentities.members.set(raw, token);
     }
-    collectionIdentities.set(copy, identity);
+    return token;
 }
 
-/** The member this replica holds for a source key or member, without comparing its contents. */
-export function collectionMember(collection: Map<unknown, unknown> | Set<unknown>, member: unknown): unknown {
-    collection = toRaw(collection);
-    if (member === null || typeof member !== 'object' || collection.has(member)) return member;
-    const identity = collectionIdentities.get(toRaw(member) as object);
-    if (identity === undefined) return member;
-    for (const candidate of collection.keys()) {
-        if (candidate !== null && typeof candidate === 'object' &&
-            collectionIdentities.get(toRaw(candidate) as object) === identity) return candidate;
+/**
+ * `copy` is a copy of the source member `source`: it carries the token of
+ * `source`. Inside a copy of a payload (see `copyingPayload`), `source` is
+ * itself a copy, and `copy` carries the token `source` carries.
+ */
+export function nameMemberCopy(source: unknown, copy: unknown): void {
+    if (source === null || typeof source !== 'object' || copy === null || typeof copy !== 'object') return;
+    if (copyingPayload) {
+        nameCopyOfCopy(source, copy);
+        return;
     }
-    return member;
+    const token = memberToken(source);
+    if (copy !== source) collectionIdentities.copies.set(copy, token);
+}
+
+/** `copy` is a copy of the payload copy `source`: it names the same member. */
+export function nameCopyOfCopy(source: unknown, copy: unknown): void {
+    if (source === null || typeof source !== 'object' || copy === null || typeof copy !== 'object') return;
+    const token = collectionIdentities.copies.get(source) ?? collectionIdentities.members.get(source);
+    if (token !== undefined) collectionIdentities.copies.set(copy, token);
+}
+
+/**
+ * True while a payload is copied again for another path of an alias (see
+ * `dispatch`): its set members and map keys are copies already, and their
+ * copies name the same members.
+ */
+let copyingPayload = false;
+
+/** Copy payloads of payloads with `run` (see `copyingPayload`). */
+export function copyingPayloads<T>(run: () => T): T {
+    const outer = copyingPayload;
+    copyingPayload = true;
+    try {
+        return run();
+    } finally {
+        copyingPayload = outer;
+    }
+}
+
+/**
+ * The member an event names: a source member, sent itself (the key of a map
+ * event, the value of a synchronous set-delete), is named by its own token;
+ * a payload copy by the token of the member it was copied from.
+ */
+function eventToken(member: object): object | undefined {
+    const raw = toRaw(member) as object;
+    return collectionIdentities.members.get(raw) ?? collectionIdentities.copies.get(raw);
+}
+
+/**
+ * The member a replica member stands for: the one it was copied from, else
+ * itself (a member the replica shares with its source).
+ */
+function heldToken(member: object): object | undefined {
+    const raw = toRaw(member) as object;
+    return collectionIdentities.copies.get(raw) ?? collectionIdentities.members.get(raw);
+}
+
+/**
+ * The members of a replica collection (raw) by token. Made at the first
+ * event that names an object member, kept by the handlers below, and made
+ * again when the collection's size changed outside them.
+ */
+function replicaIndex(collection: Set<unknown> | Map<unknown, unknown>): ReplicaIndex {
+    let index = collectionIdentities.indexes.get(collection);
+    if (index === undefined || index.size !== collection.size) {
+        const byToken = new Map<object, unknown>();
+        const members = collection instanceof Map ? Map.prototype.keys.call(collection) : Set.prototype.values.call(collection);
+        for (const member of members) {
+            if (member === null || typeof member !== 'object') continue;
+            const token = heldToken(member);
+            if (token !== undefined && !byToken.has(token)) byToken.set(token, member);
+        }
+        index = { byToken, size: collection.size };
+        collectionIdentities.indexes.set(collection, index);
+    }
+    return index;
+}
+
+/** After a handler changed `collection` (raw): its index, if it has one, knows its size. */
+function keepIndexSize(collection: Set<unknown> | Map<unknown, unknown>): void {
+    const index = collectionIdentities.indexes.get(collection);
+    if (index !== undefined) index.size = collection.size;
+}
+
+/**
+ * The replica's member that `token` names, or undefined when it holds none.
+ * A member the index names but the collection no longer holds does not count.
+ */
+function heldMember(raw: Set<unknown> | Map<unknown, unknown>, index: ReplicaIndex, token: object): unknown {
+    const held = index.byToken.get(token);
+    return held !== undefined && raw.has(held) ? held : undefined;
+}
+
+/**
+ * The object a replica adds for an event's `member` named by `token`: the
+ * member itself, unless the replica holds that object already for another
+ * member (a source member that is also a copy the replica holds); then a
+ * copy that carries `token`.
+ */
+function newMember(raw: Set<unknown> | Map<unknown, unknown>, member: object, token: object): object {
+    if (!raw.has(member)) return member;
+    const copy = cloneTree(member, Named.All);
+    collectionIdentities.copies.set(copy, token);
+    return copy;
+}
+
+function objectToken(value: unknown): object | undefined {
+    return value !== null && typeof value === 'object' ? eventToken(value) : undefined;
+}
+
+/** `set-add` on a replica set (raw or a proxy). */
+export function replicaAdd(set: Set<unknown>, value: unknown): void {
+    const raw = toRaw(set);
+    const token = objectToken(value);
+    if (token === undefined) {
+        set.add(value);
+        keepIndexSize(raw);
+        return;
+    }
+    const index = replicaIndex(raw);
+    if (heldMember(raw, index, token) !== undefined) return;
+    const member = newMember(raw, toRaw(value) as object, token);
+    set.add(member);
+    index.byToken.set(token, member);
+    index.size = raw.size;
+}
+
+/** `set-delete` on a replica set (raw or a proxy). */
+export function replicaDelete(set: Set<unknown>, value: unknown): void {
+    const raw = toRaw(set);
+    const token = objectToken(value);
+    if (token === undefined) {
+        set.delete(value);
+        keepIndexSize(raw);
+        return;
+    }
+    const index = replicaIndex(raw);
+    const held = heldMember(raw, index, token);
+    set.delete(held === undefined ? value : held);
+    index.byToken.delete(token);
+    index.size = raw.size;
+}
+
+/** `map-set` on a replica map (raw or a proxy). */
+export function replicaMapSet(map: Map<unknown, unknown>, key: unknown, value: unknown): void {
+    const raw = toRaw(map);
+    const token = objectToken(key);
+    if (token === undefined) {
+        map.set(key, value);
+        keepIndexSize(raw);
+        return;
+    }
+    const index = replicaIndex(raw);
+    const held = heldMember(raw, index, token);
+    if (held !== undefined) {
+        map.set(held, value);
+        return;
+    }
+    const member = newMember(raw, toRaw(key) as object, token);
+    map.set(member, value);
+    index.byToken.set(token, member);
+    index.size = raw.size;
+}
+
+/** `map-delete` on a replica map (raw or a proxy). */
+export function replicaMapDelete(map: Map<unknown, unknown>, key: unknown): void {
+    const raw = toRaw(map);
+    const token = objectToken(key);
+    if (token === undefined) {
+        map.delete(key);
+        keepIndexSize(raw);
+        return;
+    }
+    const index = replicaIndex(raw);
+    const held = heldMember(raw, index, token);
+    map.delete(held === undefined ? key : held);
+    index.byToken.delete(token);
+    index.size = raw.size;
+}
+
+/** A replica collection was cleared or refilled: its index is made again when needed. */
+export function forgetReplicaIndex(collection: object): void {
+    collectionIdentities.indexes.delete(toRaw(collection));
 }
 
 /**

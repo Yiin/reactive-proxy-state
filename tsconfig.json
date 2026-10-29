@@ -9,7 +9,8 @@
     "forceConsistentCasingInFileNames": true,
     "types": ["bun-types"],
     "outDir": "./dist",
-    "declaration": true
+    "declaration": true,
+    "stripInternal": true
   },
   "include": ["src/**/*"],
   "exclude": ["node_modules", "dist", "tests"]

@@ -90,6 +90,17 @@ describe("a store of one object at many places", () => {
     }
   });
 
+  test("rows read and then removed one at a time, from either end", () => {
+    for (const remove of ["shift", "pop"] as const) {
+      const state = reactive({ list: rows(ROWS, { v: 0 }) }, noop);
+      for (let i = 0; i < ROWS; i++) void state.list[i].ref.v;
+      const derefs = countDerefs(() => {
+        for (let i = 0; i < ROWS; i++) state.list[remove]();
+      });
+      expect(derefs).toBeLessThan(DEREFS_PER_PLACE * ROWS);
+    }
+  });
+
   test("a write through the shared object still reaches every place", () => {
     const shared = { v: 0 };
     const sync = replicate({ list: rows(50, shared), fill: Array(30).fill(shared) });
@@ -100,6 +111,22 @@ describe("a store of one object at many places", () => {
     sync.clear();
     sync.state.fill[3].v = 4;
     expect(sync.events.length).toBe(80);
+    expect(sync.inSync()).toBe(true);
+  });
+
+  test("a removed row that comes back gets its place again", () => {
+    const shared = { v: 0 };
+    const sync = replicate({ list: rows(20, shared) });
+    for (let i = 0; i < 20; i++) void sync.state.list[i].ref.v;
+    const last = sync.state.list.pop();
+    const first = sync.state.list.shift();
+    sync.state.list[3].ref.v = 1;
+    expect(sync.inSync()).toBe(true);
+    sync.state.list.push(last);
+    sync.state.list.unshift(first);
+    sync.clear();
+    sync.state.list[5].ref.v = 2;
+    expect(sync.events.length).toBe(20);
     expect(sync.inSync()).toBe(true);
   });
 });

@@ -6,10 +6,12 @@ import {
   UnsupportedStateError,
   cloneStored,
   cloneTree,
-  keepCollectionIdentity,
   cloneTreeAfter,
   cloneTreeUnless,
   copiedFresh,
+  copyingPayloads,
+  nameCopyOfCopy,
+  nameMemberCopy,
   globalSeen,
   locationNodes,
   setData,
@@ -128,6 +130,34 @@ export interface LocationNode {
    * number is never below the places there are (see `relink`).
    */
   childPlaces: number;
+  /** The last store walk that met this object (see `enterAdopt`). */
+  walk: number;
+  /** The last store that put this node on its list of nodes to prune (see `touch`). */
+  touched: number;
+  /** How many places the node kept at its last full `prunePlaces`. */
+  pruned: number;
+  /** The places of a node with more than `WIDE` of them, by container and key (see `findPlace`). */
+  index: PlaceIndex | undefined;
+}
+
+/**
+ * A node with more places than this finds one of them through its `index`,
+ * and prunes them only when their number doubled since the last time (see
+ * `prunePlaces`), so storing or reading such an object at one more place
+ * does not walk all of its places again. Most objects have one place.
+ */
+const WIDE = 8;
+
+/**
+ * The places of one node by container id, then by key when one container
+ * holds the object at several keys. It belongs to `places` while that array
+ * keeps `length` items; a change of an item in place (a splice, a new key)
+ * drops it. A push through `pushPlace` keeps it.
+ */
+interface PlaceIndex {
+  places: Place[];
+  length: number;
+  byParent: Map<number, Place | Map<unknown, Place>>;
 }
 
 const nodes = locationNodes;
@@ -166,6 +196,10 @@ export function ensureLocationNode(raw: object): LocationNode {
       lostLink: false,
       dataOnly: undefined,
       childPlaces: 0,
+      walk: 0,
+      touched: 0,
+      pruned: 0,
+      index: undefined,
     };
     nodes.set(raw, node);
   }
@@ -271,6 +305,7 @@ function chain(node: LocationNode, tail: PropertyKey | undefined): Target | null
     if (!holdsIn(parent, place.key, current.raw)) {
       dropped(place);
       places.length = 0;
+      current.index = undefined;
       return null;
     }
     (reversed ??= []).push(segment(parent, place.key, current.raw));
@@ -409,19 +444,31 @@ function attachedBefore(node: LocationNode, former: LocationNode | undefined): b
     if (!holdsIn(parent, place.key, current.raw)) return false;
     current = parent;
   }
-  // several places, or a long chain: search every place
-  const pending: LocationNode[] = [current];
-  const visited = new Set<LocationNode>(pending);
-  while (pending.length > 0) {
-    const next = pending.pop()!;
-    if (next.root !== undefined || next === former) return true;
-    const places = next.places;
-    for (let i = 0; i < places.length; i++) {
-      const parent = places[i].parent;
-      if (!holdsIn(parent, places[i].key, next.raw) || visited.has(parent)) continue;
-      visited.add(parent);
-      pending.push(parent);
+  if (current.root !== undefined || current === former) return true;
+  // Several places, or a long chain: search depth first, and stop at the
+  // first container that is in the tree. An object at thousands of places
+  // usually finds one through its first place.
+  const visited = new Set<LocationNode>();
+  visited.add(current);
+  const stack: LocationNode[] = [current];
+  const next: number[] = [0];
+  while (stack.length > 0) {
+    const top = stack.length - 1;
+    const at = stack[top];
+    const places = at.places;
+    if (next[top] >= places.length) {
+      stack.pop();
+      next.pop();
+      continue;
     }
+    const place = places[next[top]++];
+    const parent = place.parent;
+    if (!holdsIn(parent, place.key, at.raw)) continue;
+    if (parent.root !== undefined || parent === former) return true;
+    if (visited.has(parent)) continue;
+    visited.add(parent);
+    stack.push(parent);
+    next.push(0);
   }
   return false;
 }
@@ -443,6 +490,12 @@ export function dispatch(target: Target, event: StateEvent): void {
     else deliver(root, [event]);
     return;
   }
+  // copies of the payload copies: their set members and map keys name the same members
+  deliver(root, copyingPayloads(() => copiesPerPath(event, paths, root.async)));
+}
+
+/** `event` for its first path, and a copy of it for each other path (see `dispatch`). */
+function copiesPerPath(event: StateEvent, paths: Path[], async: boolean): StateEvent[] {
   const removesValue = event.action === "set-delete";
   const events: StateEvent[] = [event];
   for (let i = 1; i < paths.length; i++) {
@@ -451,20 +504,20 @@ export function dispatch(target: Target, event: StateEvent): void {
     if (isObject(event.newValue)) copy.newValue = cloneTree(event.newValue, event.action === "replace" ? Named.Below : Named.None);
     if (isObject(event.value) && !removesValue) {
       copy.value = cloneTree(event.value, Named.All);
-      keepCollectionIdentity(event.value, copy.value);
+      nameCopyOfCopy(event.value, copy.value);
     }
     if (event.items !== undefined) copy.items = cloneTree(event.items, Named.Below);
-    if (root.async) {
+    if (async) {
       if (isObject(event.oldValue)) copy.oldValue = cloneTree(event.oldValue, Named.All);
       if (event.oldValues !== undefined) copy.oldValues = cloneTree(event.oldValues, Named.Below);
       if (removesValue) {
         copy.value = copy.oldValue;
-        keepCollectionIdentity(event.value, copy.value);
+        nameCopyOfCopy(event.value, copy.value);
       }
     }
     events.push(copy);
   }
-  deliver(root, events);
+  return events;
 }
 
 /**
@@ -603,7 +656,7 @@ export function copyPayload(
   }
   if (isObject(newValue)) event.newValue = newCopy;
   if (isObject(value)) {
-    keepCollectionIdentity(value, valueCopy);
+    nameMemberCopy(value, valueCopy);
     event.value = valueCopy;
   }
   if (items !== undefined) event.items = itemsCopy as any[];
@@ -649,7 +702,7 @@ export function copyPayloadAfter(event: StateEvent, target: Target, container: o
   if (isObject(newValue)) event.newValue = newCopy;
   if (isObject(oldValue)) event.oldValue = oldCopy;
   if (isObject(value)) {
-    keepCollectionIdentity(value, valueCopy);
+    nameMemberCopy(value, valueCopy);
     event.value = valueCopy;
   }
   if (items !== undefined) event.items = itemsCopy;
@@ -737,12 +790,48 @@ function refuseAccessors(event: StateEvent, removed: boolean, container: object,
 
 /** Add a place unless it is already known. Returns true when it was new. */
 function addPlace(node: LocationNode, parent: LocationNode, key: unknown): boolean {
-  const places = node.places;
-  for (let i = 0; i < places.length; i++) {
-    if (samePlace(places[i], parent, key)) return false;
-  }
-  places.push(new Place(parent, key));
+  if (findPlace(node, parent, key) !== undefined) return false;
+  pushPlace(node, new Place(parent, key));
   return true;
+}
+
+/** The place of `node` at `parent[key]`, if it has one. */
+function findPlace(node: LocationNode, parent: LocationNode, key: unknown): Place | undefined {
+  const places = node.places;
+  if (places.length <= WIDE) {
+    for (let i = 0; i < places.length; i++) {
+      if (samePlace(places[i], parent, key)) return places[i];
+    }
+    return undefined;
+  }
+  let index = node.index;
+  if (index === undefined || index.places !== places || index.length !== places.length) {
+    index = node.index = { places, length: places.length, byParent: new Map() };
+    for (let i = 0; i < places.length; i++) indexPlace(index.byParent, places[i]);
+  }
+  const entry = index.byParent.get(parent.id);
+  if (entry === undefined) return undefined;
+  if (entry instanceof Place) return parent.kind === ContainerKind.Set || entry.key === key ? entry : undefined;
+  return entry.get(key);
+}
+
+function indexPlace(byParent: Map<number, Place | Map<unknown, Place>>, place: Place): void {
+  const entry = byParent.get(place.parentId);
+  if (entry === undefined) byParent.set(place.parentId, place);
+  else if (entry instanceof Place) {
+    if (entry.key !== place.key) byParent.set(place.parentId, new Map<unknown, Place>([[entry.key, entry], [place.key, place]]));
+  } else if (!entry.has(place.key)) entry.set(place.key, place);
+}
+
+/** Add `place` to the places of `node`, which has no place at its container and key. */
+function pushPlace(node: LocationNode, place: Place): void {
+  const places = node.places;
+  places.push(place);
+  const index = node.index;
+  if (index !== undefined && index.places === places && index.length === places.length - 1) {
+    index.length++;
+    indexPlace(index.byParent, place);
+  }
 }
 
 /**
@@ -752,20 +841,40 @@ function addPlace(node: LocationNode, parent: LocationNode, key: unknown): boole
  * it again gives the place back (see `lostLink`).
  */
 function prunePlaces(node: LocationNode): void {
+  const count = node.places.length;
+  // a wide node prunes when its places doubled: a store or read that adds
+  // one more place does not check all of them again
+  if (count > WIDE && count < 2 * node.pruned) return;
   let places = keepPlaces(node.places, (place) => holds(place, node.raw));
   if (places.length > 1) {
-    const live = places.filter((place) => isAttached(place.parent!));
-    if (live.length > 0 && live.length < places.length) {
+    const live: boolean[] = new Array(places.length);
+    let attached = 0;
+    // places in one container (an array that holds the object at many indexes) ask once
+    let parent: LocationNode | undefined;
+    let parentAttached = false;
+    for (let i = 0; i < places.length; i++) {
+      const next = places[i].parent!;
+      if (next !== parent) {
+        parent = next;
+        parentAttached = isAttached(next);
+      }
+      live[i] = parentAttached;
+      if (parentAttached) attached++;
+    }
+    if (attached > 0 && attached < places.length) {
+      const kept: Place[] = [];
       for (let i = 0; i < places.length; i++) {
-        if (!live.includes(places[i])) {
+        if (live[i]) kept.push(places[i]);
+        else {
           markLostLink(places[i].parent!);
           dropped(places[i]);
         }
       }
-      places = live;
+      places = kept;
     }
   }
   node.places = places;
+  node.pruned = places.length;
 }
 
 /** The places that pass `keep`; the others are dropped. */
@@ -797,7 +906,8 @@ function markLostLink(node: LocationNode): void {
 
 /**
  * Record that a proxy read found `raw` at `parent[key]`. Called on every read
- * of a nested object, so the common case (place already known) is one compare.
+ * of a nested object, so the common case (place already known) is one
+ * compare, and a wide node finds the place in its index.
  */
 export function notePlace(node: LocationNode, parent: LocationNode, key: unknown): void {
   const places = node.places;
@@ -808,15 +918,39 @@ export function notePlace(node: LocationNode, parent: LocationNode, key: unknown
 /** `parent[key]` no longer holds `value`. */
 export function detachPlace(value: object, parent: LocationNode, key: unknown): void {
   const node = nodes.get(value);
-  if (node === undefined) return;
+  if (node !== undefined) removePlace(node, parent, key);
+}
+
+/** Drop the place of `node` at `parent[key]`; true when it had one. */
+function removePlace(node: LocationNode, parent: LocationNode, key: unknown): boolean {
   const places = node.places;
-  for (let i = 0; i < places.length; i++) {
-    if (samePlace(places[i], parent, key)) {
-      dropped(places[i]);
-      places.splice(i, 1);
-      return;
+  if (places.length <= WIDE) {
+    for (let i = 0; i < places.length; i++) {
+      if (samePlace(places[i], parent, key)) {
+        dropped(places[i]);
+        places.splice(i, 1);
+        node.index = undefined;
+        return true;
+      }
     }
+    return false;
   }
+  const place = findPlace(node, parent, key);
+  if (place === undefined) return false;
+  const at = places.indexOf(place);
+  if (at < 0) {
+    node.index = undefined;
+    return false;
+  }
+  dropped(place);
+  places.splice(at, 1);
+  // the index stays: it loses this place
+  const index = node.index!;
+  index.length--;
+  const entry = index.byParent.get(place.parentId);
+  if (entry === place) index.byParent.delete(place.parentId);
+  else if (entry instanceof Map && entry.get(place.key) === place) entry.delete(place.key);
+  return true;
 }
 
 /**
@@ -833,10 +967,27 @@ export function detachPlace(value: object, parent: LocationNode, key: unknown): 
  * it; a second walk then gives each such object a node at its first visit,
  * so every later visit records its place. The second walk also goes into
  * the containers the first walk gave a node (they hold a known object), as
- * an alias below them needs its place there too. Each walk keeps its own
- * set of visited objects.
+ * an alias below them needs its place there too. Each walk marks the nodes
+ * it met (`LocationNode.walk`) and keeps a set of the objects without a node
+ * it met, so it meets each object once and asks `attachedBefore` once.
+ *
+ * A proxy found in the value (a spread of a proxy leaves them at any depth)
+ * stands for its raw object: the walk writes the raw object in its place
+ * (see `storeRaw`) and goes on with it, so the state never holds a proxy
+ * that a later read would wrap again.
+ *
+ * The work of a walk grows with the objects it meets and the places it
+ * adds. A place whose container or object got its node in this walk is
+ * new, so it is added without a search; the second walk adds again only
+ * the places the first could not.
  */
 interface Walk {
+  /** This walk, in `LocationNode.walk`. */
+  id: number;
+  /** The store this walk belongs to (see `touch`). */
+  store: number;
+  /** Nodes made from here on are made in this walk. */
+  firstId: number;
   touched: LocationNode[];
   seen: Set<object>;
   /** Objects without a node the walk met more than once. */
@@ -860,11 +1011,15 @@ interface Walk {
 
 function newWalk(
   touched: LocationNode[],
+  store: number,
   former: LocationNode | undefined,
   held: Set<object> | undefined,
   first?: Walk
 ): Walk {
   return {
+    id: ++stamps,
+    store,
+    firstId: nodeCount + 1,
     touched,
     seen: new Set(),
     repeated: undefined,
@@ -908,6 +1063,8 @@ interface AdoptFrame {
   entries: Iterator<any> | undefined;
   /** The key of the child visited last. */
   childKey: unknown;
+  /** A set's proxy members and their raw objects, swapped in when the frame ends (see `storeRaw`). */
+  swaps: Map<object, object> | undefined;
 }
 
 function adoptFrame(raw: object, node: LocationNode | undefined, unknown: boolean, key: unknown): AdoptFrame {
@@ -923,7 +1080,7 @@ function adoptFrame(raw: object, node: LocationNode | undefined, unknown: boolea
     entries = Set.prototype.values.call(raw);
   } else if (raw instanceof Date || ArrayBuffer.isView(raw)) kind = ChildKind.None;
   else keys = Object.keys(raw);
-  return { raw, node, unknown, key, kind, next: 0, keys, entries, childKey: undefined };
+  return { raw, node, unknown, key, kind, next: 0, keys, entries, childKey: undefined, swaps: undefined };
 }
 
 /** The next child object of the frame's object, with its key in `childKey`; undefined after the last. */
@@ -982,37 +1139,108 @@ function nextChild(frame: AdoptFrame): object | undefined {
  */
 function enterAdopt(raw: object, key: unknown, walk: Walk, frames: AdoptFrame[]): LocationNode | undefined {
   let node = nodes.get(raw);
-  if (node !== undefined && !node.lostLink && walk.revisit?.has(raw) !== true) {
-    if (attachedBefore(node, walk.former)) return node;
-    // it comes back from outside the tree: walk it, in both walks
-    if (walk.aliases === undefined) (walk.created ??= new Set()).add(raw);
+  if (node !== undefined) {
+    // met before in this walk: the caller adds this place
+    if (node.walk === walk.id) return node;
+    node.walk = walk.id;
+    if (!node.lostLink && walk.revisit?.has(raw) !== true) {
+      if (attachedBefore(node, walk.former)) return node;
+      // it comes back from outside the tree: walk it, in both walks
+      if (walk.aliases === undefined) (walk.created ??= new Set()).add(raw);
+    }
+    if (node.lostLink) walk.relinked.push(node);
+    frames.push(adoptFrame(raw, node, false, key));
+    return node;
+  }
+  if ((raw as any)[ReactiveFlags.SKIP]) return undefined;
+  if ((raw as any)[ReactiveFlags.IS_REACTIVE]) {
+    // a proxy stands for its raw object (a proxy has no node of its own)
+    const target = toRaw(raw);
+    if (frames.length > 0) storeRaw(frames[frames.length - 1], key, raw, target);
+    return enterAdopt(target, key, walk, frames);
   }
   // one set operation: an object already seen leaves the size as it was
   const seen = walk.seen;
   const size = seen.size;
   seen.add(raw);
   if (seen.size === size) {
-    if (node === undefined) (walk.repeated ??= new Set()).add(raw);
-    return node;
+    (walk.repeated ??= new Set()).add(raw);
+    return undefined;
   }
-  if (node !== undefined) {
-    if (node.lostLink) walk.relinked.push(node);
-    frames.push(adoptFrame(raw, node, false, key));
-    return node;
-  }
-  if ((raw as any)[ReactiveFlags.SKIP] || (raw as any)[ReactiveFlags.IS_REACTIVE]) return undefined;
-  if (walk.aliases?.has(raw)) node = ensureLocationNode(raw);
+  if (walk.aliases?.has(raw)) node = walkNode(raw, walk);
   if (walk.held?.has(raw)) return node;
   frames.push(adoptFrame(raw, node, true, key));
   return node;
 }
 
+/** A node for `raw`, made in `walk`, which has met it. */
+function walkNode(raw: object, walk: Walk): LocationNode {
+  const node = ensureLocationNode(raw);
+  node.walk = walk.id;
+  return node;
+}
+
+/**
+ * Put `target` where the frame's object holds `proxy` (its proxy), at `key`.
+ * An object or array changes only an own data property that holds the
+ * proxy, through `Reflect.set`: no setter runs, and a frozen or sealed
+ * object, or a read-only property, keeps the proxy without a throw. A map
+ * changes the value at `key`; its keys stay as they are. A set swaps its
+ * member when the frame ends, in its place, so its order stays and the
+ * walk does not meet the raw object twice.
+ */
+function storeRaw(frame: AdoptFrame, key: unknown, proxy: object, target: object): void {
+  const container = frame.raw as any;
+  switch (frame.kind) {
+    case ChildKind.Map:
+      Map.prototype.set.call(container, key, target);
+      return;
+    case ChildKind.Set:
+      (frame.swaps ??= new Map()).set(proxy, target);
+      return;
+    default: {
+      const descriptor = Reflect.getOwnPropertyDescriptor(container, key as PropertyKey);
+      if (descriptor !== undefined && descriptor.value === proxy) Reflect.set(container, key as PropertyKey, target);
+    }
+  }
+}
+
+/** Swap the members of a set the walk found proxies for (see `storeRaw`), keeping the order. */
+function swapMembers(set: Set<unknown>, swaps: Map<object, object>): void {
+  const members = Array.from(Set.prototype.values.call(set));
+  Set.prototype.clear.call(set);
+  for (let i = 0; i < members.length; i++) {
+    const member = members[i];
+    Set.prototype.add.call(set, (isObject(member) && swaps.get(member)) || member);
+  }
+}
+
 /** The child at `key` of the frame's object has `childNode`: give it its place there. */
 function placeChild(frame: AdoptFrame, key: unknown, childNode: LocationNode | undefined, walk: Walk): void {
   if (childNode === undefined) return;
-  frame.node ??= ensureLocationNode(frame.raw);
-  if (addPlace(childNode, frame.node, key)) walk.touched.push(childNode);
+  const parent = (frame.node ??= walkNode(frame.raw, walk));
+  if (parent.id < walk.firstId && childNode.id < walk.firstId) {
+    // Both had nodes before this walk, so the place may be there already. The
+    // first walk placed every child that had a node when it met it there; in
+    // the second, only an object it met again before giving it a node (an
+    // ancestor on a cycle, among `aliases`) may lack its place.
+    if (walk.aliases !== undefined && !walk.aliases.has(childNode.raw)) return;
+    if (!addPlace(childNode, parent, key)) return;
+  } else {
+    pushPlace(childNode, new Place(parent, key));
+  }
+  touch(childNode, walk.store, walk.touched);
 }
+
+/** Add `node` to the nodes `store` prunes when it ends, once. */
+function touch(node: LocationNode, store: number, touched: LocationNode[]): void {
+  if (node.touched === store) return;
+  node.touched = store;
+  touched.push(node);
+}
+
+/** Numbers for walks and stores (see `LocationNode.walk`, `touch`); never reused. */
+let stamps = 0;
 
 /** Walk the frames to the end; returns the node of the bottom frame's object, if it has one. */
 function walkFrames(frames: AdoptFrame[], walk: Walk): LocationNode | undefined {
@@ -1026,6 +1254,7 @@ function walkFrames(frames: AdoptFrame[], walk: Walk): LocationNode | undefined 
       continue;
     }
     frames.pop();
+    if (frame.swaps !== undefined) swapMembers(frame.raw as Set<unknown>, frame.swaps);
     const node = frame.node;
     if (frame.unknown && node !== undefined && walk.aliases === undefined) (walk.created ??= new Set()).add(frame.raw);
     if (frames.length === 0) return node;
@@ -1046,15 +1275,16 @@ function adopt(raw: object, walk: Walk): LocationNode | undefined {
  */
 function adoptAll(
   touched: LocationNode[],
+  store: number,
   former: LocationNode | undefined,
   held: Set<object> | undefined,
   visit: (walk: Walk) => void
 ): void {
-  let walk = newWalk(touched, former, held);
+  let walk = newWalk(touched, store, former, held);
   visit(walk);
   if (walk.repeated !== undefined) {
     const first = walk;
-    walk = newWalk(touched, former, held, first);
+    walk = newWalk(touched, store, former, held, first);
     visit(walk);
     for (let i = 0; i < first.relinked.length; i++) first.relinked[i].lostLink = false;
   }
@@ -1178,9 +1408,10 @@ export function attachValue(
   }
   if (existing === undefined && !hasObjectChild(value)) return;
   const touched: LocationNode[] = [];
-  adoptAll(touched, former, held, (walk) => {
+  const store = ++stamps;
+  adoptAll(touched, store, former, held, (walk) => {
     const node = adopt(value, walk);
-    if (node !== undefined && addPlace(node, parent, key)) touched.push(node);
+    if (node !== undefined && addPlace(node, parent, key)) touch(node, store, touched);
   });
   pruneTouched(touched);
 }
@@ -1192,8 +1423,8 @@ export function attachValue(
  */
 export function adoptRoot(node: LocationNode): void {
   const touched: LocationNode[] = [];
-  adoptAll(touched, undefined, undefined, (walk) => {
-    walk.seen.add(node.raw);
+  adoptAll(touched, ++stamps, undefined, undefined, (walk) => {
+    node.walk = walk.id;
     walkFrames([adoptFrame(node.raw, node, false, undefined)], walk);
   });
   pruneTouched(touched);
@@ -1240,8 +1471,9 @@ function relink(
   findAliases: boolean
 ): void {
   const touched: LocationNode[] = [];
+  const store = ++stamps;
   if (inserted !== undefined && insertedNeedWalk(inserted)) {
-    adoptAll(touched, undefined, undefined, (walk) => {
+    adoptAll(touched, store, undefined, undefined, (walk) => {
       for (let i = 0; i < inserted.length; i++) {
         const value = inserted[i];
         if (isObject(value)) adopt(value, walk);
@@ -1299,6 +1531,7 @@ function relink(
         places[0].key >= from
       ) {
         places[0].key = i;
+        node.index = undefined;
         node.relinkedPlaces = 0;
         left--;
         continue;
@@ -1311,7 +1544,7 @@ function relink(
       left--;
     }
     node.places.push(new Place(arrayNode, i));
-    if (node.places.length > 1) touched.push(node);
+    if (node.places.length > 1) touch(node, store, touched);
   }
   pruneTouched(touched);
 }
@@ -1340,6 +1573,7 @@ function stripIndexes(node: LocationNode, arrayNode: LocationNode, from: number)
       count++;
     }
   }
+  if (count > 0) node.index = undefined;
   return count;
 }
 
@@ -1352,22 +1586,31 @@ export function evictDeep(value: any, parent?: LocationNode): void {
   if (value == null || typeof value !== "object") return;
   const top = toRaw(value);
   if (globalSeen.get(top) === undefined) return; // not proxied, skip entire subtree
-  // proxied objects to evict, each after the node of the container it was found in
-  const pending: unknown[] = [parent, top];
+  // proxied objects to evict, each after the node of the container it was found in and its key there
+  const pending: unknown[] = [parent, undefined, top];
   while (pending.length > 0) {
     const raw: any = pending.pop();
+    const key = pending.pop();
     const container = pending.pop() as LocationNode | undefined;
     const proxy = globalSeen.get(raw);
     if (proxy === undefined) continue; // evicted at another place meanwhile
 
     const node = nodes.get(raw);
     if (node !== undefined) {
+      const places = node.places;
       const onlyUnderParent =
         container !== undefined &&
         node.root === undefined &&
-        node.places.length === 1 &&
-        node.places[0].parentId === container.id;
-      if (!onlyUnderParent && isAttached(node)) continue;
+        places.length === 1 &&
+        places[0].parentId === container.id;
+      if (!onlyUnderParent) {
+        // An evicted container left the tree, so its place is a dead end for
+        // an object that also sits elsewhere. Dropped, it is not searched
+        // again (rows that share one object, removed one at a time). Storing
+        // the container again walks it and gives the place back (`lostLink`).
+        if (container !== undefined && places.length > 1 && removePlace(node, container, key)) markLostLink(container);
+        if (isAttached(node)) continue;
+      }
       node.proxy = undefined;
       node.evicted = new WeakRef(proxy);
     }
@@ -1377,23 +1620,23 @@ export function evictDeep(value: any, parent?: LocationNode): void {
     proxyStats.staleEvicted++;
 
     if (Array.isArray(raw)) {
-      for (let i = 0; i < raw.length; i++) pushProxied(raw[i], node, pending);
+      for (let i = 0; i < raw.length; i++) pushProxied(raw[i], node, i, pending);
     } else if (raw instanceof Map) {
-      for (const child of Map.prototype.values.call(raw)) pushProxied(child, node, pending);
+      for (const [key, child] of Map.prototype.entries.call(raw)) pushProxied(child, node, key, pending);
     } else if (raw instanceof Set) {
-      for (const child of Set.prototype.values.call(raw)) pushProxied(child, node, pending);
+      for (const child of Set.prototype.values.call(raw)) pushProxied(child, node, undefined, pending);
     } else {
       const keys = Object.keys(raw);
-      for (let i = 0; i < keys.length; i++) pushProxied(raw[keys[i]], node, pending);
+      for (let i = 0; i < keys.length; i++) pushProxied(raw[keys[i]], node, keys[i], pending);
     }
   }
 }
 
-/** Add `value` to `pending` with its container's node when it is a proxied object; a subtree without a proxy is skipped. */
-function pushProxied(value: unknown, container: LocationNode | undefined, pending: unknown[]): void {
+/** Add `value` to `pending` with its container's node and key when it is a proxied object; a subtree without a proxy is skipped. */
+function pushProxied(value: unknown, container: LocationNode | undefined, key: unknown, pending: unknown[]): void {
   if (value === null || typeof value !== "object") return;
   const raw = toRaw(value);
-  if (globalSeen.get(raw) !== undefined) pending.push(container, raw);
+  if (globalSeen.get(raw) !== undefined) pending.push(container, key, raw);
 }
 
 /** The proxy an evicted object had, if it is still alive; it goes back in the caches. */

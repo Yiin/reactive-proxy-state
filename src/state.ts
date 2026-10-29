@@ -1,6 +1,15 @@
 import { isReactive } from './reactive';
 import { StateEvent } from './types';
-import { pathCache, setInPathCache, evictDescendantsFromPathCache, collectionMember } from './utils';
+import {
+    pathCache,
+    setInPathCache,
+    evictDescendantsFromPathCache,
+    forgetReplicaIndex,
+    replicaAdd,
+    replicaDelete,
+    replicaMapDelete,
+    replicaMapSet,
+} from './utils';
 
 // helper to abstract getting a value from a map or object property
 function getValue(obj: any, key: any): any {
@@ -123,37 +132,39 @@ const actionHandlers: { [key: string]: (target: any, key: any, event: StateEvent
         if (!(targetMap instanceof Map)) {
              console.warn(`expected map at path ${event.path.join('.')}`); return;
         }
-        targetMap.set(collectionMember(targetMap, event.key), event.newValue);
+        replicaMapSet(targetMap, event.key, event.newValue);
     },
     'map-delete': function(targetMap: Map<any, any>, _parentKeyIgnored: any, event: StateEvent) {
          if (!(targetMap instanceof Map)) {
              console.warn(`expected map at path ${event.path.join('.')}`); return;
          }
-        targetMap.delete(collectionMember(targetMap, event.key));
+        replicaMapDelete(targetMap, event.key);
     },
     'map-clear': function(targetMap: Map<any, any>, _parentKeyIgnored: any, event: StateEvent) {
          if (!(targetMap instanceof Map)) {
              console.warn(`expected map at path ${event.path.join('.')}`); return;
          }
         targetMap.clear();
+        forgetReplicaIndex(targetMap);
     },
     'set-add': function(targetSet: Set<any>, _keyIgnored: any, event: StateEvent) {
          if (!(targetSet instanceof Set)) {
              console.warn(`expected set at path ${event.path.join('.')}`); return;
          }
-        targetSet.add(collectionMember(targetSet, event.value));
+        replicaAdd(targetSet, event.value);
     },
     'set-delete': function(targetSet: Set<any>, _keyIgnored: any, event: StateEvent) {
          if (!(targetSet instanceof Set)) {
              console.warn(`expected set at path ${event.path.join('.')}`); return;
          }
-        targetSet.delete(collectionMember(targetSet, event.value));
+        replicaDelete(targetSet, event.value);
     },
     'set-clear': function(targetSet: Set<any>, _keyIgnored: any, event: StateEvent) {
          if (!(targetSet instanceof Set)) {
              console.warn(`expected set at path ${event.path.join('.')}`); return;
          }
         targetSet.clear();
+        forgetReplicaIndex(targetSet);
     },
     'replace': function(target: any, _keyIgnored: any, event: StateEvent) {
         const newValue = event.newValue;
@@ -168,12 +179,14 @@ const actionHandlers: { [key: string]: (target: any, key: any, event: StateEvent
         } else if (target instanceof Map && newValue instanceof Map) {
             const newValueEntries = [...newValue.entries()];
             target.clear();
+            forgetReplicaIndex(target);
             for (const [key, value] of newValueEntries) {
                 target.set(key, value);
             }
         } else if (target instanceof Set && newValue instanceof Set) {
             const newValueEntries = [...newValue.values()];
             target.clear();
+            forgetReplicaIndex(target);
             for (const value of newValueEntries) {
                 target.add(value);
             }
