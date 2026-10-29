@@ -2822,10 +2822,10 @@ function entriesOf(source, identity) {
   }
   const entries = [];
   if (source instanceof Map) {
-    for (const [key, entry] of source)
+    for (const [key, entry] of Map.prototype.entries.call(source))
       entries.push(key, entry);
   } else if (source instanceof Set) {
-    for (const entry of source)
+    for (const entry of Set.prototype.values.call(source))
       entries.push(entry);
   }
   for (const key in source)
@@ -3096,25 +3096,25 @@ function fillNamed(value, identity, copy, depth, named, pushed) {
 function fillMap(value, identity, copy, depth, named) {
   const below = depth + 1;
   enterPath(identity, copy, depth);
-  value.forEach((entry, key) => {
+  Map.prototype.forEach.call(toRaw(value), (entry, key) => {
     const keyCopy = cloneValue(key, below, named);
     if (key !== null && typeof key === "object")
       keepCollectionIdentity(key, keyCopy);
     copy.set(keyCopy, cloneValue(entry, below, named));
   });
-  fillCollectionProperties(value, copy, below, named);
+  fillCollectionProperties(toRaw(value), copy, below, named);
   return true;
 }
 function fillSet(value, identity, copy, depth, named) {
   const below = depth + 1;
   enterPath(identity, copy, depth);
-  value.forEach((entry) => {
+  Set.prototype.forEach.call(toRaw(value), (entry) => {
     const entryCopy = cloneValue(entry, below, named);
     if (entry !== null && typeof entry === "object")
       keepCollectionIdentity(entry, entryCopy);
     copy.add(entryCopy);
   });
-  fillCollectionProperties(value, copy, below, named);
+  fillCollectionProperties(toRaw(value), copy, below, named);
   return true;
 }
 function fillCollectionProperties(value, copy, depth, named) {
@@ -3845,7 +3845,7 @@ function holdsObject(values) {
   return false;
 }
 function shallowCopy(container) {
-  const copy = Array.isArray(container) ? container.slice() : container instanceof Map ? new Map(container) : container instanceof Set ? new Set(container) : Object.create(Object.getPrototypeOf(container));
+  const copy = Array.isArray(container) ? container.slice() : container instanceof Map ? new Map(Map.prototype.entries.call(container)) : container instanceof Set ? new Set(Set.prototype.values.call(container)) : Object.create(Object.getPrototypeOf(container));
   const keys = Reflect.ownKeys(container);
   for (let i = 0;i < keys.length; i++) {
     const value = enumerableData(container, keys[i]);
@@ -3890,10 +3890,10 @@ function refuseAccessors(event, removed, container, after) {
       for (let i = 0;i < value.length; i++)
         pending.push(value[i]);
     } else if (value instanceof Map) {
-      for (const [key, item] of value)
+      for (const [key, item] of Map.prototype.entries.call(value))
         pending.push(key, item);
     } else if (value instanceof Set) {
-      for (const item of value)
+      for (const item of Set.prototype.values.call(value))
         pending.push(item);
     }
     const keys = Reflect.ownKeys(value);
@@ -3996,10 +3996,10 @@ function adoptFrame(raw, node, unknown, key) {
     kind = 0 /* Array */;
   else if (raw instanceof Map) {
     kind = 1 /* Map */;
-    entries = raw.entries();
+    entries = Map.prototype.entries.call(raw);
   } else if (raw instanceof Set) {
     kind = 2 /* Set */;
-    entries = raw.values();
+    entries = Set.prototype.values.call(raw);
   } else if (raw instanceof Date || ArrayBuffer.isView(raw))
     kind = 4 /* None */;
   else
@@ -4147,7 +4147,8 @@ function hasObjectChild(raw) {
   }
   if (Object.getPrototypeOf(raw) !== Object.prototype) {
     if (raw instanceof Map || raw instanceof Set) {
-      for (const child of raw.values())
+      const entries = raw instanceof Map ? Map.prototype.values.call(raw) : Set.prototype.values.call(raw);
+      for (const child of entries)
         if (isObject2(child))
           return true;
       return false;
@@ -4366,10 +4367,10 @@ function evictDeep(value, parent) {
       for (let i = 0;i < raw.length; i++)
         pushProxied(raw[i], node, pending);
     } else if (raw instanceof Map) {
-      for (const child of raw.values())
+      for (const child of Map.prototype.values.call(raw))
         pushProxied(child, node, pending);
     } else if (raw instanceof Set) {
-      for (const child of raw)
+      for (const child of Set.prototype.values.call(raw))
         pushProxied(child, node, pending);
     } else {
       const keys = Object.keys(raw);
