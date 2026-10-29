@@ -125,3 +125,16 @@ for (const kind of ["array-symbol", "map-string", "set-symbol", "date-string"]) 
     expect(() => reactive({ graph }, () => {})).toThrow(SnapshotLimitError);
   });
 }
+
+for (const kind of ["map", "set"]) {
+  test(`initial ${kind} properties can have native method names`, () => {
+    const collection: any = kind === "map" ? new Map([["a", { n: 1 }]]) : new Set([{ n: 1 }]);
+    for (const key of ["forEach", "entries", "values", Symbol.iterator]) collection[key] = { label: String(key) };
+    let snapshot: any;
+    reactive({ a: collection, b: collection }, (event: any) => { snapshot = event.newValue; });
+    for (const key of ["forEach", "entries", "values", Symbol.iterator]) {
+      expect(snapshot.a[key]).toEqual({ label: String(key) });
+      expect(snapshot.b[key]).toEqual({ label: String(key) });
+    }
+  });
+}

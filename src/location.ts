@@ -671,8 +671,8 @@ function holdsObject(values: readonly unknown[]): boolean {
  */
 export function shallowCopy(container: object): any {
   const copy = Array.isArray(container) ? container.slice()
-    : container instanceof Map ? new Map(container)
-    : container instanceof Set ? new Set(container)
+    : container instanceof Map ? new Map(Map.prototype.entries.call(container))
+    : container instanceof Set ? new Set(Set.prototype.values.call(container))
     : Object.create(Object.getPrototypeOf(container));
   const keys = Reflect.ownKeys(container);
   for (let i = 0; i < keys.length; i++) {
@@ -723,9 +723,9 @@ function refuseAccessors(event: StateEvent, removed: boolean, container: object,
     if (Array.isArray(value)) {
       for (let i = 0; i < value.length; i++) pending.push(value[i]);
     } else if (value instanceof Map) {
-      for (const [key, item] of value) pending.push(key, item);
+      for (const [key, item] of Map.prototype.entries.call(value)) pending.push(key, item);
     } else if (value instanceof Set) {
-      for (const item of value) pending.push(item);
+      for (const item of Set.prototype.values.call(value)) pending.push(item);
     }
     const keys = Reflect.ownKeys(value);
     for (let i = 0; i < keys.length; i++) {
@@ -917,10 +917,10 @@ function adoptFrame(raw: object, node: LocationNode | undefined, unknown: boolea
   if (Array.isArray(raw)) kind = ChildKind.Array;
   else if (raw instanceof Map) {
     kind = ChildKind.Map;
-    entries = raw.entries();
+    entries = Map.prototype.entries.call(raw);
   } else if (raw instanceof Set) {
     kind = ChildKind.Set;
-    entries = raw.values();
+    entries = Set.prototype.values.call(raw);
   } else if (raw instanceof Date || ArrayBuffer.isView(raw)) kind = ChildKind.None;
   else keys = Object.keys(raw);
   return { raw, node, unknown, key, kind, next: 0, keys, entries, childKey: undefined };
@@ -1078,7 +1078,8 @@ function hasObjectChild(raw: object): boolean {
   }
   if (Object.getPrototypeOf(raw) !== Object.prototype) {
     if (raw instanceof Map || raw instanceof Set) {
-      for (const child of raw.values()) if (isObject(child)) return true;
+      const entries = raw instanceof Map ? Map.prototype.values.call(raw) : Set.prototype.values.call(raw);
+      for (const child of entries) if (isObject(child)) return true;
       return false;
     }
     if (raw instanceof Date || ArrayBuffer.isView(raw)) return false;
@@ -1378,9 +1379,9 @@ export function evictDeep(value: any, parent?: LocationNode): void {
     if (Array.isArray(raw)) {
       for (let i = 0; i < raw.length; i++) pushProxied(raw[i], node, pending);
     } else if (raw instanceof Map) {
-      for (const child of raw.values()) pushProxied(child, node, pending);
+      for (const child of Map.prototype.values.call(raw)) pushProxied(child, node, pending);
     } else if (raw instanceof Set) {
-      for (const child of raw) pushProxied(child, node, pending);
+      for (const child of Set.prototype.values.call(raw)) pushProxied(child, node, pending);
     } else {
       const keys = Object.keys(raw);
       for (let i = 0; i < keys.length; i++) pushProxied(raw[keys[i]], node, pending);

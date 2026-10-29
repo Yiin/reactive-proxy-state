@@ -738,9 +738,9 @@ function entriesOf(source: any, identity: object): readonly unknown[] {
     }
     const entries: unknown[] = [];
     if (source instanceof Map) {
-        for (const [key, entry] of source) entries.push(key, entry);
+        for (const [key, entry] of Map.prototype.entries.call(source)) entries.push(key, entry);
     } else if (source instanceof Set) {
-        for (const entry of source) entries.push(entry);
+        for (const entry of Set.prototype.values.call(source)) entries.push(entry);
     }
     for (const key in source) if (hasOwn.call(source, key)) entries.push(source[key]);
     const symbolKeys = Object.getOwnPropertySymbols(source);
@@ -1060,24 +1060,24 @@ function fillNamed(value: any, identity: object, copy: any, depth: number, named
 function fillMap(value: any, identity: object, copy: Map<unknown, unknown>, depth: number, named: Named): boolean {
     const below = depth + 1;
     enterPath(identity, copy, depth);
-    value.forEach((entry: unknown, key: unknown) => {
+    Map.prototype.forEach.call(toRaw(value), (entry: unknown, key: unknown) => {
         const keyCopy = cloneValue(key, below, named);
         if (key !== null && typeof key === "object") keepCollectionIdentity(key, keyCopy);
         copy.set(keyCopy, cloneValue(entry, below, named));
     });
-    fillCollectionProperties(value, copy, below, named);
+    fillCollectionProperties(toRaw(value), copy, below, named);
     return true;
 }
 
 function fillSet(value: any, identity: object, copy: Set<unknown>, depth: number, named: Named): boolean {
     const below = depth + 1;
     enterPath(identity, copy, depth);
-    value.forEach((entry: unknown) => {
+    Set.prototype.forEach.call(toRaw(value), (entry: unknown) => {
         const entryCopy = cloneValue(entry, below, named);
         if (entry !== null && typeof entry === "object") keepCollectionIdentity(entry, entryCopy);
         copy.add(entryCopy);
     });
-    fillCollectionProperties(value, copy, below, named);
+    fillCollectionProperties(toRaw(value), copy, below, named);
     return true;
 }
 
