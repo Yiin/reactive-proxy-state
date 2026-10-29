@@ -18,6 +18,8 @@ bun add @yiin/reactive-proxy-state
 # or yarn add @yiin/reactive-proxy-state
 ```
 
+Version 2 needs ES2021 or later (it uses `WeakRef`). Coming from 1.x? Read [Upgrading to 2.0.0](./docs/guide/upgrading-to-2.md) first: payloads are copies now, and a few inputs are refused.
+
 ## Quick Start
 
 The most common use case is creating reactive state for local applications:
@@ -304,7 +306,7 @@ Events carry paths, and `updateState` applies them on a replica. Some shapes can
 - **A cycle through the written object travels as a copy.** A value that reaches back into the object it is written to (`state.x = [toRaw(state)]`) reaches the replica with a copy of that object at the back-reference, because a path cannot name the object itself. A later write to the object changes its own place on the replica, not that copy. Keep such back-references out of synced state.
 - **Shared graphs have a copy limit.** Payloads copy a shared object once per place. A payload that would make more than 100,000 extra copies (`SNAPSHOT_SHARED_COPY_LIMIT`) throws a `SnapshotLimitError` (a `RangeError`) before anything changes: `reactive()` throws before it returns a proxy, and a write throws with the state as it was, no event sent and no effect run, so a replica still matches. The `items` of one call are one payload. A root with `{ async: true }` refuses to remove a part over the limit too, because its copy is the `oldValue`: remove it in smaller parts. In a cyclic graph every part can reach the whole graph, so even one property can be too large to remove. A synchronous root sends what a write removes without a copy, as 1.0.44 did, and never refuses a removal, `Set.delete()` included. Then rebuild the root: make the state again from new objects without that graph (for example with `structuredClone` of the parts you keep), pass it to `reactive()` with the same emit function, and stop using the old root and its proxies. The new root's first event, a `replace` at the root path, resets every replica.
 
-The [1.0.44 compatibility notes](./docs/compatibility-1.0.44.md) list the remaining differences, including non-enumerable data and the copy limit.
+[Upgrading to 2.0.0](./docs/guide/upgrading-to-2.md) lists what a 1.x user must change, what else changed, and the measured costs.
 
 A write through a proxy whose object is no longer in the tree changes the object and emits nothing. `getProxyStats().detachedWrites` counts those writes, so you can alert on them.
 

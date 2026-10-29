@@ -1,6 +1,6 @@
 # Cookbook: Practical Patterns
 
-The snippets in this page are **copy-pasteable** starting points for common scenarios. They are all framework-agnostic vanilla TS/JS and assume you are using the APIs from `@yiin/reactive-proxy-state` 1.x.
+The snippets in this page are **copy-pasteable** starting points for common scenarios. They are all framework-agnostic vanilla TS/JS and assume you are using the APIs from `@yiin/reactive-proxy-state` 2.x.
 
 > Each snippet is intentionally concise; production code should add error handling and edge-case guards as appropriate.
 
