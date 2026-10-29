@@ -2653,7 +2653,6 @@ function copyTree(value, container, contents, checkFresh, named) {
   const outerBase = cloneBase;
   const outerIndex = cloneIndex;
   const outerNamed = cloneNamed;
-  const outerUnnamed = cloneUnnamed;
   cloneTop = top;
   cloneCountdown = SNAPSHOT_CHECK_AFTER;
   cloneContainer = container;
@@ -2663,10 +2662,9 @@ function copyTree(value, container, contents, checkFresh, named) {
   cloneSeen = undefined;
   cloneBase = base;
   cloneIndex = undefined;
-  cloneNamed = named !== 0 /* None */;
-  cloneUnnamed = named === 1 /* Below */ ? top : undefined;
+  cloneNamed = named;
   try {
-    const copy = cloneEntry(value, 0);
+    const copy = cloneEntry(value, 0, named);
     if (checkFresh)
       copiedFresh = cloneFresh;
     return copy;
@@ -2684,7 +2682,6 @@ function copyTree(value, container, contents, checkFresh, named) {
     cloneBase = outerBase;
     cloneIndex = outerIndex;
     cloneNamed = outerNamed;
-    cloneUnnamed = outerUnnamed;
   }
 }
 var cloneTop;
@@ -2694,8 +2691,7 @@ var cloneContents;
 var cloneFresh = false;
 var cloneFirst;
 var cloneSeen;
-var cloneNamed = false;
-var cloneUnnamed;
+var cloneNamed = 0 /* None */;
 function copySmall(value, container, checkFresh, named) {
   if (!Array.isArray(value)) {
     const copy2 = copyLeaf(value);
@@ -2877,7 +2873,7 @@ function enterCopies(value, depth, walk, frames) {
 }
 function entriesOf(source, identity) {
   if (Array.isArray(source)) {
-    const names = cloneNamed && identity !== cloneUnnamed ? namedKeys(source) : undefined;
+    const names = keepsNamed(cloneNamed, identity === cloneTop ? 0 : 1) ? namedKeys(source) : undefined;
     if (names === undefined)
       return source;
     const entries2 = source.slice();
@@ -2938,14 +2934,17 @@ function leavePath(length) {
   if (index !== undefined && length - cloneBase <= DEEP_PATH)
     cloneIndex = undefined;
 }
-function cloneValue(value, depth) {
+function cloneValue(value, depth, named) {
   if (value === null || typeof value !== "object")
     return value;
   if (cloneFresh)
     noteFresh(toRaw(value));
-  return cloneEntry(value, depth);
+  return cloneEntry(value, depth, named);
 }
-function cloneEntry(value, depth) {
+function keepsNamed(named, depth) {
+  return named === 2 /* All */ || named === 1 /* Below */ && depth > 0;
+}
+function cloneEntry(value, depth, named) {
   const identity = toRaw(value);
   if (identity === cloneContainer)
     value = readsOf(identity);
@@ -2985,7 +2984,7 @@ function cloneEntry(value, depth) {
     }
   }
   if (depth >= FILL_DEPTH - 1) {
-    cloneDeep(kind, value, identity, copy, depth);
+    cloneDeep(kind, value, identity, copy, depth, named);
     return copy;
   }
   const below = depth + 1;
@@ -3002,7 +3001,7 @@ function cloneEntry(value, depth) {
         }
         if (cloneFresh)
           noteFresh(toRaw(child));
-        child = cloneEntry(child, below);
+        child = cloneEntry(child, below, named);
       }
       if (key === "__proto__")
         setData(copy, key, child);
@@ -3011,7 +3010,7 @@ function cloneEntry(value, depth) {
     }
     const symbolKeys = Object.getOwnPropertySymbols(value);
     if (symbolKeys.length !== 0)
-      pushed = fillSymbols(value, identity, copy, depth, symbolKeys, pushed);
+      pushed = fillSymbols(value, identity, copy, depth, named, symbolKeys, pushed);
   } else if (kind === 1 /* Array */) {
     const length = copy.length;
     for (let i = 0;i < length; i++) {
@@ -3027,12 +3026,12 @@ function cloneEntry(value, depth) {
       }
       if (cloneFresh)
         noteFresh(toRaw(child));
-      copy[i] = cloneEntry(child, below);
+      copy[i] = cloneEntry(child, below, named);
     }
-    if (cloneNamed && identity !== cloneUnnamed)
-      pushed = fillNamed(value, identity, copy, depth, pushed);
+    if (keepsNamed(named, depth))
+      pushed = fillNamed(value, identity, copy, depth, named, pushed);
   } else {
-    pushed = kind === 2 /* Map */ ? fillMap(value, identity, copy, depth) : fillSet(value, identity, copy, depth);
+    pushed = kind === 2 /* Map */ ? fillMap(value, identity, copy, depth, named) : fillSet(value, identity, copy, depth, named);
   }
   if (pushed) {
     if (depth < DEEP_PATH) {
@@ -3044,26 +3043,26 @@ function cloneEntry(value, depth) {
   }
   return copy;
 }
-function cloneDeep(kind, value, identity, copy, depth) {
+function cloneDeep(kind, value, identity, copy, depth, named) {
   const pathLength = cloneAncestors.length;
   if (depth >= FILL_DEPTH) {
     cloneWork.push(kind, value, identity, copy, pathLength);
     return;
   }
   const workBase = cloneWork.length;
-  fill(kind, value, identity, copy, depth);
+  fill(kind, value, identity, copy, depth, named);
   fillWaiting(workBase);
   leavePath(pathLength);
 }
-function fill(kind, value, identity, copy, depth) {
+function fill(kind, value, identity, copy, depth, named) {
   if (kind === 0 /* Object */)
-    fillObject(value, identity, copy, depth);
+    fillObject(value, identity, copy, depth, named);
   else if (kind === 1 /* Array */)
-    fillArray(value, identity, copy, depth);
+    fillArray(value, identity, copy, depth, named);
   else if (kind === 2 /* Map */)
-    fillMap(value, identity, copy, depth);
+    fillMap(value, identity, copy, depth, named);
   else
-    fillSet(value, identity, copy, depth);
+    fillSet(value, identity, copy, depth, named);
 }
 function fillWaiting(workBase) {
   const work = cloneWork;
@@ -3077,10 +3076,10 @@ function fillWaiting(workBase) {
     work.length = at;
     if (cloneAncestors.length !== pathLength)
       leavePath(pathLength);
-    fill(kind, value, identity, copy, FILL_DEPTH);
+    fill(kind, value, identity, copy, FILL_DEPTH, cloneNamed);
   }
 }
-function fillObject(value, identity, copy, depth) {
+function fillObject(value, identity, copy, depth, named) {
   const below = depth + 1;
   let pushed = false;
   for (const key in value) {
@@ -3094,7 +3093,7 @@ function fillObject(value, identity, copy, depth) {
       }
       if (cloneFresh)
         noteFresh(toRaw(child));
-      child = cloneEntry(child, below);
+      child = cloneEntry(child, below, named);
     }
     if (key === "__proto__")
       setData(copy, key, child);
@@ -3102,9 +3101,9 @@ function fillObject(value, identity, copy, depth) {
       copy[key] = child;
   }
   const symbolKeys = Object.getOwnPropertySymbols(value);
-  return symbolKeys.length === 0 ? pushed : fillSymbols(value, identity, copy, depth, symbolKeys, pushed);
+  return symbolKeys.length === 0 ? pushed : fillSymbols(value, identity, copy, depth, named, symbolKeys, pushed);
 }
-function fillSymbols(value, identity, copy, depth, symbolKeys, pushed) {
+function fillSymbols(value, identity, copy, depth, named, symbolKeys, pushed) {
   const below = depth + 1;
   for (let i = 0;i < symbolKeys.length; i++) {
     const symbolKey = symbolKeys[i];
@@ -3115,11 +3114,11 @@ function fillSymbols(value, identity, copy, depth, symbolKeys, pushed) {
       pushed = true;
       enterPath(identity, copy, depth);
     }
-    copy[symbolKey] = cloneValue(child, below);
+    copy[symbolKey] = cloneValue(child, below, named);
   }
   return pushed;
 }
-function fillArray(value, identity, copy, depth) {
+function fillArray(value, identity, copy, depth, named) {
   const below = depth + 1;
   let pushed = false;
   const length = copy.length;
@@ -3136,11 +3135,11 @@ function fillArray(value, identity, copy, depth) {
     }
     if (cloneFresh)
       noteFresh(toRaw(child));
-    copy[i] = cloneEntry(child, below);
+    copy[i] = cloneEntry(child, below, named);
   }
-  return cloneNamed && identity !== cloneUnnamed ? fillNamed(value, identity, copy, depth, pushed) : pushed;
+  return keepsNamed(named, depth) ? fillNamed(value, identity, copy, depth, named, pushed) : pushed;
 }
-function fillNamed(value, identity, copy, depth, pushed) {
+function fillNamed(value, identity, copy, depth, named, pushed) {
   const names = namedKeys(value);
   if (names === undefined)
     return pushed;
@@ -3151,23 +3150,23 @@ function fillNamed(value, identity, copy, depth, pushed) {
       pushed = true;
       enterPath(identity, copy, depth);
     }
-    setData(copy, names[i], cloneValue(child, below));
+    setData(copy, names[i], cloneValue(child, below, named));
   }
   return pushed;
 }
-function fillMap(value, identity, copy, depth) {
+function fillMap(value, identity, copy, depth, named) {
   const below = depth + 1;
   enterPath(identity, copy, depth);
   value.forEach((entry, key) => {
-    copy.set(cloneValue(key, below), cloneValue(entry, below));
+    copy.set(cloneValue(key, below, named), cloneValue(entry, below, named));
   });
   return true;
 }
-function fillSet(value, identity, copy, depth) {
+function fillSet(value, identity, copy, depth, named) {
   const below = depth + 1;
   enterPath(identity, copy, depth);
   value.forEach((entry) => {
-    copy.add(cloneValue(entry, below));
+    copy.add(cloneValue(entry, below, named));
   });
   return true;
 }
@@ -4354,8 +4353,10 @@ function stripIndexes(node, arrayNode, from) {
 function evictDeep(value, parent) {
   if (value == null || typeof value !== "object")
     return;
-  const pending = [];
-  pushProxied(value, parent, pending);
+  const top = toRaw(value);
+  if (globalSeen.get(top) === undefined)
+    return;
+  const pending = [parent, top];
   while (pending.length > 0) {
     const raw = pending.pop();
     const container = pending.pop();
