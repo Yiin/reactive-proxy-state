@@ -1622,7 +1622,7 @@ export function evictDeep(value: any, parent?: LocationNode): void {
     if (Array.isArray(raw)) {
       for (let i = 0; i < raw.length; i++) pushProxied(raw[i], node, i, pending);
     } else if (raw instanceof Map) {
-      for (const [key, child] of Map.prototype.entries.call(raw)) pushProxied(child, node, key, pending);
+      Map.prototype.forEach.call(raw, (child: unknown, key: unknown) => pushProxied(child, node, key, pending));
     } else if (raw instanceof Set) {
       for (const child of Set.prototype.values.call(raw)) pushProxied(child, node, undefined, pending);
     } else {
