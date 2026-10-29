@@ -3701,8 +3701,7 @@ function chain(node, tail) {
     const parent = place.parent;
     if (!holdsIn(parent, place.key, current.raw)) {
       dropped(place);
-      places.length = 0;
-      current.index = undefined;
+      current.places = [];
       return null;
     }
     (reversed ??= []).push(segment(parent, place.key, current.raw));
@@ -4106,7 +4105,8 @@ function prunePlaces(node) {
     return;
   let places = keepPlaces(node.places, (place) => holds(place, node.raw));
   if (places.length > 1) {
-    const live = new Array(places.length);
+    const live = pruneScratch;
+    live.length = places.length;
     let attached = 0;
     let parent;
     let parentAttached = false;
@@ -4133,9 +4133,11 @@ function prunePlaces(node) {
       places = kept;
     }
   }
+  pruneScratch.length = 0;
   node.places = places;
   node.pruned = places.length;
 }
+var pruneScratch = [];
 function keepPlaces(places, keep) {
   const kept = [];
   for (let i = 0;i < places.length; i++) {
@@ -4588,7 +4590,6 @@ function relink(arrayNode, array, from, removed, inserted, findAliases) {
       const places = node.places;
       if (places.length === 1 && places[0].parentId === arrayNode.id && typeof places[0].key === "number" && places[0].key >= from) {
         places[0].key = i;
-        node.index = undefined;
         node.relinkedPlaces = 0;
         left--;
         continue;
