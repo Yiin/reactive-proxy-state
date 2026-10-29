@@ -325,52 +325,72 @@ export class UnsupportedStateError extends TypeError {
 const SNAPSHOT_CHECK_AFTER = SNAPSHOT_SHARED_COPY_LIMIT + 1;
 
 /**
+ * Which arrays of a payload copy keep their named (non-index) properties.
+ * Finding them costs a key list per array, so only the payloads 1.0.44 sent
+ * as the value itself keep them: the initial replace, inserted values and
+ * what a write removes. A later `newValue` keeps each array's items, as
+ * 1.0.44's copy did.
+ */
+export const enum Named {
+    /** No array: its items only. */
+    None = 0,
+    /** Every array below the top value, an array the library made (`items`, `oldValues`). */
+    Below = 1,
+    /** Every array. */
+    All = 2,
+}
+
+/**
  * Deep clone for event payloads. Unlike `deepClone`, an object that appears
  * at several places in `value` is copied once per place, so the result is a
  * tree: a replica holds one copy per place, and a write through a shared
  * object emits one event per place. Copies may not share objects, because a
  * wire that keeps identity (structuredClone, an in-process listener) would
  * then hold one object where the source has several places, and apply each
- * per-place event to it again. Cycles are kept.
+ * per-place event to it again. Cycles are kept. Every own enumerable data
+ * property is copied as an own data property (also `__proto__`), and an
+ * array's holes stay holes; `named` says which arrays keep their named
+ * properties. Levels deeper than `FILL_DEPTH` take no stack frame, so any
+ * depth fits.
  *
  * Throws a `SnapshotLimitError` (a `RangeError`) when the copy would make more than
  * `SNAPSHOT_SHARED_COPY_LIMIT` extra copies of shared objects.
  */
-export function cloneTree<T>(value: T): T {
-    return copyTree(value, undefined, undefined, false) as T;
+export function cloneTree<T>(value: T, named: Named): T {
+    return copyTree(value, undefined, undefined, false, named) as T;
 }
 
 /** What `cloneTreeUnless` returns for a value that reaches the object it names. */
 export const REACHES = Symbol('reaches');
 
 /**
- * `cloneTree(value)`, or `REACHES` as soon as the copy (or its measure)
- * meets `container`. A `SnapshotLimitError` thrown first is measured on
- * objects other than `container`.
+ * `cloneTree(value, named)`, or `REACHES` as soon as the copy (or its
+ * measure) meets `container`. A `SnapshotLimitError` thrown first is
+ * measured on objects other than `container`.
  */
-export function cloneTreeUnless<T>(value: T, container: object): T | typeof REACHES {
-    return copyUnless(value, container, false) as T | typeof REACHES;
+export function cloneTreeUnless<T>(value: T, container: object, named: Named): T | typeof REACHES {
+    return copyUnless(value, container, false, named) as T | typeof REACHES;
 }
 
 /**
- * `cloneTreeUnless(value, container)` for a value about to be stored (the
- * new value of a write, inserted items, a new root; `container` may be
+ * `cloneTreeUnless(value, container, named)` for a value about to be stored
+ * (the new value of a write, inserted items, a new root; `container` may be
  * undefined). It also finds whether the value is fresh: no object in it has
  * a location node, and no object sits at two places in it (an alias or a
  * cycle). `copiedFresh` says so when the call returns. The place walk of a
  * store finds nothing to do in a fresh value, so the store skips it (see
  * `attachValue`). The check stops at the first object that is not fresh.
  */
-export function cloneStored<T>(value: T, container: object | undefined): T | typeof REACHES {
-    return copyUnless(value, container, true) as T | typeof REACHES;
+export function cloneStored<T>(value: T, container: object | undefined, named: Named): T | typeof REACHES {
+    return copyUnless(value, container, true, named) as T | typeof REACHES;
 }
 
 /** Whether the value the last `cloneStored` call copied is fresh; set when it returns. */
 export let copiedFresh = false;
 
-function copyUnless(value: unknown, container: object | undefined, checkFresh: boolean): unknown {
+function copyUnless(value: unknown, container: object | undefined, checkFresh: boolean, named: Named): unknown {
     try {
-        return copyTree(value, container, undefined, checkFresh);
+        return copyTree(value, container, undefined, checkFresh, named);
     } catch (error) {
         if (error === reachedContainer) {
             copiedFresh = false;
@@ -381,14 +401,14 @@ function copyUnless(value: unknown, container: object | undefined, checkFresh: b
 }
 
 /**
- * The copy `cloneTree(value)` makes once `container` holds what `contents`
- * holds: wherever the copy (and its measure) meets `container`, it reads
- * `contents` instead, a shallow copy of `container` of the same kind. So a
- * payload is copied, or refused, as it will be after a write to `container`,
- * before that write is made.
+ * The copy `cloneTree(value, named)` makes once `container` holds what
+ * `contents` holds: wherever the copy (and its measure) meets `container`,
+ * it reads `contents` instead, a shallow copy of `container` of the same
+ * kind. So a payload is copied, or refused, as it will be after a write to
+ * `container`, before that write is made.
  */
-export function cloneTreeAfter<T>(value: T, container: object, contents: object): T {
-    return copyTree(value, container, contents, false) as T;
+export function cloneTreeAfter<T>(value: T, container: object, contents: object, named: Named): T {
+    return copyTree(value, container, contents, false, named) as T;
 }
 
 const reachedContainer = new Error('reactive-proxy-state: internal, a copy reached its container');
@@ -397,7 +417,8 @@ function copyTree(
     value: unknown,
     container: object | undefined,
     contents: object | undefined,
-    checkFresh: boolean
+    checkFresh: boolean,
+    named: Named
 ): unknown {
     if (value === null || typeof value !== 'object') {
         if (checkFresh) copiedFresh = true;
@@ -405,11 +426,12 @@ function copyTree(
     }
     const top = toRaw(value) as object;
     if (top === value && top !== container) {
-        const small = copySmall(value, container, checkFresh);
+        const small = copySmall(value, container, checkFresh, named);
         if (small !== undefined) return small;
     }
     // a copy made from a getter during another copy keeps the outer copy's state
     const base = cloneAncestors.length;
+    const workBase = cloneWork.length;
     const outerTop = cloneTop;
     const outerCountdown = cloneCountdown;
     const outerContainer = cloneContainer;
@@ -417,6 +439,10 @@ function copyTree(
     const outerFresh = cloneFresh;
     const outerFirst = cloneFirst;
     const outerSeen = cloneSeen;
+    const outerBase = cloneBase;
+    const outerIndex = cloneIndex;
+    const outerNamed = cloneNamed;
+    const outerUnnamed = cloneUnnamed;
     cloneTop = top;
     cloneCountdown = SNAPSHOT_CHECK_AFTER;
     cloneContainer = container;
@@ -424,13 +450,18 @@ function copyTree(
     cloneFresh = checkFresh && locationNodes.get(top) === undefined;
     cloneFirst = undefined;
     cloneSeen = undefined;
+    cloneBase = base;
+    cloneIndex = undefined;
+    cloneNamed = named !== Named.None;
+    cloneUnnamed = named === Named.Below ? top : undefined;
     try {
-        const copy = cloneTreeInto(value, base);
+        const copy = cloneEntry(value, 0);
         if (checkFresh) copiedFresh = cloneFresh;
         return copy;
     } finally {
         cloneAncestors.length = base;
         cloneCopies.length = base;
+        cloneWork.length = workBase;
         cloneTop = outerTop;
         cloneCountdown = outerCountdown;
         cloneContainer = outerContainer;
@@ -438,6 +469,10 @@ function copyTree(
         cloneFresh = outerFresh;
         cloneFirst = outerFirst;
         cloneSeen = outerSeen;
+        cloneBase = outerBase;
+        cloneIndex = outerIndex;
+        cloneNamed = outerNamed;
+        cloneUnnamed = outerUnnamed;
     }
 }
 
@@ -446,6 +481,8 @@ function copyTree(
 // stops at (see `cloneTreeUnless`) or reads `cloneContents` for (see
 // `cloneTreeAfter`), and, for `cloneStored`, whether every object met so far
 // is fresh, with the first object met below the top, then all of them.
+// `cloneNamed`: arrays keep their named properties, except `cloneUnnamed`
+// (see `Named`).
 let cloneTop: object | undefined;
 let cloneCountdown = 0;
 let cloneContainer: object | undefined;
@@ -453,17 +490,25 @@ let cloneContents: object | undefined;
 let cloneFresh = false;
 let cloneFirst: object | undefined;
 let cloneSeen: Set<object> | undefined;
+let cloneNamed = false;
+let cloneUnnamed: object | undefined;
 
 /**
  * The copy of a small raw value, made without the stack and the counter of
  * a tree copy: a leaf (a plain object of primitives), or an array of at
  * most 8 entries that are primitives or leaves. Such a value holds no
  * cycle, only the repeats checked here, and is far below the copy limit.
- * Undefined for any other value, which takes the full copy, and for an
- * array that holds `container` (the copy must read or refuse it, see
- * `readsOf`). With `checkFresh` (see `cloneStored`), sets `copiedFresh`.
+ * Undefined for any other value, which takes the full copy, for an array
+ * that holds `container` (the copy must read or refuse it, see `readsOf`),
+ * and for an array with named properties `named` keeps. With `checkFresh`
+ * (see `cloneStored`), sets `copiedFresh`.
  */
-function copySmall(value: object, container: object | undefined, checkFresh: boolean): object | undefined {
+function copySmall(
+    value: object,
+    container: object | undefined,
+    checkFresh: boolean,
+    named: Named
+): object | undefined {
     if (!Array.isArray(value)) {
         const copy = copyLeaf(value);
         if (copy !== undefined && checkFresh) copiedFresh = locationNodes.get(value) === undefined;
@@ -471,12 +516,13 @@ function copySmall(value: object, container: object | undefined, checkFresh: boo
     }
     const length = value.length;
     if (length > 8) return undefined;
+    if (named === Named.All && namedKeys(value) !== undefined) return undefined;
     const copy = new Array(length);
     let fresh = checkFresh && locationNodes.get(value) === undefined;
     for (let i = 0; i < length; i++) {
         const item = value[i];
         if (item === null || typeof item !== 'object') {
-            copy[i] = item;
+            if (item !== undefined || i in value) copy[i] = item; // a hole stays a hole
             continue;
         }
         if (item === container || toRaw(item) !== item) return undefined;
@@ -497,7 +543,8 @@ function copyLeaf(value: object): object | undefined {
         if (!hasOwn.call(value, key)) continue;
         const entry = (value as any)[key];
         if (entry !== null && typeof entry === 'object') return undefined;
-        copy[key] = entry;
+        if (key === '__proto__') setData(copy, key, entry);
+        else copy[key] = entry;
     }
     if (Object.getOwnPropertySymbols(value).length !== 0) return undefined;
     return copy;
@@ -547,11 +594,41 @@ function noteFresh(identity: object): void {
     if (seen.size === size) cloneFresh = false;
 }
 
+/**
+ * The own enumerable keys of `array` that are not array indexes ("extra",
+ * "-1", "01"), or undefined when it has none. Indexes come first in key
+ * order, so the named keys are the ones after the last index.
+ */
+export function namedKeys(array: object): string[] | undefined {
+    const keys = Object.keys(array);
+    let start = keys.length;
+    while (start > 0 && !isIndexKey(keys[start - 1])) start--;
+    return start === keys.length ? undefined : keys.slice(start);
+}
+
+/** Is `key` an array index: "0", or digits without a leading zero, below 2^32 - 1? */
+function isIndexKey(key: string): boolean {
+    const length = key.length;
+    if (length === 0 || length > 10) return false;
+    const first = key.charCodeAt(0);
+    if (first < 48 || first > 57 || (first === 48 && length > 1)) return false;
+    for (let i = 1; i < length; i++) {
+        const code = key.charCodeAt(i);
+        if (code < 48 || code > 57) return false;
+    }
+    return length < 10 || Number(key) < 4294967295;
+}
+
+/** `object[key] = value` as an own enumerable data property: no setter runs, and `__proto__` stays a key. */
+export function setData(object: object, key: PropertyKey, value: unknown): void {
+    Object.defineProperty(object, key, { value, writable: true, enumerable: true, configurable: true });
+}
+
 /** One `checkSharedCopies` walk. */
 interface CopyWalk {
     /** Copies beyond the first copy of each object, so far. */
     extra: number;
-    /** After `walkCopies`: the depth of the highest ancestor a cycle below returned to. */
+    /** After an object's walk: the depth of the highest ancestor a cycle below returned to. */
     low: number;
     /**
      * Each object met: `-(depth + 2)` while it is on the path from the top,
@@ -561,8 +638,18 @@ interface CopyWalk {
     marks: Map<object, number>;
 }
 
+/** An object `walkCopies` is in: its entries, the next one, and what they add up to so far. */
+interface CopyFrame {
+    identity: object;
+    depth: number;
+    entries: readonly unknown[];
+    next: number;
+    size: number;
+    low: number;
+}
+
 /**
- * Throws when a tree copy of `value` (made like `cloneTreeInto`) would make
+ * Throws when a tree copy of `value` (made like `copyTree`) would make
  * more than `SNAPSHOT_SHARED_COPY_LIMIT` copies beyond the first copy of each
  * object. The copies of a shared subtree are counted once and remembered, so
  * the walk is linear in the distinct objects. An object on a cycle is counted
@@ -571,21 +658,48 @@ interface CopyWalk {
  */
 function checkSharedCopies(value: object): void {
     const walk: CopyWalk = { extra: 0, low: Infinity, marks: new Map() };
-    walkCopies(value, 0, walk);
+    walkCopies(value, walk);
     if (walk.extra > SNAPSHOT_SHARED_COPY_LIMIT) throw new SnapshotLimitError(walk.extra);
 }
 
-/** The copies `entry` makes (0 for a primitive); sets `walk.low`. */
-function walkEntry(entry: unknown, depth: number, walk: CopyWalk): number {
-    if (entry === null || typeof entry !== 'object') {
-        walk.low = Infinity;
-        return 0;
+/** The copies a tree copy of `top` makes, walked with a stack of frames, not of calls. */
+function walkCopies(top: object, walk: CopyWalk): void {
+    const frames: CopyFrame[] = [];
+    enterCopies(top, 0, walk, frames);
+    while (frames.length > 0) {
+        const frame = frames[frames.length - 1];
+        if (frame.next < frame.entries.length && walk.extra <= SNAPSHOT_SHARED_COPY_LIMIT) {
+            const entry = frame.entries[frame.next++];
+            if (entry === null || typeof entry !== 'object') {
+                walk.low = Infinity;
+                continue;
+            }
+            const size = enterCopies(entry, frame.depth + 1, walk, frames);
+            if (frames[frames.length - 1] !== frame) continue; // its frame adds up when it ends
+            frame.size += size;
+            if (walk.low < frame.low) frame.low = walk.low;
+            continue;
+        }
+        frames.pop();
+        // Remember the count only when no cycle below returns to this object or
+        // above it. Such an object is on no cycle, so no object below it can be
+        // an ancestor of another place of it, and its count is the same at every
+        // place. On a cycle, the count depends on which objects are ancestors there.
+        walk.marks.set(frame.identity, frame.low > frame.depth ? frame.size : -1);
+        walk.low = frame.low;
+        const below = frames[frames.length - 1];
+        if (below !== undefined) {
+            below.size += frame.size;
+            if (frame.low < below.low) below.low = frame.low;
+        }
     }
-    return walkCopies(entry, depth, walk);
 }
 
-/** The copies a tree copy of `value` makes; sets `walk.low`. */
-function walkCopies(value: object, depth: number, walk: CopyWalk): number {
+/**
+ * Meet `value` at `depth`: the copies it makes when they are known (and
+ * `walk.low`), else 0 with a frame pushed for its entries.
+ */
+function enterCopies(value: object, depth: number, walk: CopyWalk, frames: CopyFrame[]): number {
     const identity = toRaw(value) as object;
     const source: any = identity === cloneContainer ? readsOf(identity) : identity;
     const marks = walk.marks;
@@ -608,162 +722,350 @@ function walkCopies(value: object, depth: number, walk: CopyWalk): number {
         walk.low = Infinity;
         return 1;
     }
-
     marks.set(identity, -(depth + 2));
-    const below = depth + 1;
-    let size = 1;
-    let low = Infinity;
-    if (Array.isArray(source)) {
-        for (let i = 0; i < source.length && walk.extra <= SNAPSHOT_SHARED_COPY_LIMIT; i++) {
-            size += walkEntry(source[i], below, walk);
-            if (walk.low < low) low = walk.low;
-        }
-    } else if (source instanceof Map) {
-        for (const [key, entry] of source) {
-            size += walkEntry(key, below, walk);
-            if (walk.low < low) low = walk.low;
-            size += walkEntry(entry, below, walk);
-            if (walk.low < low) low = walk.low;
-            if (walk.extra > SNAPSHOT_SHARED_COPY_LIMIT) break;
-        }
-    } else if (source instanceof Set) {
-        for (const entry of source) {
-            size += walkEntry(entry, below, walk);
-            if (walk.low < low) low = walk.low;
-            if (walk.extra > SNAPSHOT_SHARED_COPY_LIMIT) break;
-        }
-    } else {
-        for (const key in source) {
-            if (!hasOwn.call(source, key)) continue;
-            size += walkEntry(source[key], below, walk);
-            if (walk.low < low) low = walk.low;
-            if (walk.extra > SNAPSHOT_SHARED_COPY_LIMIT) break;
-        }
-        const symbolKeys = Object.getOwnPropertySymbols(source);
-        for (let i = 0; i < symbolKeys.length; i++) {
-            if (!isEnumerable.call(source, symbolKeys[i])) continue;
-            size += walkEntry(source[symbolKeys[i]], below, walk);
-            if (walk.low < low) low = walk.low;
-        }
-    }
-    // Remember the count only when no cycle below returns to this object or
-    // above it. Such an object is on no cycle, so no object below it can be
-    // an ancestor of another place of it, and its count is the same at every
-    // place. On a cycle, the count depends on which objects are ancestors there.
-    marks.set(identity, low > depth ? size : -1);
-    walk.low = low;
-    return size;
+    frames.push({ identity, depth, entries: entriesOf(source, identity), next: 0, size: 1, low: Infinity });
+    return 0;
 }
 
-// The raw objects on the path from the top of the current clone to here, and
-// their copies, so only a cycle (not a shared object) is reused. One stack
-// for every call: a call (also one made from a getter during another clone)
-// looks only at the entries from its own `base` up.
+/** What a copy of `source` (the raw object `identity`, or what is read for it) copies below it, in order. */
+function entriesOf(source: any, identity: object): readonly unknown[] {
+    if (Array.isArray(source)) {
+        const names = cloneNamed && identity !== cloneUnnamed ? namedKeys(source) : undefined;
+        if (names === undefined) return source;
+        const entries: unknown[] = source.slice();
+        for (let i = 0; i < names.length; i++) entries.push((source as any)[names[i]]);
+        return entries;
+    }
+    const entries: unknown[] = [];
+    if (source instanceof Map) {
+        for (const [key, entry] of source) entries.push(key, entry);
+    } else if (source instanceof Set) {
+        for (const entry of source) entries.push(entry);
+    } else {
+        for (const key in source) if (hasOwn.call(source, key)) entries.push(source[key]);
+        const symbolKeys = Object.getOwnPropertySymbols(source);
+        for (let i = 0; i < symbolKeys.length; i++) {
+            if (isEnumerable.call(source, symbolKeys[i])) entries.push(source[symbolKeys[i]]);
+        }
+    }
+    return entries;
+}
+
+// The raw objects on the path from the top of the current copy to the object
+// being filled, and their copies, so only a cycle (not a shared object) is
+// reused. One stack for every call: a copy (also one made from a getter
+// during another copy) looks only at the entries from its own `cloneBase`
+// up. An object at depth d (the top is at 0) is copied with its d ancestors
+// on the path, so the path is d entries long there. A path longer than
+// `DEEP_PATH` entries is also kept in `cloneIndex`, which exists only then:
+// a deep copy finds its cycles in one lookup, and a shallow one, which
+// scans its few ancestors, never reads `cloneIndex` (a read per object costs
+// a shallow copy about a tenth of its time).
 const cloneAncestors: object[] = [];
 const cloneCopies: any[] = [];
+let cloneBase = 0;
+let cloneIndex: Map<object, any> | undefined;
+const DEEP_PATH = 64;
+// The copies left to fill below `FILL_DEPTH`, five entries each: their kind,
+// what the copy reads, its raw object, its copy, and the path length of its
+// parent (see `fillWaiting`).
+const cloneWork: any[] = [];
+/** Levels a copy fills with one call each; deeper levels wait in `cloneWork`. */
+const FILL_DEPTH = 256;
 const hasOwn = Object.prototype.hasOwnProperty;
 const isEnumerable = Object.prototype.propertyIsEnumerable;
 
-function cloneChild(value: any, base: number): any {
-    if (value === null || typeof value !== 'object') return value;
-    if (cloneFresh) noteFresh(toRaw(value) as object);
-    return cloneTreeInto(value, base);
+/** What a copy is filled with. */
+const enum Fill {
+    Object,
+    Array,
+    Map,
+    Set,
 }
 
-function cloneTreeInto(value: any, base: number): any {
-    // identity from the raw target, reads through `value` (see deepClone)
+/** Put `identity` (raw), at `depth`, and its copy at the end of the path. */
+function enterPath(identity: object, copy: any, depth: number): void {
+    cloneAncestors.push(identity);
+    cloneCopies.push(copy);
+    if (depth < DEEP_PATH) return;
+    // the path is longer than DEEP_PATH now
+    if (cloneIndex !== undefined) {
+        cloneIndex.set(identity, copy);
+        return;
+    }
+    cloneIndex = new Map();
+    for (let i = cloneBase; i < cloneAncestors.length; i++) cloneIndex.set(cloneAncestors[i], cloneCopies[i]);
+}
+
+/** Cut the path back to `length` entries. */
+function leavePath(length: number): void {
+    const ancestors = cloneAncestors;
+    const index = cloneIndex;
+    while (ancestors.length > length) {
+        const identity = ancestors.pop()!;
+        cloneCopies.pop();
+        if (index !== undefined) index.delete(identity);
+    }
+    if (index !== undefined && length - cloneBase <= DEEP_PATH) cloneIndex = undefined;
+}
+
+/** The copy of `value` at `depth` below the top of the copy (see `cloneEntry`). */
+function cloneValue(value: unknown, depth: number): unknown {
+    if (value === null || typeof value !== 'object') return value;
+    if (cloneFresh) noteFresh(toRaw(value) as object);
+    return cloneEntry(value, depth);
+}
+
+/**
+ * The copy of `value` (an object) at `depth` below the top of the copy: the
+ * copy of the ancestor it is, on a cycle, else a new copy. Its identity is
+ * the raw target and its reads go through `value` (see deepClone). The new
+ * copy is filled now when `depth` is below `FILL_DEPTH`, else it waits in
+ * `cloneWork` for the object at the last such depth (see `fillWaiting`).
+ */
+function cloneEntry(value: any, depth: number): any {
     const identity = toRaw(value) as object;
     if (identity === cloneContainer) value = readsOf(identity);
-    for (let i = cloneAncestors.length - 1; i >= base; i--) {
-        if (cloneAncestors[i] === identity) return cloneCopies[i];
+    if (depth > DEEP_PATH) {
+        const ancestor = cloneIndex!.get(identity);
+        if (ancestor !== undefined) return ancestor;
+    } else {
+        const ancestors = cloneAncestors;
+        for (let i = ancestors.length - 1, stop = ancestors.length - depth; i >= stop; i--) {
+            if (ancestors[i] === identity) return cloneCopies[i];
+        }
     }
 
     countCopy();
-    // an object goes on the ancestor stack before its first object child,
-    // the only one that can meet it again: a leaf never goes on it
-    let pushed = false;
+    let copy: any;
+    let kind: Fill;
     if (Array.isArray(value)) {
-        const length = value.length;
-        const copy = new Array(length);
+        copy = new Array(value.length);
+        kind = Fill.Array;
+    } else {
+        const prototype = Object.getPrototypeOf(value);
+        if (prototype === Object.prototype) {
+            copy = {};
+            kind = Fill.Object;
+        } else if (value instanceof Date) {
+            return new Date(value.getTime());
+        } else if (value instanceof Map) {
+            copy = new Map();
+            kind = Fill.Map;
+        } else if (value instanceof Set) {
+            copy = new Set();
+            kind = Fill.Set;
+        } else {
+            copy = Object.create(prototype);
+            kind = Fill.Object;
+        }
+    }
+    if (depth >= FILL_DEPTH - 1) {
+        cloneDeep(kind, value, identity, copy, depth);
+        return copy;
+    }
+    // Plain objects and arrays are filled here, not in `fillObject` and
+    // `fillArray`, which do the same for deep copies: a call less per object
+    // is most of a shallow copy's cost.
+    const below = depth + 1;
+    let pushed = false;
+    if (kind === Fill.Object) {
+        for (const key in value) {
+            if (!hasOwn.call(value, key)) continue;
+            let child = value[key];
+            if (child !== null && typeof child === 'object') {
+                if (!pushed) {
+                    pushed = true;
+                    enterPath(identity, copy, depth);
+                }
+                if (cloneFresh) noteFresh(toRaw(child) as object);
+                child = cloneEntry(child, below);
+            }
+            if (key === '__proto__') setData(copy, key, child);
+            else copy[key] = child;
+        }
+        const symbolKeys = Object.getOwnPropertySymbols(value);
+        if (symbolKeys.length !== 0) pushed = fillSymbols(value, identity, copy, depth, symbolKeys, pushed);
+    } else if (kind === Fill.Array) {
+        const length = copy.length;
         for (let i = 0; i < length; i++) {
             const child = value[i];
             if (child === null || typeof child !== 'object') {
-                copy[i] = child;
+                if (child !== undefined || i in value) copy[i] = child; // a hole stays a hole
                 continue;
             }
             if (!pushed) {
                 pushed = true;
-                cloneAncestors.push(identity);
-                cloneCopies.push(copy);
+                enterPath(identity, copy, depth);
             }
-            copy[i] = cloneChild(child, base);
+            if (cloneFresh) noteFresh(toRaw(child) as object);
+            copy[i] = cloneEntry(child, below);
         }
-        if (pushed) {
+        if (cloneNamed && identity !== cloneUnnamed) pushed = fillNamed(value, identity, copy, depth, pushed);
+    } else {
+        pushed = kind === Fill.Map ? fillMap(value, identity, copy, depth) : fillSet(value, identity, copy, depth);
+    }
+    if (pushed) {
+        // the children took themselves off the path: only this object is left
+        if (depth < DEEP_PATH) {
             cloneAncestors.pop();
             cloneCopies.pop();
+        } else {
+            leavePath(cloneAncestors.length - 1);
         }
-        return copy;
     }
-    const prototype = Object.getPrototypeOf(value);
-    let copy: any;
-    if (prototype === Object.prototype) {
-        copy = {};
-    } else if (value instanceof Date) {
-        return new Date(value.getTime());
-    } else if (value instanceof Map) {
-        const map = new Map();
-        cloneAncestors.push(identity);
-        cloneCopies.push(map);
-        value.forEach((entry, key) => {
-            map.set(cloneChild(key, base), cloneChild(entry, base));
-        });
-        cloneAncestors.pop();
-        cloneCopies.pop();
-        return map;
-    } else if (value instanceof Set) {
-        const set = new Set();
-        cloneAncestors.push(identity);
-        cloneCopies.push(set);
-        value.forEach(entry => {
-            set.add(cloneChild(entry, base));
-        });
-        cloneAncestors.pop();
-        cloneCopies.pop();
-        return set;
-    } else {
-        copy = Object.create(prototype);
+    return copy;
+}
+
+/**
+ * `cloneEntry` from depth `FILL_DEPTH - 1` on: the copy at that depth is
+ * filled now and fills the copies waiting below it (see `fillWaiting`); a
+ * deeper copy waits in `cloneWork`.
+ */
+function cloneDeep(kind: Fill, value: any, identity: object, copy: any, depth: number): void {
+    const pathLength = cloneAncestors.length;
+    if (depth >= FILL_DEPTH) {
+        cloneWork.push(kind, value, identity, copy, pathLength);
+        return;
     }
+    const workBase = cloneWork.length;
+    fill(kind, value, identity, copy, depth);
+    fillWaiting(workBase);
+    leavePath(pathLength);
+}
+
+function fill(kind: Fill, value: any, identity: object, copy: any, depth: number): void {
+    if (kind === Fill.Object) fillObject(value, identity, copy, depth);
+    else if (kind === Fill.Array) fillArray(value, identity, copy, depth);
+    else if (kind === Fill.Map) fillMap(value, identity, copy, depth);
+    else fillSet(value, identity, copy, depth);
+}
+
+/**
+ * Fill the copies waiting in `cloneWork` above `workBase`: those the object
+ * at depth `FILL_DEPTH - 1` left, and the ones they leave in turn, last
+ * first. Each starts with the path cut back to its parent's, which the
+ * copies filled before it left in place, so each finds its own ancestors,
+ * and no call stack grows with the depth.
+ */
+function fillWaiting(workBase: number): void {
+    const work = cloneWork;
+    while (work.length > workBase) {
+        const at = work.length - 5;
+        const kind: Fill = work[at];
+        const value = work[at + 1];
+        const identity = work[at + 2];
+        const copy = work[at + 3];
+        const pathLength: number = work[at + 4];
+        work.length = at;
+        if (cloneAncestors.length !== pathLength) leavePath(pathLength);
+        fill(kind, value, identity, copy, FILL_DEPTH);
+    }
+}
+
+// The fills below copy the entries of `value` (raw object `identity`, at
+// `depth`) into `copy`, and say whether they put the object on the ancestor
+// path. It goes there before its first object child, the only kind that can
+// meet it again: a leaf never goes on it. The caller takes it off afterwards.
+// `cloneEntry` fills shallow plain objects and arrays itself, the way
+// `fillObject` and `fillArray` do; keep the two the same.
+
+function fillObject(value: any, identity: object, copy: any, depth: number): boolean {
+    const below = depth + 1;
+    let pushed = false;
     for (const key in value) {
         if (!hasOwn.call(value, key)) continue;
-        const child = value[key];
-        if (child === null || typeof child !== 'object') {
-            copy[key] = child;
-            continue;
+        let child = value[key];
+        if (child !== null && typeof child === 'object') {
+            if (!pushed) {
+                pushed = true;
+                enterPath(identity, copy, depth);
+            }
+            if (cloneFresh) noteFresh(toRaw(child) as object);
+            child = cloneEntry(child, below);
         }
-        if (!pushed) {
-            pushed = true;
-            cloneAncestors.push(identity);
-            cloneCopies.push(copy);
-        }
-        copy[key] = cloneChild(child, base);
+        if (key === '__proto__') setData(copy, key, child);
+        else copy[key] = child;
     }
     const symbolKeys = Object.getOwnPropertySymbols(value);
+    return symbolKeys.length === 0 ? pushed : fillSymbols(value, identity, copy, depth, symbolKeys, pushed);
+}
+
+/** The enumerable symbol properties of an object (see `fillObject`). */
+function fillSymbols(
+    value: any,
+    identity: object,
+    copy: any,
+    depth: number,
+    symbolKeys: symbol[],
+    pushed: boolean
+): boolean {
+    const below = depth + 1;
     for (let i = 0; i < symbolKeys.length; i++) {
         const symbolKey = symbolKeys[i];
         if (!isEnumerable.call(value, symbolKey)) continue;
         const child = value[symbolKey];
         if (child !== null && typeof child === 'object' && !pushed) {
             pushed = true;
-            cloneAncestors.push(identity);
-            cloneCopies.push(copy);
+            enterPath(identity, copy, depth);
         }
-        copy[symbolKey] = cloneChild(child, base);
+        copy[symbolKey] = cloneValue(child, below);
     }
-    if (pushed) {
-        cloneAncestors.pop();
-        cloneCopies.pop();
+    return pushed;
+}
+
+function fillArray(value: any, identity: object, copy: any[], depth: number): boolean {
+    const below = depth + 1;
+    let pushed = false;
+    const length = copy.length;
+    for (let i = 0; i < length; i++) {
+        const child = value[i];
+        if (child === null || typeof child !== 'object') {
+            if (child !== undefined || i in value) copy[i] = child; // a hole stays a hole
+            continue;
+        }
+        if (!pushed) {
+            pushed = true;
+            enterPath(identity, copy, depth);
+        }
+        if (cloneFresh) noteFresh(toRaw(child) as object);
+        copy[i] = cloneEntry(child, below);
     }
-    return copy;
+    return cloneNamed && identity !== cloneUnnamed ? fillNamed(value, identity, copy, depth, pushed) : pushed;
+}
+
+/** The named properties of an array the copy keeps (see `Named`, `fillArray`). */
+function fillNamed(value: any, identity: object, copy: any, depth: number, pushed: boolean): boolean {
+    const names = namedKeys(value);
+    if (names === undefined) return pushed;
+    const below = depth + 1;
+    for (let i = 0; i < names.length; i++) {
+        const child = value[names[i]];
+        if (child !== null && typeof child === 'object' && !pushed) {
+            pushed = true;
+            enterPath(identity, copy, depth);
+        }
+        setData(copy, names[i], cloneValue(child, below));
+    }
+    return pushed;
+}
+
+function fillMap(value: any, identity: object, copy: Map<unknown, unknown>, depth: number): boolean {
+    const below = depth + 1;
+    enterPath(identity, copy, depth);
+    value.forEach((entry: unknown, key: unknown) => {
+        copy.set(cloneValue(key, below), cloneValue(entry, below));
+    });
+    return true;
+}
+
+function fillSet(value: any, identity: object, copy: Set<unknown>, depth: number): boolean {
+    const below = depth + 1;
+    enterPath(identity, copy, depth);
+    value.forEach((entry: unknown) => {
+        copy.add(cloneValue(entry, below));
+    });
+    return true;
 }
 
 /**

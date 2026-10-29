@@ -1,11 +1,13 @@
 import { EmitFunction, Path, ReactiveOptions, StateEvent } from "./types";
 import {
+  Named,
   SnapshotLimitError,
   cloneStored,
   copiedFresh,
   deepEqual,
   globalSeen,
   proxyStats,
+  setData,
   unwrapForStore,
 } from "./utils";
 import {
@@ -24,7 +26,6 @@ import {
   notePlace,
   restoreEvicted,
   copyPayloadReaching,
-  setData,
   shallowCopy,
   writesThroughSetter,
 } from "./location";
@@ -50,7 +51,9 @@ export function isReactive(value: any): boolean {
 /**
  * Wraps an emit function to defer calls to the next microtask.
  * Multiple events queued in the same synchronous tick are flushed
- * in order on a single microtask.
+ * in order on a single microtask. An emit that throws does not stop the
+ * others: every event of the batch is delivered, then the first error is
+ * thrown from the microtask.
  */
 function createAsyncEmit(emit: EmitFunction): EmitFunction {
   const queue: StateEvent[] = []
@@ -63,9 +66,19 @@ function createAsyncEmit(emit: EmitFunction): EmitFunction {
       queueMicrotask(() => {
         flushScheduled = false
         const batch = queue.splice(0)
+        let failed = false
+        let failure: unknown
         for (const queuedEvent of batch) {
-          emit(queuedEvent)
+          try {
+            emit(queuedEvent)
+          } catch (error) {
+            if (!failed) {
+              failed = true
+              failure = error
+            }
+          }
         }
+        if (failed) throw failure
       })
     }
   }
@@ -102,12 +115,14 @@ export function reactive<T extends object>(
   // if this is the root call (path is empty) and an emit function is provided,
   // emit the initial state event, with a copy like every stored value: a
   // listener may keep it as its replica and apply the later events to it,
-  // which must not write into `obj`. A value too large to copy (see
-  // SNAPSHOT_SHARED_COPY_LIMIT) throws here, before the root has a proxy.
+  // which must not write into `obj`. 1.0.44 sent `obj` itself, so the copy
+  // keeps every data property it has, also named properties of arrays. A
+  // value too large to copy (see SNAPSHOT_SHARED_COPY_LIMIT) throws here,
+  // before the root has a proxy.
   let fresh = false;
   if (emit && path.length === 0) {
     try {
-      const newValue = cloneStored(obj, undefined);
+      const newValue = cloneStored(obj, undefined, Named.All);
       fresh = copiedFresh;
       emit({ action: "replace", path: [], newValue });
     } catch (error) {

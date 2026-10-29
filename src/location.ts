@@ -1,6 +1,7 @@
 import { ReactiveFlags } from "./constants";
 import type { EmitFunction, Path, StateEvent } from "./types";
 import {
+  Named,
   REACHES,
   UnsupportedStateError,
   cloneStored,
@@ -10,6 +11,7 @@ import {
   copiedFresh,
   globalSeen,
   locationNodes,
+  setData,
   wrapperCache,
   proxyStats,
   toRaw,
@@ -276,17 +278,58 @@ function chain(node: LocationNode, tail: PropertyKey | undefined): Target | null
   return undefined;
 }
 
+/** A node `findAll` is in: its places, the next one to follow, and whether one was stale. */
+interface FindFrame {
+  node: LocationNode;
+  places: Place[];
+  next: number;
+  stale: boolean;
+}
+
 /**
- * Every root path of `node`, plus `tail` when given, by the general walk.
- * Places that no longer hold the object are dropped on the way. With
- * `firstOnly`, stops at the first path found.
+ * Every root path of `node`, plus `tail` when given, by the general walk: a
+ * path follows places up to a root, and never meets a node twice. Places
+ * that no longer hold the object are dropped on the way. With `firstOnly`,
+ * stops at the first path found. The walk keeps its own stack, so any depth
+ * fits, and builds each path once.
  */
 function findAll(node: LocationNode, tail: PropertyKey | undefined, firstOnly: boolean): Found[] {
   const out: Found[] = [];
-  collect(node, tail === undefined ? [] : [String(tail)], new Set(), out, firstOnly);
+  // the segments from the node up to the frame on top, nearest first
+  const segments: string[] = [];
+  const visiting = new Set<LocationNode>();
+  const frames: FindFrame[] = [];
+  const enter = (entered: LocationNode): void => {
+    visiting.add(entered);
+    const root = entered.root;
+    if (root !== undefined) out.push({ root, path: buildPath(root.path, segments, tail) });
+    frames.push({ node: entered, places: entered.places, next: 0, stale: false });
+  };
+  enter(node);
+  while (frames.length > 0) {
+    const frame = frames[frames.length - 1];
+    const current = frame.node;
+    if (frame.next < frame.places.length && !(firstOnly && out.length > 0)) {
+      const place = frame.places[frame.next++];
+      const parent = place.parent;
+      if (!holdsIn(parent, place.key, current.raw)) {
+        frame.stale = true;
+        continue;
+      }
+      if (visiting.has(parent)) continue;
+      segments.push(segment(parent, place.key, current.raw));
+      enter(parent);
+      continue;
+    }
+    frames.pop();
+    if (frame.stale) current.places = keepPlaces(frame.places, (place) => holds(place, current.raw));
+    visiting.delete(current);
+    if (frames.length > 0) segments.pop();
+  }
   return out;
 }
 
+/** `base`, then `reversed` from its end to its start, then `tail` when given. */
 function buildPath(base: Path, reversed: string[] | undefined, tail: PropertyKey | undefined): Path {
   const middle = reversed === undefined ? 0 : reversed.length;
   const path: Path = new Array(base.length + middle + (tail === undefined ? 0 : 1));
@@ -295,34 +338,6 @@ function buildPath(base: Path, reversed: string[] | undefined, tail: PropertyKey
   for (let i = middle - 1; i >= 0; i--) path[index++] = reversed![i];
   if (tail !== undefined) path[index] = String(tail);
   return path;
-}
-
-function collect(
-  node: LocationNode,
-  suffix: string[],
-  visiting: Set<LocationNode>,
-  out: Found[],
-  firstOnly: boolean
-): void {
-  if (visiting.has(node)) return;
-  visiting.add(node);
-  const root = node.root;
-  if (root !== undefined) {
-    out.push({ root, path: [...root.path, ...suffix] });
-  }
-  const places = node.places;
-  let stale = false;
-  for (let i = 0; i < places.length && !(firstOnly && out.length > 0); i++) {
-    const place = places[i];
-    const parent = place.parent;
-    if (!holdsIn(parent, place.key, node.raw)) {
-      stale = true;
-      continue;
-    }
-    collect(parent, [segment(parent, place.key, node.raw), ...suffix], visiting, out, firstOnly);
-  }
-  if (stale) node.places = keepPlaces(places, (place) => holds(place, node.raw));
-  visiting.delete(node);
 }
 
 /**
@@ -413,11 +428,12 @@ function attachedBefore(node: LocationNode, former: LocationNode | undefined): b
 /**
  * Send `event` to every path of `target`. Its payload holds copies already
  * (`copyPayload` or `copyPayloadAfter`, made before the write). Every
- * further path gets copies of those copies, all made before the first emit,
- * so a listener that changes a payload cannot change another, and two
- * remote places never share one object. The first path gets `event` itself.
- * What the write removed is copied per path only where `copyPayload` copied
- * it (an async root); otherwise every path carries the removed value itself.
+ * further path gets copies of the stored values (`newValue`, `value`,
+ * `items`), all made before the first emit, so a listener that changes one
+ * cannot change another, and two remote places never share one object.
+ * The first path gets `event` itself. What the write removed is copied per
+ * path only where `copyPayload` copied it (an async root); otherwise every
+ * path carries the removed value itself, shared by the events.
  */
 export function dispatch(target: Target, event: StateEvent): void {
   const { root, paths } = target;
@@ -426,16 +442,18 @@ export function dispatch(target: Target, event: StateEvent): void {
     else deliver(root, [event]);
     return;
   }
+  const removesValue = event.action === "set-delete";
   const events: StateEvent[] = [event];
   for (let i = 1; i < paths.length; i++) {
     // copies of copies: a tree with cycles only, so they cannot pass the limit
     const copy = { ...event, path: paths[i] };
-    if (isObject(event.newValue)) copy.newValue = cloneTree(event.newValue);
-    if (isObject(event.value)) copy.value = cloneTree(event.value);
-    if (event.items !== undefined) copy.items = cloneTree(event.items);
+    if (isObject(event.newValue)) copy.newValue = cloneTree(event.newValue, Named.None);
+    if (isObject(event.value) && !removesValue) copy.value = cloneTree(event.value, Named.All);
+    if (event.items !== undefined) copy.items = cloneTree(event.items, Named.Below);
     if (root.async) {
-      if (isObject(event.oldValue)) copy.oldValue = cloneTree(event.oldValue);
-      if (event.oldValues !== undefined) copy.oldValues = cloneTree(event.oldValues);
+      if (isObject(event.oldValue)) copy.oldValue = cloneTree(event.oldValue, Named.All);
+      if (event.oldValues !== undefined) copy.oldValues = cloneTree(event.oldValues, Named.Below);
+      if (removesValue) copy.value = copy.oldValue;
     }
     events.push(copy);
   }
@@ -454,8 +472,10 @@ export function dispatch(target: Target, event: StateEvent): void {
  * before it returns, and a write made while nothing waits is delivered at
  * once, inside the listener call that made it.
  *
- * An `emit` that throws drops the events of this root not delivered yet; the
- * error reaches the write that was delivering them.
+ * An `emit` that throws does not stop the others: every event in the queue
+ * is delivered once, each for a write that already changed the state, then
+ * the first error reaches the write that was delivering them. A listener
+ * that called that write may catch it and go on.
  */
 export function deliver(root: LocationRoot, events: StateEvent[]): void {
   const emit = root.emit!;
@@ -469,16 +489,20 @@ export function deliver(root: LocationRoot, events: StateEvent[]): void {
   } else {
     for (let i = 0; i < events.length; i++) queue.events.push(events[i]);
   }
-  try {
-    while (queue.next < queue.events.length) emit(queue.events[queue.next++]);
-  } catch (error) {
-    // a listener that called this write may catch the error: its own loop ends too
-    queue.events.length = 0;
-    queue.next = 0;
-    throw error;
-  } finally {
-    if (root.undelivered === queue && queue.next === queue.events.length) root.undelivered = undefined;
+  let failed = false;
+  let failure: unknown;
+  while (queue.next < queue.events.length) {
+    try {
+      emit(queue.events[queue.next++]);
+    } catch (error) {
+      if (!failed) {
+        failed = true;
+        failure = error;
+      }
+    }
   }
+  if (root.undelivered === queue) root.undelivered = undefined;
+  if (failed) throw failure;
 }
 
 /** What `copyPayload` did. */
@@ -507,10 +531,13 @@ export const enum Copied {
  *
  * What the write stores (`newValue`, `value`, `items`) is always copied: it
  * stays in the tree, where later writes change it, and a replica needs it
- * as it was. What the write removes (`oldValue`, `oldValues`) is copied only
- * for an async root (`target.root.async`), whose events wait for a
- * microtask. A synchronous root delivers the event before the write
- * returns, and sends the removed value itself, as 1.0.44 did.
+ * as it was. What the write removes (`oldValue`, `oldValues`, and the
+ * `value` of a `set-delete`) is copied only for an async root
+ * (`target.root.async`), whose events wait for a microtask. A synchronous
+ * root delivers the event before the write returns, and sends the removed
+ * value itself, as 1.0.44 did, so it never refuses a removal. A `newValue`
+ * keeps each array's items only; the other fields keep its named
+ * properties too (see `Named`).
  *
  * A payload that reaches `container` would be copied as `container` is
  * before the write. Then nothing is copied and the result is
@@ -529,35 +556,43 @@ export function copyPayload(
   if (event === undefined) return Copied.Done;
   const removed = target!.root.async;
   const { newValue, oldValue, value, items, oldValues } = event;
+  // a set's deleted member is a removed value (it is the `oldValue` too)
+  const stored = event.action !== "set-delete";
   let fresh = true;
   let newCopy = newValue;
   if (isObject(newValue)) {
     // a store with held items walks only those items, which costs less than
     // finding the copy fresh (see `heldItems`)
-    newCopy = held === undefined ? cloneStored(newValue, container) : cloneTreeUnless(newValue, container);
+    newCopy =
+      held === undefined
+        ? cloneStored(newValue, container, Named.None)
+        : cloneTreeUnless(newValue, container, Named.None);
     if (newCopy === REACHES) return Copied.Reaches;
     fresh = held === undefined && copiedFresh;
   }
   let valueCopy = value;
-  if (isObject(value)) {
-    valueCopy = cloneStored(value, container);
+  if (isObject(value) && stored) {
+    valueCopy = cloneStored(value, container, Named.All);
     if (valueCopy === REACHES) return Copied.Reaches;
     fresh &&= copiedFresh;
   }
   let itemsCopy: unknown = items;
   if (items !== undefined && holdsObject(items)) {
-    itemsCopy = cloneStored(items, container);
+    itemsCopy = cloneStored(items, container, Named.Below);
     if (itemsCopy === REACHES) return Copied.Reaches;
     fresh &&= copiedFresh;
   }
   if (removed) {
-    const oldCopy = isObject(oldValue) ? cloneTreeUnless(oldValue, container) : oldValue;
+    const oldCopy = isObject(oldValue) ? cloneTreeUnless(oldValue, container, Named.All) : oldValue;
     if (oldCopy === REACHES) return Copied.Reaches;
     const oldValuesCopy =
-      oldValues !== undefined && holdsObject(oldValues) ? cloneTreeUnless(oldValues, container) : oldValues;
+      oldValues !== undefined && holdsObject(oldValues)
+        ? cloneTreeUnless(oldValues, container, Named.Below)
+        : oldValues;
     if (oldValuesCopy === REACHES) return Copied.Reaches;
     if (isObject(oldValue)) event.oldValue = oldCopy;
     if (oldValues !== undefined) event.oldValues = oldValuesCopy as any[];
+    if (!stored) valueCopy = event.oldValue;
   }
   if (isObject(newValue)) event.newValue = newCopy;
   if (isObject(value)) event.value = valueCopy;
@@ -587,13 +622,19 @@ export function copyPayloadReaching(event: StateEvent, target: Target, container
 export function copyPayloadAfter(event: StateEvent, target: Target, container: object, after: object): void {
   const { newValue, oldValue, value, items, oldValues } = event;
   const removed = target.root.async;
-  const newCopy = isObject(newValue) ? cloneTreeAfter(newValue, container, after) : newValue;
-  const oldCopy = removed && isObject(oldValue) ? cloneTreeAfter(oldValue, container, after) : oldValue;
-  const valueCopy = isObject(value) ? cloneTreeAfter(value, container, after) : value;
-  const itemsCopy = items !== undefined && holdsObject(items) ? cloneTreeAfter(items, container, after) : items;
+  const stored = event.action !== "set-delete";
+  const newCopy = isObject(newValue) ? cloneTreeAfter(newValue, container, after, Named.None) : newValue;
+  const oldCopy = removed && isObject(oldValue) ? cloneTreeAfter(oldValue, container, after, Named.All) : oldValue;
+  const valueCopy = !isObject(value)
+    ? value
+    : stored
+      ? cloneTreeAfter(value, container, after, Named.All)
+      : oldCopy;
+  const itemsCopy =
+    items !== undefined && holdsObject(items) ? cloneTreeAfter(items, container, after, Named.Below) : items;
   const oldValuesCopy =
     removed && oldValues !== undefined && holdsObject(oldValues)
-      ? cloneTreeAfter(oldValues, container, after)
+      ? cloneTreeAfter(oldValues, container, after, Named.Below)
       : oldValues;
   if (isObject(newValue)) event.newValue = newCopy;
   if (isObject(oldValue)) event.oldValue = oldCopy;
@@ -651,7 +692,8 @@ function enumerableData(object: object, key: PropertyKey): unknown {
  * outside the supported input.
  */
 function refuseAccessors(event: StateEvent, removed: boolean, container: object, after: object): void {
-  const pending: unknown[] = [event.newValue, event.value];
+  const pending: unknown[] = [event.newValue];
+  if (event.action !== "set-delete") pending.push(event.value);
   if (event.items !== undefined) pending.push(event.items);
   if (removed) {
     pending.push(event.oldValue);
@@ -679,14 +721,6 @@ function refuseAccessors(event: StateEvent, removed: boolean, container: object,
       }
     }
   }
-}
-
-/**
- * `copy[key] = value` on an object `shallowCopy` made, as an own enumerable
- * data property: no setter of the copy's prototype runs.
- */
-export function setData(copy: object, key: PropertyKey, value: unknown): void {
-  Object.defineProperty(copy, key, { value, writable: true, enumerable: true, configurable: true });
 }
 
 /** Add a place unless it is already known. Returns true when it was new. */
@@ -736,10 +770,16 @@ function keepPlaces(places: Place[], keep: (place: Place) => boolean): Place[] {
 function markLostLink(node: LocationNode): void {
   if (node.lostLink) return;
   node.lostLink = true;
-  const places = node.places;
-  for (let i = 0; i < places.length; i++) {
-    const parent = places[i].parent;
-    if (parent !== undefined) markLostLink(parent);
+  const pending = [node];
+  while (pending.length > 0) {
+    const places = pending.pop()!.places;
+    for (let i = 0; i < places.length; i++) {
+      const parent = places[i].parent;
+      if (parent !== undefined && !parent.lostLink) {
+        parent.lostLink = true;
+        pending.push(parent);
+      }
+    }
   }
 }
 
@@ -825,7 +865,110 @@ function newWalk(
   };
 }
 
-function adopt(raw: object, walk: Walk): LocationNode | undefined {
+/** What kind of children an `AdoptFrame` visits. */
+const enum ChildKind {
+  Array,
+  Map,
+  Set,
+  Object,
+  /** A date or a typed array: none to visit. */
+  None,
+}
+
+/**
+ * An object the walk is in. Its children are visited one at a time; a child
+ * that needs a walk of its own gets a frame on top, and its place here is
+ * added when that frame ends. The walk keeps this stack itself, so any
+ * depth fits, and it visits and places in the order of a recursive walk.
+ */
+interface AdoptFrame {
+  raw: object;
+  /** The object's node, made when a child has one. */
+  node: LocationNode | undefined;
+  /** The object had no node when the walk met it. */
+  unknown: boolean;
+  /** Its key in the object of the frame below. */
+  key: unknown;
+  kind: ChildKind;
+  /** The next index of an array, or of `keys`. */
+  next: number;
+  keys: string[] | undefined;
+  entries: Iterator<any> | undefined;
+  /** The key of the child visited last. */
+  childKey: unknown;
+}
+
+function adoptFrame(raw: object, node: LocationNode | undefined, unknown: boolean, key: unknown): AdoptFrame {
+  let kind = ChildKind.Object;
+  let keys: string[] | undefined;
+  let entries: Iterator<any> | undefined;
+  if (Array.isArray(raw)) kind = ChildKind.Array;
+  else if (raw instanceof Map) {
+    kind = ChildKind.Map;
+    entries = raw.entries();
+  } else if (raw instanceof Set) {
+    kind = ChildKind.Set;
+    entries = raw.values();
+  } else if (raw instanceof Date || ArrayBuffer.isView(raw)) kind = ChildKind.None;
+  else keys = Object.keys(raw);
+  return { raw, node, unknown, key, kind, next: 0, keys, entries, childKey: undefined };
+}
+
+/** The next child object of the frame's object, with its key in `childKey`; undefined after the last. */
+function nextChild(frame: AdoptFrame): object | undefined {
+  const raw = frame.raw as any;
+  switch (frame.kind) {
+    case ChildKind.Array:
+      while (frame.next < raw.length) {
+        const index = frame.next++;
+        const child = raw[index];
+        if (isObject(child)) {
+          frame.childKey = index;
+          return child;
+        }
+      }
+      return undefined;
+    case ChildKind.Map:
+      for (;;) {
+        const step = frame.entries!.next();
+        if (step.done) return undefined;
+        const child = step.value[1];
+        if (isObject(child)) {
+          frame.childKey = step.value[0];
+          return child;
+        }
+      }
+    case ChildKind.Set:
+      for (;;) {
+        const step = frame.entries!.next();
+        if (step.done) return undefined;
+        if (isObject(step.value)) {
+          frame.childKey = undefined;
+          return step.value;
+        }
+      }
+    case ChildKind.Object: {
+      const keys = frame.keys!;
+      while (frame.next < keys.length) {
+        const key = keys[frame.next++];
+        const child = raw[key];
+        if (isObject(child)) {
+          frame.childKey = key;
+          return child;
+        }
+      }
+      return undefined;
+    }
+    default:
+      return undefined;
+  }
+}
+
+/**
+ * Meet `raw` at `key` of the object of the top frame: returns its node, or
+ * pushes a frame to walk its children (its place is added when that ends).
+ */
+function enterAdopt(raw: object, key: unknown, walk: Walk, frames: AdoptFrame[]): LocationNode | undefined {
   let node = nodes.get(raw);
   if (node !== undefined && !node.lostLink && walk.revisit?.has(raw) !== true) {
     if (attachedBefore(node, walk.former)) return node;
@@ -842,59 +985,47 @@ function adopt(raw: object, walk: Walk): LocationNode | undefined {
   }
   if (node !== undefined) {
     if (node.lostLink) walk.relinked.push(node);
-    return adoptChildren(raw, node, walk);
+    frames.push(adoptFrame(raw, node, false, key));
+    return node;
   }
   if ((raw as any)[ReactiveFlags.SKIP] || (raw as any)[ReactiveFlags.IS_REACTIVE]) return undefined;
   if (walk.aliases?.has(raw)) node = ensureLocationNode(raw);
   if (walk.held?.has(raw)) return node;
-  node = adoptChildren(raw, node, walk);
-  if (node !== undefined && walk.aliases === undefined) (walk.created ??= new Set()).add(raw);
+  frames.push(adoptFrame(raw, node, true, key));
   return node;
 }
 
-/** Walk the children of `raw` (whose node, if any, is `node`); returns its node afterwards. */
-function adoptChildren(raw: object, node: LocationNode | undefined, walk: Walk): LocationNode | undefined {
-  if (Array.isArray(raw)) {
-    for (let i = 0; i < raw.length; i++) {
-      const child = raw[i];
-      if (child !== null && typeof child === "object") node = adoptChild(raw, node, i, child, walk);
-    }
-    return node;
-  }
-  if (raw instanceof Map) {
-    for (const [key, child] of raw) {
-      if (child !== null && typeof child === "object") node = adoptChild(raw, node, key, child, walk);
-    }
-    return node;
-  }
-  if (raw instanceof Set) {
-    for (const child of raw) {
-      if (child !== null && typeof child === "object") node = adoptChild(raw, node, undefined, child, walk);
-    }
-    return node;
-  }
-  if (raw instanceof Date || ArrayBuffer.isView(raw)) return node;
-  for (const key in raw) {
-    if (!Object.prototype.hasOwnProperty.call(raw, key)) continue;
-    const child = (raw as any)[key];
-    if (child !== null && typeof child === "object") node = adoptChild(raw, node, key, child, walk);
-  }
-  return node;
+/** The child at `key` of the frame's object has `childNode`: give it its place there. */
+function placeChild(frame: AdoptFrame, key: unknown, childNode: LocationNode | undefined, walk: Walk): void {
+  if (childNode === undefined) return;
+  frame.node ??= ensureLocationNode(frame.raw);
+  if (addPlace(childNode, frame.node, key)) walk.touched.push(childNode);
 }
 
-/** Adopt `child` at `container[key]`; returns the container's node (made when needed). */
-function adoptChild(
-  container: object,
-  containerNode: LocationNode | undefined,
-  key: unknown,
-  child: object,
-  walk: Walk
-): LocationNode | undefined {
-  const childNode = adopt(child, walk);
-  if (childNode === undefined) return containerNode;
-  containerNode ??= ensureLocationNode(container);
-  if (addPlace(childNode, containerNode, key)) walk.touched.push(childNode);
-  return containerNode;
+/** Walk the frames to the end; returns the node of the bottom frame's object, if it has one. */
+function walkFrames(frames: AdoptFrame[], walk: Walk): LocationNode | undefined {
+  for (;;) {
+    const frame = frames[frames.length - 1];
+    const child = nextChild(frame);
+    if (child !== undefined) {
+      const depth = frames.length;
+      const childNode = enterAdopt(child, frame.childKey, walk, frames);
+      if (frames.length === depth) placeChild(frame, frame.childKey, childNode, walk);
+      continue;
+    }
+    frames.pop();
+    const node = frame.node;
+    if (frame.unknown && node !== undefined && walk.aliases === undefined) (walk.created ??= new Set()).add(frame.raw);
+    if (frames.length === 0) return node;
+    placeChild(frames[frames.length - 1], frame.key, node, walk);
+  }
+}
+
+/** Adopt `raw` and what it holds; returns its node, if it has one. */
+function adopt(raw: object, walk: Walk): LocationNode | undefined {
+  const frames: AdoptFrame[] = [];
+  const node = enterAdopt(raw, undefined, walk, frames);
+  return frames.length === 0 ? node : walkFrames(frames, walk);
 }
 
 /**
@@ -1050,7 +1181,7 @@ export function adoptRoot(node: LocationNode): void {
   const touched: LocationNode[] = [];
   adoptAll(touched, undefined, undefined, (walk) => {
     walk.seen.add(node.raw);
-    adoptChildren(node.raw, node, walk);
+    walkFrames([adoptFrame(node.raw, node, false, undefined)], walk);
   });
   pruneTouched(touched);
 }
@@ -1206,45 +1337,49 @@ function stripIndexes(node: LocationNode, arrayNode: LocationNode, from: number)
  */
 export function evictDeep(value: any, parent?: LocationNode): void {
   if (value == null || typeof value !== "object") return;
-  value = toRaw(value);
-  const proxy = globalSeen.get(value);
-  if (proxy === undefined) return; // not proxied, skip entire subtree
+  // proxied objects to evict, each after the node of the container it was found in
+  const pending: unknown[] = [];
+  pushProxied(value, parent, pending);
+  while (pending.length > 0) {
+    const raw: any = pending.pop();
+    const container = pending.pop() as LocationNode | undefined;
+    const proxy = globalSeen.get(raw);
+    if (proxy === undefined) continue; // evicted at another place meanwhile
 
-  const node = nodes.get(value);
-  if (node !== undefined) {
-    const onlyUnderParent =
-      parent !== undefined &&
-      node.root === undefined &&
-      node.places.length === 1 &&
-      node.places[0].parentId === parent.id;
-    if (!onlyUnderParent && isAttached(node)) return;
-    node.proxy = undefined;
-    node.evicted = new WeakRef(proxy);
-  }
+    const node = nodes.get(raw);
+    if (node !== undefined) {
+      const onlyUnderParent =
+        container !== undefined &&
+        node.root === undefined &&
+        node.places.length === 1 &&
+        node.places[0].parentId === container.id;
+      if (!onlyUnderParent && isAttached(node)) continue;
+      node.proxy = undefined;
+      node.evicted = new WeakRef(proxy);
+    }
 
-  globalSeen.delete(value);
-  wrapperCache.delete(value);
-  proxyStats.staleEvicted++;
+    globalSeen.delete(raw);
+    wrapperCache.delete(raw);
+    proxyStats.staleEvicted++;
 
-  if (Array.isArray(value)) {
-    for (let i = 0; i < value.length; i++) {
-      if (value[i] != null && typeof value[i] === "object") evictDeep(value[i], node);
-    }
-  } else if (value instanceof Map) {
-    for (const child of value.values()) {
-      if (child != null && typeof child === "object") evictDeep(child, node);
-    }
-  } else if (value instanceof Set) {
-    for (const child of value) {
-      if (child != null && typeof child === "object") evictDeep(child, node);
-    }
-  } else {
-    const keys = Object.keys(value);
-    for (let i = 0; i < keys.length; i++) {
-      const child = value[keys[i]];
-      if (child != null && typeof child === "object") evictDeep(child, node);
+    if (Array.isArray(raw)) {
+      for (let i = 0; i < raw.length; i++) pushProxied(raw[i], node, pending);
+    } else if (raw instanceof Map) {
+      for (const child of raw.values()) pushProxied(child, node, pending);
+    } else if (raw instanceof Set) {
+      for (const child of raw) pushProxied(child, node, pending);
+    } else {
+      const keys = Object.keys(raw);
+      for (let i = 0; i < keys.length; i++) pushProxied(raw[keys[i]], node, pending);
     }
   }
+}
+
+/** Add `value` to `pending` with its container's node when it is a proxied object; a subtree without a proxy is skipped. */
+function pushProxied(value: unknown, container: LocationNode | undefined, pending: unknown[]): void {
+  if (value === null || typeof value !== "object") return;
+  const raw = toRaw(value);
+  if (globalSeen.get(raw) !== undefined) pending.push(container, raw);
 }
 
 /** The proxy an evicted object had, if it is still alive; it goes back in the caches. */

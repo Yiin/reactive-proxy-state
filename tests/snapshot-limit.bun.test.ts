@@ -163,17 +163,22 @@ describe("a refused write changes nothing", () => {
     expect(sync.state.map.size).toBe(1);
     expect(sync.state.set.size).toBe(1);
 
-    // set-delete names the member it removes in `value`, which is always copied
+    // set-delete names the member it removes in `value` and `oldValue`: a
+    // synchronous root sends it as it is, as 1.0.44 did, and removes it
     const big = dag(17);
     (toRaw(sync.state.set) as Set<any>).add(big);
-    expect(() => sync.state.set.delete(big)).toThrow(SnapshotLimitError);
-    expect((toRaw(sync.state.set) as Set<any>).has(big)).toBe(true);
-    expect(sync.events.length).toBe(0);
+    expect(sync.state.set.delete(big)).toBe(true);
+    expect((toRaw(sync.state.set) as Set<any>).has(big)).toBe(false);
+    expect(sync.paths()).toEqual(["set-delete:set"]);
 
-    const later = guarded({ map: new Map<string, any>([["a", { n: 1 }]]) }, true);
+    // an async root copies what it removes, so there both are refused
+    const later = guarded({ map: new Map<string, any>([["a", { n: 1 }]]), set: new Set<any>([1]) }, true);
     (toRaw(later.state.map) as Map<string, any>).set("big", big);
+    (toRaw(later.state.set) as Set<any>).add(big);
     expect(() => later.state.map.delete("big")).toThrow(SnapshotLimitError);
     expect((toRaw(later.state.map) as Map<string, any>).get("big")).toBe(big);
+    expect(() => later.state.set.delete(big)).toThrow(SnapshotLimitError);
+    expect((toRaw(later.state.set) as Set<any>).has(big)).toBe(true);
   });
 
   test("a payload that reaches back into the written container is measured after the write", () => {
@@ -421,6 +426,7 @@ describe("a refusal needs no rollback", () => {
     { name: "set add", make: () => new Set<any>([1]), write: (state, raw) => state.add(reaching(raw)) },
     {
       name: "set delete",
+      removes: true,
       make: () => new Set<any>([1]),
       setup: (raw) => raw.add(reaching(raw)),
       write: (state, raw) => state.delete([...raw].find((member: any) => typeof member === "object")),
