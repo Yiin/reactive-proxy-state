@@ -2693,8 +2693,9 @@ function countCopy() {
       checkSharedCopies(cloneTop);
   }
 }
-function noteFresh(identity) {
-  if (identity === cloneTop || locationNodes.get(identity) !== undefined) {
+function noteFresh(value) {
+  const identity = toRaw(value);
+  if (identity !== value || identity === cloneTop || locationNodes.get(identity) !== undefined) {
     cloneFresh = false;
     return;
   }
@@ -2876,7 +2877,7 @@ function cloneValue(value, depth, named) {
   if (value === null || typeof value !== "object")
     return value;
   if (cloneFresh)
-    noteFresh(toRaw(value));
+    noteFresh(value);
   return cloneEntry(value, depth, named);
 }
 function keepsNamed(named, depth) {
@@ -2939,7 +2940,7 @@ function cloneEntry(value, depth, named) {
           enterPath(identity, copy, depth);
         }
         if (cloneFresh)
-          noteFresh(toRaw(child));
+          noteFresh(child);
         child = cloneEntry(child, below, named);
       }
       if (key === "__proto__")
@@ -2964,7 +2965,7 @@ function cloneEntry(value, depth, named) {
         enterPath(identity, copy, depth);
       }
       if (cloneFresh)
-        noteFresh(toRaw(child));
+        noteFresh(child);
       copy[i] = cloneEntry(child, below, named);
     }
     if (keepsNamed(named, depth))
@@ -3031,7 +3032,7 @@ function fillObject(value, identity, copy, depth, named) {
         enterPath(identity, copy, depth);
       }
       if (cloneFresh)
-        noteFresh(toRaw(child));
+        noteFresh(child);
       child = cloneEntry(child, below, named);
     }
     if (key === "__proto__")
@@ -3073,7 +3074,7 @@ function fillArray(value, identity, copy, depth, named) {
       enterPath(identity, copy, depth);
     }
     if (cloneFresh)
-      noteFresh(toRaw(child));
+      noteFresh(child);
     copy[i] = cloneEntry(child, below, named);
   }
   return keepsNamed(named, depth) ? fillNamed(value, identity, copy, depth, named, pushed) : pushed;
@@ -3099,7 +3100,7 @@ function fillMap(value, identity, copy, depth, named) {
   Map.prototype.forEach.call(toRaw(value), (entry, key) => {
     const keyCopy = cloneValue(key, below, named);
     if (key !== null && typeof key === "object")
-      keepCollectionIdentity(key, keyCopy);
+      nameMemberCopy(key, keyCopy);
     copy.set(keyCopy, cloneValue(entry, below, named));
   });
   fillCollectionProperties(toRaw(value), copy, below, named);
@@ -3111,7 +3112,7 @@ function fillSet(value, identity, copy, depth, named) {
   Set.prototype.forEach.call(toRaw(value), (entry) => {
     const entryCopy = cloneValue(entry, below, named);
     if (entry !== null && typeof entry === "object")
-      keepCollectionIdentity(entry, entryCopy);
+      nameMemberCopy(entry, entryCopy);
     copy.add(entryCopy);
   });
   fillCollectionProperties(toRaw(value), copy, below, named);
@@ -3128,34 +3129,157 @@ function fillCollectionProperties(value, copy, depth, named) {
       setData(copy, symbols[i], cloneValue(value[symbols[i]], depth, named));
   }
 }
-var collectionIdentityKey = Symbol.for("@yiin/reactive-proxy-state.collection-identities");
-var collectionIdentities = Reflect.get(globalThis, collectionIdentityKey) ?? new WeakMap;
+var collectionIdentityKey = Symbol.for("@yiin/reactive-proxy-state.collection-identities.v2");
+var collectionIdentities = Reflect.get(globalThis, collectionIdentityKey) ?? { members: new WeakMap, copies: new WeakMap, indexes: new WeakMap };
 if (!Reflect.has(globalThis, collectionIdentityKey)) {
   Object.defineProperty(globalThis, collectionIdentityKey, { value: collectionIdentities });
 }
-function keepCollectionIdentity(source, copy) {
+function memberToken(member) {
+  const raw = toRaw(member);
+  let token = collectionIdentities.members.get(raw);
+  if (token === undefined) {
+    token = {};
+    collectionIdentities.members.set(raw, token);
+  }
+  return token;
+}
+function nameMemberCopy(source, copy) {
   if (source === null || typeof source !== "object" || copy === null || typeof copy !== "object")
     return;
-  const raw = toRaw(source);
-  let identity = collectionIdentities.get(raw);
-  if (identity === undefined) {
-    identity = {};
-    collectionIdentities.set(raw, identity);
+  if (copyingPayload) {
+    nameCopyOfCopy(source, copy);
+    return;
   }
-  collectionIdentities.set(copy, identity);
+  const token = memberToken(source);
+  if (copy !== source)
+    collectionIdentities.copies.set(copy, token);
 }
-function collectionMember(collection, member) {
-  collection = toRaw(collection);
-  if (member === null || typeof member !== "object" || collection.has(member))
-    return member;
-  const identity = collectionIdentities.get(toRaw(member));
-  if (identity === undefined)
-    return member;
-  for (const candidate of collection.keys()) {
-    if (candidate !== null && typeof candidate === "object" && collectionIdentities.get(toRaw(candidate)) === identity)
-      return candidate;
+function nameCopyOfCopy(source, copy) {
+  if (source === null || typeof source !== "object" || copy === null || typeof copy !== "object")
+    return;
+  const token = collectionIdentities.copies.get(source) ?? collectionIdentities.members.get(source);
+  if (token !== undefined)
+    collectionIdentities.copies.set(copy, token);
+}
+var copyingPayload = false;
+function copyingPayloads(run) {
+  const outer = copyingPayload;
+  copyingPayload = true;
+  try {
+    return run();
+  } finally {
+    copyingPayload = outer;
   }
-  return member;
+}
+function eventToken(member) {
+  const raw = toRaw(member);
+  return collectionIdentities.members.get(raw) ?? collectionIdentities.copies.get(raw);
+}
+function heldToken(member) {
+  const raw = toRaw(member);
+  return collectionIdentities.copies.get(raw) ?? collectionIdentities.members.get(raw);
+}
+function replicaIndex(collection) {
+  let index = collectionIdentities.indexes.get(collection);
+  if (index === undefined || index.size !== collection.size) {
+    const byToken = new Map;
+    const members = collection instanceof Map ? Map.prototype.keys.call(collection) : Set.prototype.values.call(collection);
+    for (const member of members) {
+      if (member === null || typeof member !== "object")
+        continue;
+      const token = heldToken(member);
+      if (token !== undefined && !byToken.has(token))
+        byToken.set(token, member);
+    }
+    index = { byToken, size: collection.size };
+    collectionIdentities.indexes.set(collection, index);
+  }
+  return index;
+}
+function keepIndexSize(collection) {
+  const index = collectionIdentities.indexes.get(collection);
+  if (index !== undefined)
+    index.size = collection.size;
+}
+function heldMember(raw, index, token) {
+  const held = index.byToken.get(token);
+  return held !== undefined && raw.has(held) ? held : undefined;
+}
+function newMember(raw, member, token) {
+  if (!raw.has(member))
+    return member;
+  const copy = cloneTree(member, 2 /* All */);
+  collectionIdentities.copies.set(copy, token);
+  return copy;
+}
+function objectToken(value) {
+  return value !== null && typeof value === "object" ? eventToken(value) : undefined;
+}
+function replicaAdd(set, value) {
+  const raw = toRaw(set);
+  const token = objectToken(value);
+  if (token === undefined) {
+    set.add(value);
+    keepIndexSize(raw);
+    return;
+  }
+  const index = replicaIndex(raw);
+  if (heldMember(raw, index, token) !== undefined)
+    return;
+  const member = newMember(raw, toRaw(value), token);
+  set.add(member);
+  index.byToken.set(token, member);
+  index.size = raw.size;
+}
+function replicaDelete(set, value) {
+  const raw = toRaw(set);
+  const token = objectToken(value);
+  if (token === undefined) {
+    set.delete(value);
+    keepIndexSize(raw);
+    return;
+  }
+  const index = replicaIndex(raw);
+  const held = heldMember(raw, index, token);
+  set.delete(held === undefined ? value : held);
+  index.byToken.delete(token);
+  index.size = raw.size;
+}
+function replicaMapSet(map, key, value) {
+  const raw = toRaw(map);
+  const token = objectToken(key);
+  if (token === undefined) {
+    map.set(key, value);
+    keepIndexSize(raw);
+    return;
+  }
+  const index = replicaIndex(raw);
+  const held = heldMember(raw, index, token);
+  if (held !== undefined) {
+    map.set(held, value);
+    return;
+  }
+  const member = newMember(raw, toRaw(key), token);
+  map.set(member, value);
+  index.byToken.set(token, member);
+  index.size = raw.size;
+}
+function replicaMapDelete(map, key) {
+  const raw = toRaw(map);
+  const token = objectToken(key);
+  if (token === undefined) {
+    map.delete(key);
+    keepIndexSize(raw);
+    return;
+  }
+  const index = replicaIndex(raw);
+  const held = heldMember(raw, index, token);
+  map.delete(held === undefined ? key : held);
+  index.byToken.delete(token);
+  index.size = raw.size;
+}
+function forgetReplicaIndex(collection) {
+  collectionIdentities.indexes.delete(toRaw(collection));
 }
 function deepClone(value, seen = new WeakMap) {
   if (value === null || typeof value !== "object") {
@@ -3317,14 +3441,14 @@ var actionHandlers = {
       console.warn(`expected map at path ${event.path.join(".")}`);
       return;
     }
-    targetMap.set(collectionMember(targetMap, event.key), event.newValue);
+    replicaMapSet(targetMap, event.key, event.newValue);
   },
   "map-delete": function(targetMap, _parentKeyIgnored, event) {
     if (!(targetMap instanceof Map)) {
       console.warn(`expected map at path ${event.path.join(".")}`);
       return;
     }
-    targetMap.delete(collectionMember(targetMap, event.key));
+    replicaMapDelete(targetMap, event.key);
   },
   "map-clear": function(targetMap, _parentKeyIgnored, event) {
     if (!(targetMap instanceof Map)) {
@@ -3332,20 +3456,21 @@ var actionHandlers = {
       return;
     }
     targetMap.clear();
+    forgetReplicaIndex(targetMap);
   },
   "set-add": function(targetSet, _keyIgnored, event) {
     if (!(targetSet instanceof Set)) {
       console.warn(`expected set at path ${event.path.join(".")}`);
       return;
     }
-    targetSet.add(collectionMember(targetSet, event.value));
+    replicaAdd(targetSet, event.value);
   },
   "set-delete": function(targetSet, _keyIgnored, event) {
     if (!(targetSet instanceof Set)) {
       console.warn(`expected set at path ${event.path.join(".")}`);
       return;
     }
-    targetSet.delete(collectionMember(targetSet, event.value));
+    replicaDelete(targetSet, event.value);
   },
   "set-clear": function(targetSet, _keyIgnored, event) {
     if (!(targetSet instanceof Set)) {
@@ -3353,6 +3478,7 @@ var actionHandlers = {
       return;
     }
     targetSet.clear();
+    forgetReplicaIndex(targetSet);
   },
   replace: function(target, _keyIgnored, event) {
     const newValue = event.newValue;
@@ -3365,12 +3491,14 @@ var actionHandlers = {
     } else if (target instanceof Map && newValue instanceof Map) {
       const newValueEntries = [...newValue.entries()];
       target.clear();
+      forgetReplicaIndex(target);
       for (const [key, value] of newValueEntries) {
         target.set(key, value);
       }
     } else if (target instanceof Set && newValue instanceof Set) {
       const newValueEntries = [...newValue.values()];
       target.clear();
+      forgetReplicaIndex(target);
       for (const value of newValueEntries) {
         target.add(value);
       }
@@ -3469,6 +3597,7 @@ function dropped(place) {
   if (parent !== undefined)
     parent.childPlaces--;
 }
+var WIDE = 8;
 var nodes = locationNodes;
 var nodeCount = 0;
 var FAST_CHAIN_LIMIT = 256;
@@ -3494,7 +3623,11 @@ function ensureLocationNode(raw) {
       relinkedPlaces: 0,
       lostLink: false,
       dataOnly: undefined,
-      childPlaces: 0
+      childPlaces: 0,
+      walk: 0,
+      touched: 0,
+      pruned: 0,
+      index: undefined
     };
     nodes.set(raw, node);
   }
@@ -3569,6 +3702,7 @@ function chain(node, tail) {
     if (!holdsIn(parent, place.key, current.raw)) {
       dropped(place);
       places.length = 0;
+      current.index = undefined;
       return null;
     }
     (reversed ??= []).push(segment(parent, place.key, current.raw));
@@ -3678,20 +3812,32 @@ function attachedBefore(node, former) {
       return false;
     current = parent;
   }
-  const pending = [current];
-  const visited = new Set(pending);
-  while (pending.length > 0) {
-    const next = pending.pop();
-    if (next.root !== undefined || next === former)
-      return true;
-    const places = next.places;
-    for (let i = 0;i < places.length; i++) {
-      const parent = places[i].parent;
-      if (!holdsIn(parent, places[i].key, next.raw) || visited.has(parent))
-        continue;
-      visited.add(parent);
-      pending.push(parent);
+  if (current.root !== undefined || current === former)
+    return true;
+  const visited = new Set;
+  visited.add(current);
+  const stack = [current];
+  const next = [0];
+  while (stack.length > 0) {
+    const top = stack.length - 1;
+    const at = stack[top];
+    const places = at.places;
+    if (next[top] >= places.length) {
+      stack.pop();
+      next.pop();
+      continue;
     }
+    const place = places[next[top]++];
+    const parent = place.parent;
+    if (!holdsIn(parent, place.key, at.raw))
+      continue;
+    if (parent.root !== undefined || parent === former)
+      return true;
+    if (visited.has(parent))
+      continue;
+    visited.add(parent);
+    stack.push(parent);
+    next.push(0);
   }
   return false;
 }
@@ -3704,6 +3850,9 @@ function dispatch(target, event) {
       deliver(root, [event]);
     return;
   }
+  deliver(root, copyingPayloads(() => copiesPerPath(event, paths, root.async)));
+}
+function copiesPerPath(event, paths, async) {
   const removesValue = event.action === "set-delete";
   const events = [event];
   for (let i = 1;i < paths.length; i++) {
@@ -3712,23 +3861,23 @@ function dispatch(target, event) {
       copy.newValue = cloneTree(event.newValue, event.action === "replace" ? 1 /* Below */ : 0 /* None */);
     if (isObject2(event.value) && !removesValue) {
       copy.value = cloneTree(event.value, 2 /* All */);
-      keepCollectionIdentity(event.value, copy.value);
+      nameCopyOfCopy(event.value, copy.value);
     }
     if (event.items !== undefined)
       copy.items = cloneTree(event.items, 1 /* Below */);
-    if (root.async) {
+    if (async) {
       if (isObject2(event.oldValue))
         copy.oldValue = cloneTree(event.oldValue, 2 /* All */);
       if (event.oldValues !== undefined)
         copy.oldValues = cloneTree(event.oldValues, 1 /* Below */);
       if (removesValue) {
         copy.value = copy.oldValue;
-        keepCollectionIdentity(event.value, copy.value);
+        nameCopyOfCopy(event.value, copy.value);
       }
     }
     events.push(copy);
   }
-  deliver(root, events);
+  return events;
 }
 function deliver(root, events) {
   const emit = root.emit;
@@ -3805,7 +3954,7 @@ function copyPayload(event, target, container, held) {
   if (isObject2(newValue))
     event.newValue = newCopy;
   if (isObject2(value)) {
-    keepCollectionIdentity(value, valueCopy);
+    nameMemberCopy(value, valueCopy);
     event.value = valueCopy;
   }
   if (items !== undefined)
@@ -3830,7 +3979,7 @@ function copyPayloadAfter(event, target, container, after) {
   if (isObject2(oldValue))
     event.oldValue = oldCopy;
   if (isObject2(value)) {
-    keepCollectionIdentity(value, valueCopy);
+    nameMemberCopy(value, valueCopy);
     event.value = valueCopy;
   }
   if (items !== undefined)
@@ -3905,29 +4054,87 @@ function refuseAccessors(event, removed, container, after) {
   }
 }
 function addPlace(node, parent, key) {
-  const places = node.places;
-  for (let i = 0;i < places.length; i++) {
-    if (samePlace(places[i], parent, key))
-      return false;
-  }
-  places.push(new Place(parent, key));
+  if (findPlace(node, parent, key) !== undefined)
+    return false;
+  pushPlace(node, new Place(parent, key));
   return true;
 }
+function findPlace(node, parent, key) {
+  const places = node.places;
+  if (places.length <= WIDE) {
+    for (let i = 0;i < places.length; i++) {
+      if (samePlace(places[i], parent, key))
+        return places[i];
+    }
+    return;
+  }
+  let index = node.index;
+  if (index === undefined || index.places !== places || index.length !== places.length) {
+    index = node.index = { places, length: places.length, byParent: new Map };
+    for (let i = 0;i < places.length; i++)
+      indexPlace(index.byParent, places[i]);
+  }
+  const entry = index.byParent.get(parent.id);
+  if (entry === undefined)
+    return;
+  if (entry instanceof Place)
+    return parent.kind === 2 /* Set */ || entry.key === key ? entry : undefined;
+  return entry.get(key);
+}
+function indexPlace(byParent, place) {
+  const entry = byParent.get(place.parentId);
+  if (entry === undefined)
+    byParent.set(place.parentId, place);
+  else if (entry instanceof Place) {
+    if (entry.key !== place.key)
+      byParent.set(place.parentId, new Map([[entry.key, entry], [place.key, place]]));
+  } else if (!entry.has(place.key))
+    entry.set(place.key, place);
+}
+function pushPlace(node, place) {
+  const places = node.places;
+  places.push(place);
+  const index = node.index;
+  if (index !== undefined && index.places === places && index.length === places.length - 1) {
+    index.length++;
+    indexPlace(index.byParent, place);
+  }
+}
 function prunePlaces(node) {
+  const count = node.places.length;
+  if (count > WIDE && count < 2 * node.pruned)
+    return;
   let places = keepPlaces(node.places, (place) => holds(place, node.raw));
   if (places.length > 1) {
-    const live = places.filter((place) => isAttached(place.parent));
-    if (live.length > 0 && live.length < places.length) {
+    const live = new Array(places.length);
+    let attached = 0;
+    let parent;
+    let parentAttached = false;
+    for (let i = 0;i < places.length; i++) {
+      const next = places[i].parent;
+      if (next !== parent) {
+        parent = next;
+        parentAttached = isAttached(next);
+      }
+      live[i] = parentAttached;
+      if (parentAttached)
+        attached++;
+    }
+    if (attached > 0 && attached < places.length) {
+      const kept = [];
       for (let i = 0;i < places.length; i++) {
-        if (!live.includes(places[i])) {
+        if (live[i])
+          kept.push(places[i]);
+        else {
           markLostLink(places[i].parent);
           dropped(places[i]);
         }
       }
-      places = live;
+      places = kept;
     }
   }
   node.places = places;
+  node.pruned = places.length;
 }
 function keepPlaces(places, keep) {
   const kept = [];
@@ -3964,19 +4171,46 @@ function notePlace(node, parent, key) {
 }
 function detachPlace(value, parent, key) {
   const node = nodes.get(value);
-  if (node === undefined)
-    return;
-  const places = node.places;
-  for (let i = 0;i < places.length; i++) {
-    if (samePlace(places[i], parent, key)) {
-      dropped(places[i]);
-      places.splice(i, 1);
-      return;
-    }
-  }
+  if (node !== undefined)
+    removePlace(node, parent, key);
 }
-function newWalk(touched, former, held, first) {
+function removePlace(node, parent, key) {
+  const places = node.places;
+  if (places.length <= WIDE) {
+    for (let i = 0;i < places.length; i++) {
+      if (samePlace(places[i], parent, key)) {
+        dropped(places[i]);
+        places.splice(i, 1);
+        node.index = undefined;
+        return true;
+      }
+    }
+    return false;
+  }
+  const place = findPlace(node, parent, key);
+  if (place === undefined)
+    return false;
+  const at = places.indexOf(place);
+  if (at < 0) {
+    node.index = undefined;
+    return false;
+  }
+  dropped(place);
+  places.splice(at, 1);
+  const index = node.index;
+  index.length--;
+  const entry = index.byParent.get(place.parentId);
+  if (entry === place)
+    index.byParent.delete(place.parentId);
+  else if (entry instanceof Map && entry.get(place.key) === place)
+    entry.delete(place.key);
+  return true;
+}
+function newWalk(touched, store, former, held, first) {
   return {
+    id: ++stamps,
+    store,
+    firstId: nodeCount + 1,
     touched,
     seen: new Set,
     repeated: undefined,
@@ -4004,7 +4238,7 @@ function adoptFrame(raw, node, unknown, key) {
     kind = 4 /* None */;
   else
     keys = Object.keys(raw);
-  return { raw, node, unknown, key, kind, next: 0, keys, entries, childKey: undefined };
+  return { raw, node, unknown, key, kind, next: 0, keys, entries, childKey: undefined, swaps: undefined };
 }
 function nextChild(frame) {
   const raw = frame.raw;
@@ -4058,42 +4292,93 @@ function nextChild(frame) {
 }
 function enterAdopt(raw, key, walk, frames) {
   let node = nodes.get(raw);
-  if (node !== undefined && !node.lostLink && walk.revisit?.has(raw) !== true) {
-    if (attachedBefore(node, walk.former))
-      return node;
-    if (walk.aliases === undefined)
-      (walk.created ??= new Set).add(raw);
-  }
-  const seen = walk.seen;
-  const size = seen.size;
-  seen.add(raw);
-  if (seen.size === size) {
-    if (node === undefined)
-      (walk.repeated ??= new Set).add(raw);
-    return node;
-  }
   if (node !== undefined) {
+    if (node.walk === walk.id)
+      return node;
+    node.walk = walk.id;
+    if (!node.lostLink && walk.revisit?.has(raw) !== true) {
+      if (attachedBefore(node, walk.former))
+        return node;
+      if (walk.aliases === undefined)
+        (walk.created ??= new Set).add(raw);
+    }
     if (node.lostLink)
       walk.relinked.push(node);
     frames.push(adoptFrame(raw, node, false, key));
     return node;
   }
-  if (raw["__v_skip" /* SKIP */] || raw["__v_isReactive" /* IS_REACTIVE */])
+  if (raw["__v_skip" /* SKIP */])
     return;
+  if (raw["__v_isReactive" /* IS_REACTIVE */]) {
+    const target = toRaw(raw);
+    if (frames.length > 0)
+      storeRaw(frames[frames.length - 1], key, raw, target);
+    return enterAdopt(target, key, walk, frames);
+  }
+  const seen = walk.seen;
+  const size = seen.size;
+  seen.add(raw);
+  if (seen.size === size) {
+    (walk.repeated ??= new Set).add(raw);
+    return;
+  }
   if (walk.aliases?.has(raw))
-    node = ensureLocationNode(raw);
+    node = walkNode(raw, walk);
   if (walk.held?.has(raw))
     return node;
   frames.push(adoptFrame(raw, node, true, key));
   return node;
 }
+function walkNode(raw, walk) {
+  const node = ensureLocationNode(raw);
+  node.walk = walk.id;
+  return node;
+}
+function storeRaw(frame, key, proxy, target) {
+  const container = frame.raw;
+  switch (frame.kind) {
+    case 1 /* Map */:
+      Map.prototype.set.call(container, key, target);
+      return;
+    case 2 /* Set */:
+      (frame.swaps ??= new Map).set(proxy, target);
+      return;
+    default: {
+      const descriptor = Reflect.getOwnPropertyDescriptor(container, key);
+      if (descriptor !== undefined && descriptor.value === proxy)
+        Reflect.set(container, key, target);
+    }
+  }
+}
+function swapMembers(set, swaps) {
+  const members = Array.from(Set.prototype.values.call(set));
+  Set.prototype.clear.call(set);
+  for (let i = 0;i < members.length; i++) {
+    const member = members[i];
+    Set.prototype.add.call(set, isObject2(member) && swaps.get(member) || member);
+  }
+}
 function placeChild(frame, key, childNode, walk) {
   if (childNode === undefined)
     return;
-  frame.node ??= ensureLocationNode(frame.raw);
-  if (addPlace(childNode, frame.node, key))
-    walk.touched.push(childNode);
+  const parent = frame.node ??= walkNode(frame.raw, walk);
+  if (parent.id < walk.firstId && childNode.id < walk.firstId) {
+    if (walk.aliases !== undefined && !walk.aliases.has(childNode.raw))
+      return;
+    if (!addPlace(childNode, parent, key))
+      return;
+  } else {
+    pushPlace(childNode, new Place(parent, key));
+  }
+  touch(childNode, walk.store, walk.touched);
 }
+function touch(node, store, touched) {
+  if (node.touched === store)
+    return;
+  node.touched = store;
+  touched.push(node);
+}
+var stamps = 0;
 function walkFrames(frames, walk) {
   for (;; ) {
     const frame = frames[frames.length - 1];
@@ -4106,6 +4391,8 @@ function walkFrames(frames, walk) {
       continue;
     }
     frames.pop();
+    if (frame.swaps !== undefined)
+      swapMembers(frame.raw, frame.swaps);
     const node = frame.node;
     if (frame.unknown && node !== undefined && walk.aliases === undefined)
       (walk.created ??= new Set).add(frame.raw);
@@ -4119,12 +4406,12 @@ function adopt(raw, walk) {
   const node = enterAdopt(raw, undefined, walk, frames);
   return frames.length === 0 ? node : walkFrames(frames, walk);
 }
-function adoptAll(touched, former, held, visit) {
-  let walk = newWalk(touched, former, held);
+function adoptAll(touched, store, former, held, visit) {
+  let walk = newWalk(touched, store, former, held);
   visit(walk);
   if (walk.repeated !== undefined) {
     const first = walk;
-    walk = newWalk(touched, former, held, first);
+    walk = newWalk(touched, store, former, held, first);
     visit(walk);
     for (let i = 0;i < first.relinked.length; i++)
       first.relinked[i].lostLink = false;
@@ -4225,17 +4512,18 @@ function attachValue(value, parent, key, fresh, replaced, held) {
   if (existing === undefined && !hasObjectChild(value))
     return;
   const touched = [];
-  adoptAll(touched, former, held, (walk) => {
+  const store = ++stamps;
+  adoptAll(touched, store, former, held, (walk) => {
     const node = adopt(value, walk);
     if (node !== undefined && addPlace(node, parent, key))
-      touched.push(node);
+      touch(node, store, touched);
   });
   pruneTouched(touched);
 }
 function adoptRoot(node) {
   const touched = [];
-  adoptAll(touched, undefined, undefined, (walk) => {
-    walk.seen.add(node.raw);
+  adoptAll(touched, ++stamps, undefined, undefined, (walk) => {
+    node.walk = walk.id;
     walkFrames([adoptFrame(node.raw, node, false, undefined)], walk);
   });
   pruneTouched(touched);
@@ -4250,8 +4538,9 @@ function relinkReorder(arrayNode, array, removed, inserted) {
 }
 function relink(arrayNode, array, from, removed, inserted, findAliases) {
   const touched = [];
+  const store = ++stamps;
   if (inserted !== undefined && insertedNeedWalk(inserted)) {
-    adoptAll(touched, undefined, undefined, (walk) => {
+    adoptAll(touched, store, undefined, undefined, (walk) => {
       for (let i = 0;i < inserted.length; i++) {
         const value = inserted[i];
         if (isObject2(value))
@@ -4299,6 +4588,7 @@ function relink(arrayNode, array, from, removed, inserted, findAliases) {
       const places = node.places;
       if (places.length === 1 && places[0].parentId === arrayNode.id && typeof places[0].key === "number" && places[0].key >= from) {
         places[0].key = i;
+        node.index = undefined;
         node.relinkedPlaces = 0;
         left--;
         continue;
@@ -4311,7 +4601,7 @@ function relink(arrayNode, array, from, removed, inserted, findAliases) {
     }
     node.places.push(new Place(arrayNode, i));
     if (node.places.length > 1)
-      touched.push(node);
+      touch(node, store, touched);
   }
   pruneTouched(touched);
 }
@@ -4337,6 +4627,8 @@ function stripIndexes(node, arrayNode, from) {
       count++;
     }
   }
+  if (count > 0)
+    node.index = undefined;
   return count;
 }
 function evictDeep(value, parent) {
@@ -4345,18 +4637,24 @@ function evictDeep(value, parent) {
   const top = toRaw(value);
   if (globalSeen.get(top) === undefined)
     return;
-  const pending = [parent, top];
+  const pending = [parent, undefined, top];
   while (pending.length > 0) {
     const raw = pending.pop();
+    const key = pending.pop();
     const container = pending.pop();
     const proxy = globalSeen.get(raw);
     if (proxy === undefined)
       continue;
     const node = nodes.get(raw);
     if (node !== undefined) {
-      const onlyUnderParent = container !== undefined && node.root === undefined && node.places.length === 1 && node.places[0].parentId === container.id;
-      if (!onlyUnderParent && isAttached(node))
-        continue;
+      const places = node.places;
+      const onlyUnderParent = container !== undefined && node.root === undefined && places.length === 1 && places[0].parentId === container.id;
+      if (!onlyUnderParent) {
+        if (container !== undefined && places.length > 1 && removePlace(node, container, key))
+          markLostLink(container);
+        if (isAttached(node))
+          continue;
+      }
       node.proxy = undefined;
       node.evicted = new WeakRef(proxy);
     }
@@ -4365,26 +4663,25 @@ function evictDeep(value, parent) {
     proxyStats.staleEvicted++;
     if (Array.isArray(raw)) {
       for (let i = 0;i < raw.length; i++)
-        pushProxied(raw[i], node, pending);
+        pushProxied(raw[i], node, i, pending);
     } else if (raw instanceof Map) {
-      for (const child of Map.prototype.values.call(raw))
-        pushProxied(child, node, pending);
+      Map.prototype.forEach.call(raw, (child, key2) => pushProxied(child, node, key2, pending));
     } else if (raw instanceof Set) {
       for (const child of Set.prototype.values.call(raw))
-        pushProxied(child, node, pending);
+        pushProxied(child, node, undefined, pending);
     } else {
       const keys = Object.keys(raw);
       for (let i = 0;i < keys.length; i++)
-        pushProxied(raw[keys[i]], node, pending);
+        pushProxied(raw[keys[i]], node, keys[i], pending);
     }
   }
 }
-function pushProxied(value, container, pending) {
+function pushProxied(value, container, key, pending) {
   if (value === null || typeof value !== "object")
     return;
   const raw = toRaw(value);
   if (globalSeen.get(raw) !== undefined)
-    pending.push(container, raw);
+    pending.push(container, key, raw);
 }
 function restoreEvicted(node) {
   const proxy = node.evicted?.deref();
@@ -5117,6 +5414,8 @@ function wrapMap(map, node) {
             newValue: value2
           };
           const held = located && heldItems(value2, oldValue);
+          if (event !== undefined && isObject4(key))
+            memberToken(key);
           const copied = copyPayload(event, located, target, held);
           if (copied === 0 /* Reaches */) {
             copyPayloadReaching(event, located, target, shallowCopy(target).set(key, value2));
@@ -5157,6 +5456,8 @@ function wrapMap(map, node) {
             key,
             oldValue
           };
+          if (event !== undefined && isObject4(key))
+            memberToken(key);
           if (copyPayload(event, located, target) === 0 /* Reaches */) {
             const after = shallowCopy(target);
             after.delete(key);
@@ -5483,14 +5784,19 @@ function createAsyncEmit(emit) {
       queueMicrotask(() => {
         let failed = false;
         let failure;
-        for (let next = 0;next < queue.length; next++) {
+        let next = 0;
+        while (next < queue.length) {
           try {
-            emit(queue[next]);
+            emit(queue[next++]);
           } catch (error) {
             if (!failed) {
               failed = true;
               failure = error;
             }
+          }
+          if (next === FLUSH_CHUNK) {
+            queue.splice(0, next);
+            next = 0;
           }
         }
         queue.length = 0;
@@ -5501,6 +5807,7 @@ function createAsyncEmit(emit) {
     }
   };
 }
+var FLUSH_CHUNK = 1024;
 function reactive(obj, emit, path = [], options) {
   if (obj["__v_skip" /* SKIP */]) {
     return obj;
@@ -5508,6 +5815,8 @@ function reactive(obj, emit, path = [], options) {
   const existing = globalSeen.get(obj);
   if (existing !== undefined)
     return existing;
+  if (obj["__v_isReactive" /* IS_REACTIVE */])
+    return obj;
   if (emit && path.length === 0 && options?.async) {
     emit = createAsyncEmit(emit);
   }
@@ -5539,6 +5848,8 @@ function wrapChild(raw, parent, key, options) {
   }
   if (raw["__v_skip" /* SKIP */])
     return raw;
+  if (raw["__v_isReactive" /* IS_REACTIVE */])
+    return wrapChild(toRaw(raw), parent, key, options);
   if (raw instanceof Date)
     return new Date(raw.getTime());
   node ??= ensureLocationNode(raw);
@@ -5552,6 +5863,8 @@ function wrapUnplaced(raw) {
   const existing = globalSeen.get(raw);
   if (existing !== undefined)
     return existing;
+  if (raw["__v_isReactive" /* IS_REACTIVE */])
+    return wrapUnplaced(toRaw(raw));
   const node = ensureLocationNode(raw);
   return restoreEvicted(node) ?? createProxy(raw, node);
 }
@@ -6263,8 +6576,6 @@ function deepToRaw(input, seen = new WeakMap) {
   return source;
 }
 export {
-  wrapUnplaced,
-  wrapChild,
   watchEffect,
   watch,
   updateState,

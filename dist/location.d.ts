@@ -89,6 +89,25 @@ export interface LocationNode {
      * number is never below the places there are (see `relink`).
      */
     childPlaces: number;
+    /** The last store walk that met this object (see `enterAdopt`). */
+    walk: number;
+    /** The last store that put this node on its list of nodes to prune (see `touch`). */
+    touched: number;
+    /** How many places the node kept at its last full `prunePlaces`. */
+    pruned: number;
+    /** The places of a node with more than `WIDE` of them, by container and key (see `findPlace`). */
+    index: PlaceIndex | undefined;
+}
+/**
+ * The places of one node by container id, then by key when one container
+ * holds the object at several keys. It belongs to `places` while that array
+ * keeps `length` items; a change of an item in place (a splice, a new key)
+ * drops it. A push through `pushPlace` keeps it.
+ */
+interface PlaceIndex {
+    places: Place[];
+    length: number;
+    byParent: Map<number, Place | Map<unknown, Place>>;
 }
 export declare function getLocationNode(raw: object): LocationNode | undefined;
 export declare function ensureLocationNode(raw: object): LocationNode;
@@ -219,7 +238,8 @@ export declare function copyPayloadAfter(event: StateEvent, target: Target, cont
 export declare function shallowCopy(container: object): any;
 /**
  * Record that a proxy read found `raw` at `parent[key]`. Called on every read
- * of a nested object, so the common case (place already known) is one compare.
+ * of a nested object, so the common case (place already known) is one
+ * compare, and a wide node finds the place in its index.
  */
 export declare function notePlace(node: LocationNode, parent: LocationNode, key: unknown): void;
 /** `parent[key]` no longer holds `value`. */

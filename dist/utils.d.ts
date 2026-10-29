@@ -1,4 +1,3 @@
-import type { LocationNode } from "./location";
 /**
  * Returns the raw, original object underlying a reactive proxy.
  * If the input is not a proxy, returns the input itself.
@@ -7,12 +6,14 @@ export declare function toRaw<T>(observed: T): T;
 /**
  * Strip proxy refs from spread results before storing in raw state.
  * Prevents unbounded proxy nesting from `{ ...reactiveProxy }` patterns.
+ * The value and its direct children only: the place walk of the store puts
+ * the raw object in place of a proxy deeper down (see `storeRaw` in
+ * location.ts), and a fresh value (see `cloneStored`) holds no proxy.
  */
 export declare function unwrapForStore(value: any): any;
 export declare const pathCache: WeakMap<object, Map<string, any>>;
 export declare const globalSeen: WeakMap<any, any>;
 export declare const wrapperCache: WeakMap<object, object>;
-export declare const locationNodes: WeakMap<object, LocationNode>;
 export declare const proxyStats: {
     created: number;
     arrays: number;
@@ -145,9 +146,28 @@ export declare function cloneTreeAfter<T>(value: T, container: object, contents:
 export declare function namedKeys(array: object): (string | symbol)[] | undefined;
 /** `object[key] = value` as an own enumerable data property: no setter runs, and `__proto__` stays a key. */
 export declare function setData(object: object, key: PropertyKey, value: unknown): void;
-export declare function keepCollectionIdentity(source: unknown, copy: unknown): void;
-/** The member this replica holds for a source key or member, without comparing its contents. */
-export declare function collectionMember(collection: Map<unknown, unknown> | Set<unknown>, member: unknown): unknown;
+/** The token of `member`, a source member (raw); made at its first use. */
+export declare function memberToken(member: object): object;
+/**
+ * `copy` is a copy of the source member `source`: it carries the token of
+ * `source`. Inside a copy of a payload (see `copyingPayload`), `source` is
+ * itself a copy, and `copy` carries the token `source` carries.
+ */
+export declare function nameMemberCopy(source: unknown, copy: unknown): void;
+/** `copy` is a copy of the payload copy `source`: it names the same member. */
+export declare function nameCopyOfCopy(source: unknown, copy: unknown): void;
+/** Copy payloads of payloads with `run` (see `copyingPayload`). */
+export declare function copyingPayloads<T>(run: () => T): T;
+/** `set-add` on a replica set (raw or a proxy). */
+export declare function replicaAdd(set: Set<unknown>, value: unknown): void;
+/** `set-delete` on a replica set (raw or a proxy). */
+export declare function replicaDelete(set: Set<unknown>, value: unknown): void;
+/** `map-set` on a replica map (raw or a proxy). */
+export declare function replicaMapSet(map: Map<unknown, unknown>, key: unknown, value: unknown): void;
+/** `map-delete` on a replica map (raw or a proxy). */
+export declare function replicaMapDelete(map: Map<unknown, unknown>, key: unknown): void;
+/** A replica collection was cleared or refilled: its index is made again when needed. */
+export declare function forgetReplicaIndex(collection: object): void;
 /**
  * creates a deep clone of a value.
  * includes cycle detection using a weakmap.

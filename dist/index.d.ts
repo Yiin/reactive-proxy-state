@@ -1,7 +1,7 @@
 export * from './types';
 export { SNAPSHOT_SHARED_COPY_LIMIT, SnapshotLimitError, UnsupportedStateError, deepClone, deepEqual, getProxyStats, resetProxyStats, toRaw } from './utils';
 export * from './state';
-export * from './reactive';
+export { isReactive, reactive } from './reactive';
 export * from './watch';
 export * from './watch-effect';
 export * from './ref';
