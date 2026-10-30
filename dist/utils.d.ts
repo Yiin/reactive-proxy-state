@@ -167,6 +167,8 @@ export declare function nameKey(event: StateEvent, key: object, collection: obje
 export declare function nameCopyOfCopy(source: unknown, copy: unknown): void;
 /** Copy payloads of payloads with `run` (see `copyingPayload`). */
 export declare function copyingPayloads<T>(run: () => T): T;
+/** Does `collection` (raw) have an index by token (see `replicaIndex`)? */
+export declare function hasReplicaIndex(collection: object): boolean;
 /**
  * The proxy of `collection` (raw), which has an index (see
  * `LocationNode.indexed`), added `member` (a Set member or Map key): the

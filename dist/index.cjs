@@ -3342,6 +3342,9 @@ function replicaIndex(collection, member) {
   }
   return index;
 }
+function hasReplicaIndex(collection) {
+  return collectionIdentities.indexes.has(collection);
+}
 function heldToken(collection, member) {
   return collectionIdentities.overrides.get(collection)?.get(member) ?? collectionIdentities.members.get(member);
 }
@@ -3589,10 +3592,11 @@ function getLocationNode(raw) {
 function ensureLocationNode(raw) {
   let node = nodes.get(raw);
   if (node === undefined) {
+    const kind = raw instanceof Map ? 1 /* Map */ : raw instanceof Set ? 2 /* Set */ : 0 /* Plain */;
     node = {
       id: ++nodeCount,
       raw,
-      kind: raw instanceof Map ? 1 /* Map */ : raw instanceof Set ? 2 /* Set */ : 0 /* Plain */,
+      kind,
       places: [],
       root: undefined,
       scope: undefined,
@@ -3607,7 +3611,7 @@ function ensureLocationNode(raw) {
       touched: 0,
       pruned: 0,
       index: undefined,
-      indexed: false
+      indexed: kind !== 0 /* Plain */ && hasReplicaIndex(raw)
     };
     nodes.set(raw, node);
   }
