@@ -3271,8 +3271,51 @@ function replicaIndex(collection, member) {
   if (index === undefined || index.size !== size || index.member !== member) {
     index = { byToken: member ? memberIndex(collection) : copyIndex(collection), size, member };
     collectionIdentities.indexes.set(collection, index);
+    const node = locationNodes.get(collection);
+    if (node !== undefined)
+      node.indexed = true;
   }
   return index;
+}
+function heldToken(collection, member) {
+  return collectionIdentities.overrides.get(collection)?.get(member) ?? collectionIdentities.members.get(member);
+}
+function indexAdded(collection, member) {
+  const index = collectionIdentities.indexes.get(collection);
+  if (index === undefined)
+    return;
+  if (!index.member || index.size !== collection.size - 1) {
+    collectionIdentities.indexes.delete(collection);
+    return;
+  }
+  index.size = collection.size;
+  if (member === null || typeof member !== "object")
+    return;
+  const raw = toRaw(member);
+  const own = heldToken(collection, raw);
+  if (own !== undefined) {
+    index.byToken.set(own, member);
+    return;
+  }
+  const origin = collectionIdentities.copies.get(raw);
+  if (origin !== undefined && !index.byToken.has(origin))
+    index.byToken.set(origin, member);
+}
+function indexRemoved(collection, member) {
+  const index = collectionIdentities.indexes.get(collection);
+  if (index === undefined)
+    return;
+  if (!index.member || index.size !== collection.size + 1) {
+    collectionIdentities.indexes.delete(collection);
+    return;
+  }
+  index.size = collection.size;
+  if (member === null || typeof member !== "object")
+    return;
+  const raw = toRaw(member);
+  const token = heldToken(collection, raw) ?? collectionIdentities.copies.get(raw);
+  if (token !== undefined && index.byToken.get(token) === member)
+    index.byToken.delete(token);
 }
 function membersOf(collection) {
   return collection instanceof Map ? Map.prototype.keys.call(collection) : Set.prototype.values.call(collection);
@@ -3498,7 +3541,8 @@ function ensureLocationNode(raw) {
       walk: 0,
       touched: 0,
       pruned: 0,
-      index: undefined
+      index: undefined,
+      indexed: false
     };
     nodes.set(raw, node);
   }
@@ -5297,6 +5341,8 @@ function wrapMap(map, node) {
           }
           target.set(key, value2);
           const newSize = target.size;
+          if (node.indexed && !existed)
+            indexAdded(target, key);
           if (isObject4(oldValue))
             detachPlace(oldValue, node, key);
           if (isObject4(value2))
@@ -5340,6 +5386,8 @@ function wrapMap(map, node) {
           }
           const result = target.delete(key);
           const newSize = target.size;
+          if (node.indexed && result)
+            indexRemoved(target, key);
           if (result) {
             if (isObject4(oldValue))
               detachPlace(oldValue, node, key);
@@ -5365,6 +5413,8 @@ function wrapMap(map, node) {
           const removed = [...target];
           target.clear();
           const newSize = target.size;
+          if (node.indexed)
+            forgetReplicaIndex(target);
           for (const [key, value2] of removed) {
             if (isObject4(value2))
               detachPlace(value2, node, key);
@@ -5497,6 +5547,8 @@ function wrapSet(set, node) {
             }
             target.add(value2);
             const newSize = target.size;
+            if (node.indexed)
+              indexAdded(target, value2);
             if (isObject5(value2))
               attachValue(value2, node, undefined, copied === 2 /* Fresh */);
             if (event !== undefined)
@@ -5530,6 +5582,8 @@ function wrapSet(set, node) {
             }
             const result = target.delete(value2);
             const newSize = target.size;
+            if (node.indexed && result)
+              indexRemoved(target, value2);
             if (result) {
               if (isObject5(value2))
                 detachPlace(value2, node, undefined);
@@ -5556,6 +5610,8 @@ function wrapSet(set, node) {
           const removed = [...target];
           target.clear();
           const newSize = target.size;
+          if (node.indexed)
+            forgetReplicaIndex(target);
           for (const member of removed) {
             if (isObject5(member))
               detachPlace(member, node, undefined);

@@ -166,6 +166,14 @@ export declare function nameKey(key: object, collection: object, entering: boole
 export declare function nameCopyOfCopy(source: unknown, copy: unknown): void;
 /** Copy payloads of payloads with `run` (see `copyingPayload`). */
 export declare function copyingPayloads<T>(run: () => T): T;
+/**
+ * The proxy of `collection` (raw), which has an index (see
+ * `LocationNode.indexed`), added `member` (a Set member or Map key): the
+ * index takes it, so a later event finds it without a rebuild.
+ */
+export declare function indexAdded(collection: Set<unknown> | Map<unknown, unknown>, member: unknown): void;
+/** The proxy of `collection` (raw), which has an index, removed `member`: the index lets it go. */
+export declare function indexRemoved(collection: Set<unknown> | Map<unknown, unknown>, member: unknown): void;
 /** `set-add` on a replica set (raw or a proxy). */
 export declare function replicaAdd(set: Set<unknown>, value: unknown): void;
 /** `set-delete` on a replica set (raw or a proxy). */

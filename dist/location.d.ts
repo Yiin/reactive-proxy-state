@@ -97,6 +97,11 @@ export interface LocationNode {
     pruned: number;
     /** The places of a node with more than `WIDE` of them, by container and key (see `findPlace`). */
     index: PlaceIndex | undefined;
+    /**
+     * A Set or Map whose members have an index by token (see `replicaIndex`
+     * in utils.ts): its proxy keeps that index as it changes the collection.
+     */
+    indexed: boolean;
 }
 /**
  * The places of one node by container id, then by key when one container
