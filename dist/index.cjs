@@ -5452,9 +5452,9 @@ function wrapMap(map, node) {
           }
           const result = target.delete(key);
           const newSize = target.size;
-          if (watch.indexed && result)
-            indexRemoved(target, key);
           if (result) {
+            if (watch.indexed)
+              indexRemoved(target, key);
             if (isObject4(oldValue))
               detachPlace(oldValue, node, key);
             if (event !== undefined)
@@ -5649,9 +5649,9 @@ function wrapSet(set, node) {
             }
             const result = target.delete(value2);
             const newSize = target.size;
-            if (watch.indexed && result)
-              indexRemoved(target, value2);
             if (result) {
+              if (watch.indexed)
+                indexRemoved(target, value2);
               if (isObject5(value2))
                 detachPlace(value2, node, undefined);
               if (event !== undefined)
