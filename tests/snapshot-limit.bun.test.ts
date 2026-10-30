@@ -470,6 +470,8 @@ describe("a refusal needs no rollback", () => {
       held.n = 2;
       await Promise.resolve();
       expect(events.map((event) => event.path)).toEqual([["child", "n"]]);
+      // the root stays reachable to here: a collected root emits nothing and copies nothing
+      expect(toRaw(state).box).toBe(raw);
     });
     if (removes) {
       test(`${name}: a synchronous root makes the removal and sends the value as it is`, () => {
