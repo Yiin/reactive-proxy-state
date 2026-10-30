@@ -1348,8 +1348,54 @@ function replicaIndex(collection: object, member: boolean): ReplicaIndex {
     if (index === undefined || index.size !== size || index.member !== member) {
         index = { byToken: member ? memberIndex(collection) : copyIndex(collection), size, member };
         collectionIdentities.indexes.set(collection, index);
+        const node = locationNodes.get(collection);
+        if (node !== undefined) node.indexed = true;
     }
     return index;
+}
+
+/** The token `member` (raw) has in `collection` (raw), and whether it is its own (see `memberIndex`). */
+function heldToken(collection: object, member: object): Token | undefined {
+    return collectionIdentities.overrides.get(collection)?.get(member) ?? collectionIdentities.members.get(member);
+}
+
+/**
+ * The proxy of `collection` (raw), which has an index (see
+ * `LocationNode.indexed`), added `member` (a Set member or Map key): the
+ * index takes it, so a later event finds it without a rebuild.
+ */
+export function indexAdded(collection: Set<unknown> | Map<unknown, unknown>, member: unknown): void {
+    const index = collectionIdentities.indexes.get(collection);
+    if (index === undefined) return;
+    if (!index.member || index.size !== collection.size - 1) {
+        collectionIdentities.indexes.delete(collection);
+        return;
+    }
+    index.size = collection.size;
+    if (member === null || typeof member !== 'object') return;
+    const raw = toRaw(member) as object;
+    const own = heldToken(collection, raw);
+    if (own !== undefined) {
+        index.byToken.set(own, member);
+        return;
+    }
+    const origin = collectionIdentities.copies.get(raw);
+    if (origin !== undefined && !index.byToken.has(origin)) index.byToken.set(origin, member);
+}
+
+/** The proxy of `collection` (raw), which has an index, removed `member`: the index lets it go. */
+export function indexRemoved(collection: Set<unknown> | Map<unknown, unknown>, member: unknown): void {
+    const index = collectionIdentities.indexes.get(collection);
+    if (index === undefined) return;
+    if (!index.member || index.size !== collection.size + 1) {
+        collectionIdentities.indexes.delete(collection);
+        return;
+    }
+    index.size = collection.size;
+    if (member === null || typeof member !== 'object') return;
+    const raw = toRaw(member) as object;
+    const token = heldToken(collection, raw) ?? collectionIdentities.copies.get(raw);
+    if (token !== undefined && index.byToken.get(token) === member) index.byToken.delete(token);
 }
 
 function membersOf(collection: object): Iterable<unknown> {

@@ -229,6 +229,47 @@ describe("a root on a replica whose events go back to the source", () => {
     });
   }
 
+  for (const [async, mute] of [
+    [false, true],
+    [true, false],
+  ] as const) {
+    const mode = `${async ? "async" : "sync"}${mute ? ", echo muted" : ""}`;
+    const settle = async () => {
+      for (let i = 0; i < 4; i++) await tick();
+    };
+
+    test(`B deletes one member and adds another, then S deletes the new one (${mode})`, async () => {
+      // B keeps its size, so only its own writes can tell the index what changed
+      const { S, B } = await bidirectional(async, mute, 100);
+      S.s.add({ id: 1 });
+      S.s.add({ id: 2 });
+      await settle();
+      B.s.delete([...toRaw(B).s][0]);
+      B.s.add({ id: 3 });
+      await settle();
+      expect(text(S.s)).toEqual(text(B.s));
+      S.s.delete([...toRaw(S).s].find((member: any) => member.id === 3));
+      await settle();
+      expect(text(B.s)).toEqual(['{"id":2}']);
+      expect(text(S.s)).toEqual(text(B.s));
+    });
+
+    test(`B replaces a Map key with another, then S deletes the new one (${mode})`, async () => {
+      const { S, B } = await bidirectional(async, mute, 100);
+      S.m.set({ k: 1 }, 1);
+      S.m.set({ k: 2 }, 2);
+      await settle();
+      B.m.delete([...toRaw(B).m.keys()][0]);
+      B.m.set({ k: 3 }, 3);
+      await settle();
+      expect(text(S.m)).toEqual(text(B.m));
+      S.m.delete([...toRaw(S).m.keys()].find((key: any) => key.k === 3));
+      await settle();
+      expect(text(B.m)).toEqual(['[{"k":2},2]']);
+      expect(text(S.m)).toEqual(text(B.m));
+    });
+  }
+
   test("a Set that B assigns, then a member B deletes (sync, echo muted)", async () => {
     const { S, B } = await bidirectional(false, true);
     B.x = new Set([{ id: 1 }, { id: 2 }]);

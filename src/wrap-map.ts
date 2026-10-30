@@ -1,5 +1,8 @@
 import {
   deepEqual,
+  forgetReplicaIndex,
+  indexAdded,
+  indexRemoved,
   nameKey,
   unwrapForStore,
   wrapperCache,
@@ -92,6 +95,7 @@ export function wrapMap<K, V>(map: Map<K, V>, node: LocationNode): Map<K, V> {
           }
           target.set(key, value);
           const newSize = target.size;
+          if (node.indexed && !existed) indexAdded(target, key);
 
           // move places before anything can write again (emit may throw)
           if (isObject(oldValue)) detachPlace(oldValue, node, key);
@@ -136,6 +140,7 @@ export function wrapMap<K, V>(map: Map<K, V>, node: LocationNode): Map<K, V> {
           }
           const result = target.delete(key);
           const newSize = target.size;
+          if (node.indexed && result) indexRemoved(target, key);
 
           if (result) {
             if (isObject(oldValue)) detachPlace(oldValue, node, key);
@@ -162,6 +167,7 @@ export function wrapMap<K, V>(map: Map<K, V>, node: LocationNode): Map<K, V> {
           const removed = [...target];
           target.clear();
           const newSize = target.size;
+          if (node.indexed) forgetReplicaIndex(target);
 
           for (const [key, value] of removed) {
             if (isObject(value)) detachPlace(value, node, key);
