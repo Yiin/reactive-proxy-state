@@ -10,7 +10,6 @@ import {
   cloneTreeUnless,
   copiedFresh,
   copyingPayloads,
-  hasReplicaIndex,
   nameCopyOfCopy,
   nameMember,
   globalSeen,
@@ -139,11 +138,6 @@ export interface LocationNode {
   pruned: number;
   /** The places of a node with more than `WIDE` of them, by container and key (see `findPlace`). */
   index: PlaceIndex | undefined;
-  /**
-   * A Set or Map whose members have an index by token (see `replicaIndex`
-   * in utils.ts): its proxy keeps that index as it changes the collection.
-   */
-  indexed: boolean;
 }
 
 /**
@@ -183,11 +177,15 @@ export function getLocationNode(raw: object): LocationNode | undefined {
 export function ensureLocationNode(raw: object): LocationNode {
   let node = nodes.get(raw);
   if (node === undefined) {
-    const kind = raw instanceof Map ? ContainerKind.Map : raw instanceof Set ? ContainerKind.Set : ContainerKind.Plain;
     node = {
       id: ++nodeCount,
       raw,
-      kind,
+      kind:
+        raw instanceof Map
+          ? ContainerKind.Map
+          : raw instanceof Set
+            ? ContainerKind.Set
+            : ContainerKind.Plain,
       places: [],
       root: undefined,
       scope: undefined,
@@ -202,8 +200,6 @@ export function ensureLocationNode(raw: object): LocationNode {
       touched: 0,
       pruned: 0,
       index: undefined,
-      // a replica's collection gets its first proxy after `updateState` indexed it
-      indexed: kind !== ContainerKind.Plain && hasReplicaIndex(raw),
     };
     nodes.set(raw, node);
   }

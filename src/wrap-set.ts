@@ -1,4 +1,4 @@
-import { forgetReplicaIndex, indexAdded, indexRemoved, unwrapForStore, wrapperCache, globalSeen, proxyStats } from "./utils";
+import { forgetReplicaIndex, indexAdded, indexRemoved, unwrapForStore, watchIndex, wrapperCache, globalSeen, proxyStats } from "./utils";
 import { wrapChild } from "./reactive";
 import {
   Copied,
@@ -26,6 +26,8 @@ export function wrapSet<T>(set: Set<T>, node: LocationNode): Set<T> {
   if (globalSeen.has(set)) return globalSeen.get(set);
 
   const methodCache: { [key: string | symbol]: Function } = {};
+  // the proxy keeps the collection's index by token, once it has one
+  const watch = watchIndex(set);
 
   const proxy = new Proxy(set, {
     get(target: Set<T>, prop: string | symbol, receiver: any): any {
@@ -69,7 +71,7 @@ export function wrapSet<T>(set: Set<T>, node: LocationNode): Set<T> {
             }
             target.add(value);
             const newSize = target.size;
-            if (node.indexed) indexAdded(target, value);
+            if (watch.indexed) indexAdded(target, value);
 
             if (isObject(value)) attachValue(value, node, undefined, copied === Copied.Fresh);
             if (event !== undefined) dispatch(located!, event);
@@ -103,7 +105,7 @@ export function wrapSet<T>(set: Set<T>, node: LocationNode): Set<T> {
             }
             const result = target.delete(value);
             const newSize = target.size;
-            if (node.indexed && result) indexRemoved(target, value);
+            if (watch.indexed && result) indexRemoved(target, value);
 
             if (result) {
               if (isObject(value)) detachPlace(value, node, undefined);
@@ -128,7 +130,7 @@ export function wrapSet<T>(set: Set<T>, node: LocationNode): Set<T> {
           const removed = [...target];
           target.clear();
           const newSize = target.size;
-          if (node.indexed) forgetReplicaIndex(target);
+          if (watch.indexed) forgetReplicaIndex(target);
 
           for (const member of removed) {
             if (isObject(member)) detachPlace(member, node, undefined);

@@ -4,6 +4,7 @@ import {
   indexAdded,
   indexRemoved,
   nameKey,
+  watchIndex,
   unwrapForStore,
   wrapperCache,
   globalSeen,
@@ -37,6 +38,8 @@ export function wrapMap<K, V>(map: Map<K, V>, node: LocationNode): Map<K, V> {
   if (globalSeen.has(map)) return globalSeen.get(map);
 
   const methodCache: { [key: string | symbol]: Function } = {};
+  // the proxy keeps the collection's index by token, once it has one
+  const watch = watchIndex(map);
 
   const proxy = new Proxy(map, {
     get(target: Map<K, V>, prop: string | symbol, receiver: any): any {
@@ -95,7 +98,7 @@ export function wrapMap<K, V>(map: Map<K, V>, node: LocationNode): Map<K, V> {
           }
           target.set(key, value);
           const newSize = target.size;
-          if (node.indexed && !existed) indexAdded(target, key);
+          if (watch.indexed && !existed) indexAdded(target, key);
 
           // move places before anything can write again (emit may throw)
           if (isObject(oldValue)) detachPlace(oldValue, node, key);
@@ -140,7 +143,7 @@ export function wrapMap<K, V>(map: Map<K, V>, node: LocationNode): Map<K, V> {
           }
           const result = target.delete(key);
           const newSize = target.size;
-          if (node.indexed && result) indexRemoved(target, key);
+          if (watch.indexed && result) indexRemoved(target, key);
 
           if (result) {
             if (isObject(oldValue)) detachPlace(oldValue, node, key);
@@ -167,7 +170,7 @@ export function wrapMap<K, V>(map: Map<K, V>, node: LocationNode): Map<K, V> {
           const removed = [...target];
           target.clear();
           const newSize = target.size;
-          if (node.indexed) forgetReplicaIndex(target);
+          if (watch.indexed) forgetReplicaIndex(target);
 
           for (const [key, value] of removed) {
             if (isObject(value)) detachPlace(value, node, key);

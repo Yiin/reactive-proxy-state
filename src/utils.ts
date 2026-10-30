@@ -1219,7 +1219,12 @@ export function nameMember(member: unknown, copy: unknown, collection: object, e
         nameCopyOfCopy(member, copy);
         return copy;
     }
-    return nameRaw(toRaw(member) as object, member, copy, collection, entering);
+    const raw = toRaw(member) as object;
+    const own = collectionIdentities.members.get(raw);
+    if (own === undefined || own.shared) return nameRaw(raw, member, copy, collection, entering);
+    // a token of its own that no other object carries
+    if (copy !== member) collectionIdentities.copies.set(copy, own);
+    return copy;
 }
 
 /**
@@ -1349,15 +1354,30 @@ function replicaIndex(collection: object, member: boolean): ReplicaIndex {
     if (index === undefined || index.size !== size || index.member !== member) {
         index = { byToken: member ? memberIndex(collection) : copyIndex(collection), size, member };
         collectionIdentities.indexes.set(collection, index);
-        const node = locationNodes.get(collection);
-        if (node !== undefined) node.indexed = true;
+        const watch = indexWatches.get(collection);
+        if (watch !== undefined) watch.indexed = true;
     }
     return index;
 }
 
-/** Does `collection` (raw) have an index by token (see `replicaIndex`)? */
-export function hasReplicaIndex(collection: object): boolean {
-    return collectionIdentities.indexes.has(collection);
+/** What the proxy of a Set or Map reads to know whether its collection has an index (see `watchIndex`). */
+export interface IndexWatch {
+    indexed: boolean;
+}
+
+// The `IndexWatch` of each Set and Map that has a proxy, by raw collection.
+const indexWatches = new WeakMap<object, IndexWatch>();
+
+/**
+ * The `IndexWatch` for a new proxy of `collection` (raw): `indexed` turns
+ * true when the collection gets an index, also one `updateState` made
+ * before the proxy, and the proxy then keeps that index as it changes the
+ * collection (see `indexAdded`).
+ */
+export function watchIndex(collection: object): IndexWatch {
+    const watch: IndexWatch = { indexed: collectionIdentities.indexes.has(collection) };
+    indexWatches.set(collection, watch);
+    return watch;
 }
 
 /** The token `member` (raw) has in `collection` (raw) as its own: the one there, else its own token. */
@@ -1367,7 +1387,7 @@ function heldToken(collection: object, member: object): Token | undefined {
 
 /**
  * The proxy of `collection` (raw), which has an index (see
- * `LocationNode.indexed`), added `member` (a Set member or Map key): the
+ * `watchIndex`), added `member` (a Set member or Map key): the
  * index takes it, so a later event finds it without a rebuild.
  */
 export function indexAdded(collection: Set<unknown> | Map<unknown, unknown>, member: unknown): void {
