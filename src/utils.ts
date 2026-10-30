@@ -1355,7 +1355,12 @@ function replicaIndex(collection: object, member: boolean): ReplicaIndex {
     return index;
 }
 
-/** The token `member` (raw) has in `collection` (raw), and whether it is its own (see `memberIndex`). */
+/** Does `collection` (raw) have an index by token (see `replicaIndex`)? */
+export function hasReplicaIndex(collection: object): boolean {
+    return collectionIdentities.indexes.has(collection);
+}
+
+/** The token `member` (raw) has in `collection` (raw) as its own: the one there, else its own token. */
 function heldToken(collection: object, member: object): Token | undefined {
     return collectionIdentities.overrides.get(collection)?.get(member) ?? collectionIdentities.members.get(member);
 }

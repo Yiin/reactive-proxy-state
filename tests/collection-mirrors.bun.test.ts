@@ -270,6 +270,39 @@ describe("a root on a replica whose events go back to the source", () => {
     });
   }
 
+  test("a root made on a replica that updateState already changed keeps its index", () => {
+    let replica: any;
+    let target: any;
+    let applyingFromB = false;
+    const S: any = reactive({ s: new Set<object>() }, (event) => {
+      if (event.action === "replace" && event.path.length === 0) {
+        replica = event.newValue;
+        target = replica;
+        return;
+      }
+      if (!applyingFromB) updateState(target, event);
+    });
+    S.s.add({ id: 1 });
+    S.s.add({ id: 2 });
+    // the plain replica has an index now; then a root is made on it, and S feeds the root
+    const B: any = reactive(replica, (event) => {
+      if (event.action === "replace" && event.path.length === 0) return;
+      applyingFromB = true;
+      try {
+        updateState(S, event);
+      } finally {
+        applyingFromB = false;
+      }
+    });
+    target = B;
+    B.s.delete([...toRaw(B).s][0]);
+    B.s.add({ id: 3 });
+    expect(text(S.s)).toEqual(text(B.s));
+    S.s.delete([...toRaw(S).s].find((member: any) => member.id === 3));
+    expect(text(B.s)).toEqual(['{"id":2}']);
+    expect(text(S.s)).toEqual(text(B.s));
+  });
+
   test("a Set that B assigns, then a member B deletes (sync, echo muted)", async () => {
     const { S, B } = await bidirectional(false, true);
     B.x = new Set([{ id: 1 }, { id: 2 }]);

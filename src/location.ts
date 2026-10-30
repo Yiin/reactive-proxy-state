@@ -10,6 +10,7 @@ import {
   cloneTreeUnless,
   copiedFresh,
   copyingPayloads,
+  hasReplicaIndex,
   nameCopyOfCopy,
   nameMember,
   globalSeen,
@@ -182,15 +183,11 @@ export function getLocationNode(raw: object): LocationNode | undefined {
 export function ensureLocationNode(raw: object): LocationNode {
   let node = nodes.get(raw);
   if (node === undefined) {
+    const kind = raw instanceof Map ? ContainerKind.Map : raw instanceof Set ? ContainerKind.Set : ContainerKind.Plain;
     node = {
       id: ++nodeCount,
       raw,
-      kind:
-        raw instanceof Map
-          ? ContainerKind.Map
-          : raw instanceof Set
-            ? ContainerKind.Set
-            : ContainerKind.Plain,
+      kind,
       places: [],
       root: undefined,
       scope: undefined,
@@ -205,7 +202,8 @@ export function ensureLocationNode(raw: object): LocationNode {
       touched: 0,
       pruned: 0,
       index: undefined,
-      indexed: false,
+      // a replica's collection gets its first proxy after `updateState` indexed it
+      indexed: kind !== ContainerKind.Plain && hasReplicaIndex(raw),
     };
     nodes.set(raw, node);
   }
