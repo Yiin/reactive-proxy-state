@@ -1,3 +1,4 @@
+import type { StateEvent } from "./types";
 /**
  * Returns the raw, original object underlying a reactive proxy.
  * If the input is not a proxy, returns the input itself.
@@ -157,11 +158,11 @@ export declare function setData(object: object, key: PropertyKey, value: unknown
  */
 export declare function nameMember(member: unknown, copy: unknown, collection: object, entering: boolean): unknown;
 /**
- * The object a map event about `key`, a key of `collection` (raw), carries:
- * `key` itself, or a copy when its token there is not its own (see
- * `nameMember`). `entering`: the write adds `key`.
+ * Name `key`, a key of `collection` (raw), in the map event `event`, which
+ * carries the key itself, or a copy when its token there is not its own
+ * (see `nameMember`). `entering`: the write adds `key`.
  */
-export declare function nameKey(key: object, collection: object, entering: boolean): object;
+export declare function nameKey(event: StateEvent, key: object, collection: object, entering: boolean): void;
 /** `copy` is a copy of the payload copy `source`: it names the same member. */
 export declare function nameCopyOfCopy(source: unknown, copy: unknown): void;
 /** Copy payloads of payloads with `run` (see `copyingPayload`). */

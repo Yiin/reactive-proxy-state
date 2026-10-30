@@ -3185,12 +3185,12 @@ function nameMember(member, copy, collection, entering) {
   }
   return nameRaw(toRaw(member), member, copy, collection, entering);
 }
-function nameKey(key, collection, entering) {
+function nameKey(event, key, collection, entering) {
   const raw = toRaw(key);
   const own = collectionIdentities.members.get(raw);
   if (own !== undefined && !own.shared)
-    return key;
-  return nameRaw(raw, key, key, collection, entering);
+    return;
+  event.key = nameRaw(raw, key, key, collection, entering);
 }
 function nameRaw(raw, member, copy, collection, entering) {
   const own = collectionIdentities.members.get(raw);
@@ -5334,7 +5334,7 @@ function wrapMap(map, node) {
           };
           const held = located && heldItems(value2, oldValue);
           if (event !== undefined && isObject4(key))
-            event.key = nameKey(key, target, !existed);
+            nameKey(event, key, target, !existed);
           const copied = copyPayload(event, located, target, held);
           if (copied === 0 /* Reaches */) {
             copyPayloadReaching(event, located, target, shallowCopy(target).set(key, value2));
@@ -5378,7 +5378,7 @@ function wrapMap(map, node) {
             oldValue
           };
           if (event !== undefined && isObject4(key))
-            event.key = nameKey(key, target, false);
+            nameKey(event, key, target, false);
           if (copyPayload(event, located, target) === 0 /* Reaches */) {
             const after = shallowCopy(target);
             after.delete(key);
