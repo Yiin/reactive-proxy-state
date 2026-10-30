@@ -1118,7 +1118,7 @@ function fillSet(value: any, identity: object, copy: Set<unknown>, depth: number
         if (later !== undefined && later.has(entry)) return;
         const entryCopy = cloneValue(entry, below, named) as object;
         if (copyingPayload) nameCopyOfCopy(entry, entryCopy);
-        else nameRaw(raw, entry, entryCopy, members, false);
+        else nameRaw(raw, collectionIdentities.members.get(raw), entry, entryCopy, members, false);
         copy.add(entryCopy);
     });
     fillCollectionProperties(members, copy, below, named);
@@ -1221,7 +1221,7 @@ export function nameMember(member: unknown, copy: unknown, collection: object, e
     }
     const raw = toRaw(member) as object;
     const own = collectionIdentities.members.get(raw);
-    if (own === undefined || own.shared) return nameRaw(raw, member, copy, collection, entering);
+    if (own === undefined || own.shared) return nameRaw(raw, own, member, copy, collection, entering);
     // a token of its own that no other object carries
     if (copy !== member) collectionIdentities.copies.set(copy, own);
     return copy;
@@ -1236,12 +1236,11 @@ export function nameKey(event: StateEvent, key: object, collection: object, ente
     const raw = toRaw(key) as object;
     const own = collectionIdentities.members.get(raw);
     if (own !== undefined && !own.shared) return;
-    event.key = nameRaw(raw, key, key, collection, entering);
+    event.key = nameRaw(raw, own, key, key, collection, entering);
 }
 
-/** `nameMember` for `raw`, the raw object of `member`. */
-function nameRaw(raw: object, member: object, copy: object, collection: object, entering: boolean): object {
-    const own = collectionIdentities.members.get(raw);
+/** `nameMember` for `raw`, the raw object of `member`, whose own token is `own`. */
+function nameRaw(raw: object, own: Token | undefined, member: object, copy: object, collection: object, entering: boolean): object {
     let token: Token;
     if (own === undefined) token = entering ? ownToken(raw) : namedInPlace(raw, collection);
     else if (!own.shared) token = own;
