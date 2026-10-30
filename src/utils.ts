@@ -1165,8 +1165,8 @@ function fillCollectionProperties(value: any, copy: object, depth: number, named
 // token gets a token of its own in that collection (`overrides`); an event
 // that would send the object itself sends a copy that carries that token.
 // A collection whose tokens were looked up keeps its members by token in
-// `indexes` (see `replicaIndex`), so an event finds its member without a
-// scan. Tokens are plain objects in weak maps: they keep no member alive.
+// `indexes` (see `replicaIndex`), which `updateState` and the collection's
+// proxy keep current, so an event finds its member without a scan. Tokens are plain objects in weak maps: they keep no member alive.
 // ESM and CJS bundles in one realm share these maps.
 
 /** A member's identity. `shared`: more than one object carries it as its own. */
