@@ -3135,7 +3135,7 @@ function fillSet(value, identity, copy, depth, named) {
     if (copyingPayload)
       nameCopyOfCopy(entry, entryCopy);
     else
-      nameRaw(raw, entry, entryCopy, members, false);
+      nameRaw(raw, collectionIdentities.members.get(raw), entry, entryCopy, members, false);
     copy.add(entryCopy);
   });
   fillCollectionProperties(members, copy, below, named);
@@ -3186,7 +3186,7 @@ function nameMember(member, copy, collection, entering) {
   const raw = toRaw(member);
   const own = collectionIdentities.members.get(raw);
   if (own === undefined || own.shared)
-    return nameRaw(raw, member, copy, collection, entering);
+    return nameRaw(raw, own, member, copy, collection, entering);
   if (copy !== member)
     collectionIdentities.copies.set(copy, own);
   return copy;
@@ -3196,10 +3196,9 @@ function nameKey(event, key, collection, entering) {
   const own = collectionIdentities.members.get(raw);
   if (own !== undefined && !own.shared)
     return;
-  event.key = nameRaw(raw, key, key, collection, entering);
+  event.key = nameRaw(raw, own, key, key, collection, entering);
 }
-function nameRaw(raw, member, copy, collection, entering) {
-  const own = collectionIdentities.members.get(raw);
+function nameRaw(raw, own, member, copy, collection, entering) {
   let token;
   if (own === undefined)
     token = entering ? ownToken(raw) : namedInPlace(raw, collection);
