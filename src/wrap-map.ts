@@ -87,7 +87,7 @@ export function wrapMap<K, V>(map: Map<K, V>, node: LocationNode): Map<K, V> {
           };
           const held = located && heldItems(value, oldValue);
           // the event names an object key itself: its replica finds its copy by the key's token
-          if (event !== undefined && isObject(key)) event.key = nameKey(key, target, !existed);
+          if (event !== undefined && isObject(key)) nameKey(event, key, target, !existed);
           // copies the payload, or throws, before the write
           const copied = copyPayload(event, located, target, held);
           if (copied === Copied.Reaches) {
@@ -132,7 +132,7 @@ export function wrapMap<K, V>(map: Map<K, V>, node: LocationNode): Map<K, V> {
             key,
             oldValue,
           };
-          if (event !== undefined && isObject(key)) event.key = nameKey(key, target, false);
+          if (event !== undefined && isObject(key)) nameKey(event, key, target, false);
           if (copyPayload(event, located, target) === Copied.Reaches) {
             const after = shallowCopy(target);
             after.delete(key);

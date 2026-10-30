@@ -1,5 +1,6 @@
 import { ReactiveFlags } from "./constants";
 import type { LocationNode } from "./location";
+import type { StateEvent } from "./types";
 
 /**
  * Returns the raw, original object underlying a reactive proxy.
@@ -1222,15 +1223,15 @@ export function nameMember(member: unknown, copy: unknown, collection: object, e
 }
 
 /**
- * The object a map event about `key`, a key of `collection` (raw), carries:
- * `key` itself, or a copy when its token there is not its own (see
- * `nameMember`). `entering`: the write adds `key`.
+ * Name `key`, a key of `collection` (raw), in the map event `event`, which
+ * carries the key itself, or a copy when its token there is not its own
+ * (see `nameMember`). `entering`: the write adds `key`.
  */
-export function nameKey(key: object, collection: object, entering: boolean): object {
+export function nameKey(event: StateEvent, key: object, collection: object, entering: boolean): void {
     const raw = toRaw(key) as object;
     const own = collectionIdentities.members.get(raw);
-    if (own !== undefined && !own.shared) return key;
-    return nameRaw(raw, key, key, collection, entering);
+    if (own !== undefined && !own.shared) return;
+    event.key = nameRaw(raw, key, key, collection, entering);
 }
 
 /** `nameMember` for `raw`, the raw object of `member`. */
