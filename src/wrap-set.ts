@@ -105,9 +105,9 @@ export function wrapSet<T>(set: Set<T>, node: LocationNode): Set<T> {
             }
             const result = target.delete(value);
             const newSize = target.size;
-            if (watch.indexed && result) indexRemoved(target, value);
 
             if (result) {
+              if (watch.indexed) indexRemoved(target, value);
               if (isObject(value)) detachPlace(value, node, undefined);
               if (event !== undefined) dispatch(located!, event);
               trigger(target, Symbol.iterator);

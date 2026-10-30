@@ -143,9 +143,9 @@ export function wrapMap<K, V>(map: Map<K, V>, node: LocationNode): Map<K, V> {
           }
           const result = target.delete(key);
           const newSize = target.size;
-          if (watch.indexed && result) indexRemoved(target, key);
 
           if (result) {
+            if (watch.indexed) indexRemoved(target, key);
             if (isObject(oldValue)) detachPlace(oldValue, node, key);
 
             if (event !== undefined) dispatch(located!, event);
