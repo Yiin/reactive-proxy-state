@@ -2313,21 +2313,23 @@ function unwrapForStore(value) {
   if (Array.isArray(value)) {
     for (let i = 0;i < value.length; i++) {
       const child = value[i];
-      if (child != null && typeof child === "object" && child["__v_isReactive" /* IS_REACTIVE */]) {
-        value[i] = toRaw(child);
-      }
+      if (child != null && typeof child === "object" && child["__v_isReactive" /* IS_REACTIVE */])
+        storeRawChild(value, i, child);
     }
   } else if (!(value instanceof Map) && !(value instanceof Set) && !(value instanceof Date)) {
     for (const key in value) {
       if (!Object.prototype.hasOwnProperty.call(value, key))
         continue;
       const child = value[key];
-      if (child != null && typeof child === "object" && child["__v_isReactive" /* IS_REACTIVE */]) {
-        value[key] = toRaw(child);
-      }
+      if (child != null && typeof child === "object" && child["__v_isReactive" /* IS_REACTIVE */])
+        storeRawChild(value, key, child);
     }
   }
   return value;
+}
+function storeRawChild(value, key, child) {
+  if (Reflect.getOwnPropertyDescriptor(value, key)?.value === child)
+    Reflect.set(value, key, toRaw(child));
 }
 var MAX_CACHE_SIZE = 1000;
 var pathCache = new WeakMap;
@@ -3097,26 +3099,52 @@ function fillNamed(value, identity, copy, depth, named, pushed) {
 function fillMap(value, identity, copy, depth, named) {
   const below = depth + 1;
   enterPath(identity, copy, depth);
-  Map.prototype.forEach.call(toRaw(value), (entry, key) => {
+  const entries = toRaw(value);
+  Map.prototype.forEach.call(entries, (entry, key) => {
     const keyCopy = cloneValue(key, below, named);
-    if (key !== null && typeof key === "object")
-      nameMemberCopy(key, keyCopy);
-    copy.set(keyCopy, cloneValue(entry, below, named));
+    copy.set(nameMember(key, keyCopy, entries, false), cloneValue(entry, below, named));
   });
-  fillCollectionProperties(toRaw(value), copy, below, named);
+  fillCollectionProperties(entries, copy, below, named);
   return true;
 }
 function fillSet(value, identity, copy, depth, named) {
   const below = depth + 1;
   enterPath(identity, copy, depth);
-  Set.prototype.forEach.call(toRaw(value), (entry) => {
+  const members = toRaw(value);
+  let later;
+  Set.prototype.forEach.call(members, (entry) => {
+    if (entry === null || typeof entry !== "object") {
+      copy.add(entry);
+      return;
+    }
+    const raw = toRaw(entry);
+    if (raw !== entry && later === undefined && Set.prototype.has.call(members, raw))
+      later = laterTwins(members);
+    if (later !== undefined && later.has(entry))
+      return;
     const entryCopy = cloneValue(entry, below, named);
-    if (entry !== null && typeof entry === "object")
-      nameMemberCopy(entry, entryCopy);
+    if (copyingPayload)
+      nameCopyOfCopy(entry, entryCopy);
+    else
+      nameRaw(raw, entry, entryCopy, members, false);
     copy.add(entryCopy);
   });
-  fillCollectionProperties(toRaw(value), copy, below, named);
+  fillCollectionProperties(members, copy, below, named);
   return true;
+}
+function laterTwins(set) {
+  const seen = new Set;
+  const later = new Set;
+  Set.prototype.forEach.call(set, (member) => {
+    if (member === null || typeof member !== "object")
+      return;
+    const raw = toRaw(member);
+    if (seen.has(raw))
+      later.add(member);
+    else
+      seen.add(raw);
+  });
+  return later;
 }
 function fillCollectionProperties(value, copy, depth, named) {
   for (const key in value) {
@@ -3129,30 +3157,76 @@ function fillCollectionProperties(value, copy, depth, named) {
       setData(copy, symbols[i], cloneValue(value[symbols[i]], depth, named));
   }
 }
-var collectionIdentityKey = Symbol.for("@yiin/reactive-proxy-state.collection-identities.v2");
-var collectionIdentities = Reflect.get(globalThis, collectionIdentityKey) ?? { members: new WeakMap, copies: new WeakMap, indexes: new WeakMap };
+var collectionIdentityKey = Symbol.for("@yiin/reactive-proxy-state.collection-identities.v3");
+var collectionIdentities = Reflect.get(globalThis, collectionIdentityKey) ?? { members: new WeakMap, copies: new WeakMap, indexes: new WeakMap, overrides: new WeakMap };
 if (!Reflect.has(globalThis, collectionIdentityKey)) {
   Object.defineProperty(globalThis, collectionIdentityKey, { value: collectionIdentities });
 }
-function memberToken(member) {
-  const raw = toRaw(member);
-  let token = collectionIdentities.members.get(raw);
-  if (token === undefined) {
-    token = {};
-    collectionIdentities.members.set(raw, token);
-  }
+function ownToken(member) {
+  const token = { shared: false };
+  collectionIdentities.members.set(member, token);
   return token;
 }
-function nameMemberCopy(source, copy) {
-  if (source === null || typeof source !== "object" || copy === null || typeof copy !== "object")
-    return;
+function nameMember(member, copy, collection, entering) {
+  if (member === null || typeof member !== "object" || copy === null || typeof copy !== "object")
+    return copy;
   if (copyingPayload) {
-    nameCopyOfCopy(source, copy);
-    return;
+    nameCopyOfCopy(member, copy);
+    return copy;
   }
-  const token = memberToken(source);
-  if (copy !== source)
+  return nameRaw(toRaw(member), member, copy, collection, entering);
+}
+function nameRaw(raw, member, copy, collection, entering) {
+  const own = collectionIdentities.members.get(raw);
+  let token;
+  if (own === undefined)
+    token = entering ? ownToken(raw) : namedInPlace(raw, collection);
+  else if (!own.shared)
+    token = own;
+  else
+    token = sharedTokenIn(raw, own, collection, entering);
+  if (copy !== member) {
     collectionIdentities.copies.set(copy, token);
+    return copy;
+  }
+  return own === undefined || token === own ? copy : carrier(raw, token);
+}
+function namedInPlace(member, collection) {
+  const origin = collectionIdentities.copies.get(member);
+  if (origin === undefined)
+    return ownToken(member);
+  const index = replicaIndex(collection, true);
+  const held = heldMember(collection, index, origin);
+  if (held !== undefined && held !== member) {
+    const token = ownToken(member);
+    index.byToken.set(token, member);
+    return token;
+  }
+  origin.shared = true;
+  collectionIdentities.members.set(member, origin);
+  index.byToken.set(origin, member);
+  return origin;
+}
+function sharedTokenIn(member, token, collection, entering) {
+  let inCollection = collectionIdentities.overrides.get(collection);
+  const current = inCollection?.get(member) ?? token;
+  if (!entering)
+    return current;
+  const index = replicaIndex(collection, true);
+  const held = heldMember(collection, index, current);
+  if (held === undefined || held === member)
+    return current;
+  const other = { shared: false };
+  if (inCollection === undefined)
+    collectionIdentities.overrides.set(collection, inCollection = new WeakMap);
+  inCollection.set(member, other);
+  index.byToken.set(other, member);
+  return other;
+}
+function carrier(member, token) {
+  const copy = cloneTree(member, 2 /* All */);
+  collectionIdentities.copies.set(copy, token);
+  return copy;
 }
 function nameCopyOfCopy(source, copy) {
   if (source === null || typeof source !== "object" || copy === null || typeof copy !== "object")
@@ -3175,26 +3249,47 @@ function eventToken(member) {
   const raw = toRaw(member);
   return collectionIdentities.members.get(raw) ?? collectionIdentities.copies.get(raw);
 }
-function heldToken(member) {
-  const raw = toRaw(member);
-  return collectionIdentities.copies.get(raw) ?? collectionIdentities.members.get(raw);
-}
-function replicaIndex(collection) {
+function replicaIndex(collection, member) {
   let index = collectionIdentities.indexes.get(collection);
-  if (index === undefined || index.size !== collection.size) {
-    const byToken = new Map;
-    const members = collection instanceof Map ? Map.prototype.keys.call(collection) : Set.prototype.values.call(collection);
-    for (const member of members) {
-      if (member === null || typeof member !== "object")
-        continue;
-      const token = heldToken(member);
-      if (token !== undefined && !byToken.has(token))
-        byToken.set(token, member);
-    }
-    index = { byToken, size: collection.size };
+  const size = collection.size;
+  if (index === undefined || index.size !== size || index.member !== member) {
+    index = { byToken: member ? memberIndex(collection) : copyIndex(collection), size, member };
     collectionIdentities.indexes.set(collection, index);
   }
   return index;
+}
+function membersOf(collection) {
+  return collection instanceof Map ? Map.prototype.keys.call(collection) : Set.prototype.values.call(collection);
+}
+function copyIndex(collection) {
+  const byToken = new Map;
+  for (const member of membersOf(collection)) {
+    if (member === null || typeof member !== "object")
+      continue;
+    const raw = toRaw(member);
+    const token = collectionIdentities.copies.get(raw) ?? collectionIdentities.members.get(raw);
+    if (token !== undefined && !byToken.has(token))
+      byToken.set(token, member);
+  }
+  return byToken;
+}
+function memberIndex(collection) {
+  const byToken = new Map;
+  const overrides = collectionIdentities.overrides.get(collection);
+  for (const member of membersOf(collection)) {
+    if (member === null || typeof member !== "object")
+      continue;
+    const raw = toRaw(member);
+    const own = overrides?.get(raw) ?? collectionIdentities.members.get(raw);
+    if (own !== undefined) {
+      byToken.set(own, member);
+      continue;
+    }
+    const origin = collectionIdentities.copies.get(raw);
+    if (origin !== undefined && !byToken.has(origin))
+      byToken.set(origin, member);
+  }
+  return byToken;
 }
 function keepIndexSize(collection) {
   const index = collectionIdentities.indexes.get(collection);
@@ -3205,12 +3300,17 @@ function heldMember(raw, index, token) {
   const held = index.byToken.get(token);
   return held !== undefined && raw.has(held) ? held : undefined;
 }
-function newMember(raw, member, token) {
-  if (!raw.has(member))
-    return member;
-  const copy = cloneTree(member, 2 /* All */);
-  collectionIdentities.copies.set(copy, token);
-  return copy;
+function newMember(raw, member, token, reactive) {
+  let added = member;
+  if (raw.has(member)) {
+    added = cloneTree(member, 2 /* All */);
+    collectionIdentities.copies.set(added, token);
+  }
+  if (reactive && !collectionIdentities.members.has(added)) {
+    token.shared = true;
+    collectionIdentities.members.set(added, token);
+  }
+  return added;
 }
 function objectToken(value) {
   return value !== null && typeof value === "object" ? eventToken(value) : undefined;
@@ -3223,10 +3323,10 @@ function replicaAdd(set, value) {
     keepIndexSize(raw);
     return;
   }
-  const index = replicaIndex(raw);
+  const index = replicaIndex(raw, raw !== set);
   if (heldMember(raw, index, token) !== undefined)
     return;
-  const member = newMember(raw, toRaw(value), token);
+  const member = newMember(raw, toRaw(value), token, set !== raw);
   set.add(member);
   index.byToken.set(token, member);
   index.size = raw.size;
@@ -3239,7 +3339,7 @@ function replicaDelete(set, value) {
     keepIndexSize(raw);
     return;
   }
-  const index = replicaIndex(raw);
+  const index = replicaIndex(raw, raw !== set);
   const held = heldMember(raw, index, token);
   set.delete(held === undefined ? value : held);
   index.byToken.delete(token);
@@ -3253,13 +3353,13 @@ function replicaMapSet(map, key, value) {
     keepIndexSize(raw);
     return;
   }
-  const index = replicaIndex(raw);
+  const index = replicaIndex(raw, raw !== map);
   const held = heldMember(raw, index, token);
   if (held !== undefined) {
     map.set(held, value);
     return;
   }
-  const member = newMember(raw, toRaw(key), token);
+  const member = newMember(raw, toRaw(key), token, map !== raw);
   map.set(member, value);
   index.byToken.set(token, member);
   index.size = raw.size;
@@ -3272,7 +3372,7 @@ function replicaMapDelete(map, key) {
     keepIndexSize(raw);
     return;
   }
-  const index = replicaIndex(raw);
+  const index = replicaIndex(raw, raw !== map);
   const held = heldMember(raw, index, token);
   map.delete(held === undefined ? key : held);
   index.byToken.delete(token);
@@ -3331,251 +3431,6 @@ function deepClone(value, seen = new WeakMap) {
     }
   }
   return newObject;
-}
-// src/state.ts
-function getValue(obj, key) {
-  if (obj instanceof Map)
-    return obj.get(key);
-  return obj[key];
-}
-function setValue(obj, key, value) {
-  if (obj instanceof Map)
-    obj.set(key, value);
-  else
-    obj[key] = value;
-}
-function deleteValue(obj, key) {
-  if (obj instanceof Map)
-    obj.delete(key);
-  else
-    delete obj[key];
-}
-function validateCachedPath(root, fullPath, pathKey, cached) {
-  if (fullPath.length === 0)
-    return cached;
-  const lastKey = fullPath[fullPath.length - 1];
-  let grandparent = root;
-  for (let i = 0;i < fullPath.length - 1; i++) {
-    grandparent = grandparent ? getValue(grandparent, fullPath[i]) : undefined;
-    if (grandparent === undefined)
-      break;
-  }
-  if (grandparent === undefined) {
-    evictDescendantsFromPathCache(root, pathKey);
-    return;
-  }
-  const actual = getValue(grandparent, lastKey);
-  if (actual === cached)
-    return cached;
-  evictDescendantsFromPathCache(root, pathKey);
-  return;
-}
-var actionHandlers = {
-  set: function(parent, key, event) {
-    if (Array.isArray(parent) && key === "length" && Number(event.newValue) > parent.length) {
-      console.warn(`refusing to grow array length via bare set at path ${event.path.join(".")}`);
-      return;
-    }
-    setValue(parent, key, event.newValue);
-  },
-  delete: function(parent, key) {
-    deleteValue(parent, key);
-  },
-  "array-push": function(targetArray, _keyIgnored, event) {
-    if (!Array.isArray(targetArray)) {
-      console.warn(`expected array at path ${event.path.join(".")}`);
-      return;
-    }
-    if (!event.items) {
-      console.warn("array-push event missing items");
-      return;
-    }
-    targetArray.push(...event.items);
-  },
-  "array-pop": function(targetArray, _keyIgnored, event) {
-    if (!Array.isArray(targetArray)) {
-      console.warn(`expected array at path ${event.path.join(".")}`);
-      return;
-    }
-    if (targetArray.length > 0) {
-      targetArray.pop();
-    }
-  },
-  "array-splice": function(targetArray, _keyIgnored, event) {
-    if (!Array.isArray(targetArray)) {
-      console.warn(`expected array at path ${event.path.join(".")}`);
-      return;
-    }
-    if (event.key === undefined || event.deleteCount === undefined) {
-      console.warn("array-splice event missing key or deletecount");
-      return;
-    }
-    if (event.items && event.items.length > 0) {
-      targetArray.splice(event.key, event.deleteCount, ...event.items);
-    } else {
-      targetArray.splice(event.key, event.deleteCount);
-    }
-  },
-  "array-shift": function(targetArray, _keyIgnored, event) {
-    if (!Array.isArray(targetArray)) {
-      console.warn(`expected array at path ${event.path.join(".")}`);
-      return;
-    }
-    if (targetArray.length > 0) {
-      targetArray.shift();
-    }
-  },
-  "array-unshift": function(targetArray, _keyIgnored, event) {
-    if (!Array.isArray(targetArray)) {
-      console.warn(`expected array at path ${event.path.join(".")}`);
-      return;
-    }
-    if (!event.items) {
-      console.warn("array-unshift event missing items");
-      return;
-    }
-    targetArray.unshift(...event.items);
-  },
-  "map-set": function(targetMap, _parentKeyIgnored, event) {
-    if (!(targetMap instanceof Map)) {
-      console.warn(`expected map at path ${event.path.join(".")}`);
-      return;
-    }
-    replicaMapSet(targetMap, event.key, event.newValue);
-  },
-  "map-delete": function(targetMap, _parentKeyIgnored, event) {
-    if (!(targetMap instanceof Map)) {
-      console.warn(`expected map at path ${event.path.join(".")}`);
-      return;
-    }
-    replicaMapDelete(targetMap, event.key);
-  },
-  "map-clear": function(targetMap, _parentKeyIgnored, event) {
-    if (!(targetMap instanceof Map)) {
-      console.warn(`expected map at path ${event.path.join(".")}`);
-      return;
-    }
-    targetMap.clear();
-    forgetReplicaIndex(targetMap);
-  },
-  "set-add": function(targetSet, _keyIgnored, event) {
-    if (!(targetSet instanceof Set)) {
-      console.warn(`expected set at path ${event.path.join(".")}`);
-      return;
-    }
-    replicaAdd(targetSet, event.value);
-  },
-  "set-delete": function(targetSet, _keyIgnored, event) {
-    if (!(targetSet instanceof Set)) {
-      console.warn(`expected set at path ${event.path.join(".")}`);
-      return;
-    }
-    replicaDelete(targetSet, event.value);
-  },
-  "set-clear": function(targetSet, _keyIgnored, event) {
-    if (!(targetSet instanceof Set)) {
-      console.warn(`expected set at path ${event.path.join(".")}`);
-      return;
-    }
-    targetSet.clear();
-    forgetReplicaIndex(targetSet);
-  },
-  replace: function(target, _keyIgnored, event) {
-    const newValue = event.newValue;
-    if (newValue === undefined || newValue === null) {
-      console.warn("replace action requires newValue");
-      return;
-    }
-    if (Array.isArray(target) && Array.isArray(newValue)) {
-      target.splice(0, target.length, ...newValue);
-    } else if (target instanceof Map && newValue instanceof Map) {
-      const newValueEntries = [...newValue.entries()];
-      target.clear();
-      forgetReplicaIndex(target);
-      for (const [key, value] of newValueEntries) {
-        target.set(key, value);
-      }
-    } else if (target instanceof Set && newValue instanceof Set) {
-      const newValueEntries = [...newValue.values()];
-      target.clear();
-      forgetReplicaIndex(target);
-      for (const value of newValueEntries) {
-        target.add(value);
-      }
-    } else if (typeof target === "object" && target !== null && typeof newValue === "object" && newValue !== null) {
-      Object.keys(target).forEach((key) => delete target[key]);
-      Object.assign(target, newValue);
-    } else {
-      console.warn(`Type mismatch or unsupported type for 'replace' action at path ${event.path.join(".")}. Target type: ${typeof target} ${target.constructor.name}, New value type: ${typeof newValue} ${newValue.constructor.name}`);
-    }
-  }
-};
-function updateState(root, event) {
-  const { action, path } = event;
-  if (!path || path.length === 0 && action !== "replace") {
-    console.warn("event path is invalid for action", event);
-    return;
-  }
-  const handler = actionHandlers[action];
-  if (!handler) {
-    console.error(`unhandled action type: ${action}`, event);
-    return;
-  }
-  let targetForHandler;
-  let keyForHandler = null;
-  if (action === "set" || action === "delete") {
-    if (path.length === 1) {
-      targetForHandler = root;
-      keyForHandler = path[0];
-    } else {
-      const parentPath = path.slice(0, -1);
-      const parentPathKey = parentPath.join(".");
-      let parent = pathCache.get(root)?.get(parentPathKey);
-      if (parent !== undefined) {
-        parent = validateCachedPath(root, parentPath, parentPathKey, parent);
-      }
-      if (parent === undefined) {
-        parent = parentPath.reduce((acc, key) => acc ? getValue(acc, key) : undefined, root);
-        if (parent !== undefined)
-          setInPathCache(root, parentPathKey, parent);
-      }
-      if (parent === undefined) {
-        console.warn(`parent path ${parentPathKey} not found for action ${action}`);
-        return;
-      }
-      targetForHandler = parent;
-      keyForHandler = path[path.length - 1];
-    }
-  } else if (action.startsWith("array-") || action.startsWith("map-") || action.startsWith("set-") || action === "replace") {
-    if (path.length === 0 && action === "replace") {
-      targetForHandler = root;
-    } else {
-      const targetPath = path;
-      const targetPathKey = targetPath.join(".");
-      let targetCollection = pathCache.get(root)?.get(targetPathKey);
-      if (targetCollection !== undefined) {
-        targetCollection = validateCachedPath(root, targetPath, targetPathKey, targetCollection);
-      }
-      if (targetCollection === undefined) {
-        targetCollection = targetPath.reduce((acc, key) => acc ? getValue(acc, key) : undefined, root);
-        if (targetCollection !== undefined)
-          setInPathCache(root, targetPathKey, targetCollection);
-      }
-      if (targetCollection === undefined) {
-        console.warn(`target at path ${targetPathKey} not found for action ${action}`);
-        return;
-      }
-      targetForHandler = targetCollection;
-    }
-  } else {
-    console.error(`unexpected action type passed checks: ${action}`);
-    return;
-  }
-  handler(targetForHandler, keyForHandler, event);
-  if (action === "set" && event.newValue != null && typeof event.newValue === "object") {
-    const fullPathKey = path.join(".");
-    evictDescendantsFromPathCache(root, fullPathKey);
-  }
 }
 // src/location.ts
 class Place {
@@ -3658,13 +3513,20 @@ function holdsIn(parent, key, raw) {
     return false;
   const container = parent.raw;
   switch (parent.kind) {
-    case 1 /* Map */:
-      return container.get(key) === raw;
+    case 1 /* Map */: {
+      const held = container.get(key);
+      return held === raw || proxyOf(held, raw);
+    }
     case 2 /* Set */:
       return container.has(raw);
-    default:
-      return container[key] === raw;
+    default: {
+      const held = container[key];
+      return held === raw || proxyOf(held, raw);
+    }
   }
+}
+function proxyOf(held, raw) {
+  return isObject2(held) && held["__v_raw" /* RAW */] !== undefined && toRaw(held) === raw;
 }
 function holds(place, raw) {
   return holdsIn(place.parent, place.key, raw);
@@ -3952,10 +3814,8 @@ function copyPayload(event, target, container, held) {
   }
   if (isObject2(newValue))
     event.newValue = newCopy;
-  if (isObject2(value)) {
-    nameMemberCopy(value, valueCopy);
-    event.value = valueCopy;
-  }
+  if (isObject2(value))
+    event.value = nameMember(value, valueCopy, container, stored);
   if (items !== undefined)
     event.items = itemsCopy;
   return fresh ? 2 /* Fresh */ : 1 /* Done */;
@@ -3977,10 +3837,8 @@ function copyPayloadAfter(event, target, container, after) {
     event.newValue = newCopy;
   if (isObject2(oldValue))
     event.oldValue = oldCopy;
-  if (isObject2(value)) {
-    nameMemberCopy(value, valueCopy);
-    event.value = valueCopy;
-  }
+  if (isObject2(value))
+    event.value = nameMember(value, valueCopy, container, stored);
   if (items !== undefined)
     event.items = itemsCopy;
   if (oldValues !== undefined)
@@ -5416,7 +5274,7 @@ function wrapMap(map, node) {
           };
           const held = located && heldItems(value2, oldValue);
           if (event !== undefined && isObject4(key))
-            memberToken(key);
+            event.key = nameMember(key, key, target, !existed);
           const copied = copyPayload(event, located, target, held);
           if (copied === 0 /* Reaches */) {
             copyPayloadReaching(event, located, target, shallowCopy(target).set(key, value2));
@@ -5458,7 +5316,7 @@ function wrapMap(map, node) {
             oldValue
           };
           if (event !== undefined && isObject4(key))
-            memberToken(key);
+            event.key = nameMember(key, key, target, false);
           if (copyPayload(event, located, target) === 0 /* Reaches */) {
             const after = shallowCopy(target);
             after.delete(key);
@@ -5961,6 +5819,260 @@ function wrapObject(obj, node, options) {
   proxyStats.created++;
   proxyStats.objects++;
   return proxy;
+}
+
+// src/state.ts
+function getValue(obj, key) {
+  if (obj instanceof Map)
+    return obj.get(key);
+  return obj[key];
+}
+function setValue(obj, key, value) {
+  if (obj instanceof Map)
+    obj.set(key, value);
+  else
+    obj[key] = value;
+}
+function deleteValue(obj, key) {
+  if (obj instanceof Map)
+    obj.delete(key);
+  else
+    delete obj[key];
+}
+function validateCachedPath(root, fullPath, pathKey, cached) {
+  if (fullPath.length === 0)
+    return cached;
+  const lastKey = fullPath[fullPath.length - 1];
+  let grandparent = root;
+  for (let i = 0;i < fullPath.length - 1; i++) {
+    grandparent = grandparent ? getValue(grandparent, fullPath[i]) : undefined;
+    if (grandparent === undefined)
+      break;
+  }
+  if (grandparent === undefined) {
+    evictDescendantsFromPathCache(root, pathKey);
+    return;
+  }
+  const actual = getValue(grandparent, lastKey);
+  if (actual === cached)
+    return cached;
+  evictDescendantsFromPathCache(root, pathKey);
+  return;
+}
+var actionHandlers = {
+  set: function(parent, key, event) {
+    if (Array.isArray(parent) && key === "length" && Number(event.newValue) > parent.length) {
+      console.warn(`refusing to grow array length via bare set at path ${event.path.join(".")}`);
+      return;
+    }
+    setValue(parent, key, event.newValue);
+  },
+  delete: function(parent, key) {
+    deleteValue(parent, key);
+  },
+  "array-push": function(targetArray, _keyIgnored, event) {
+    if (!Array.isArray(targetArray)) {
+      console.warn(`expected array at path ${event.path.join(".")}`);
+      return;
+    }
+    if (!event.items) {
+      console.warn("array-push event missing items");
+      return;
+    }
+    targetArray.push(...event.items);
+  },
+  "array-pop": function(targetArray, _keyIgnored, event) {
+    if (!Array.isArray(targetArray)) {
+      console.warn(`expected array at path ${event.path.join(".")}`);
+      return;
+    }
+    if (targetArray.length > 0) {
+      targetArray.pop();
+    }
+  },
+  "array-splice": function(targetArray, _keyIgnored, event) {
+    if (!Array.isArray(targetArray)) {
+      console.warn(`expected array at path ${event.path.join(".")}`);
+      return;
+    }
+    if (event.key === undefined || event.deleteCount === undefined) {
+      console.warn("array-splice event missing key or deletecount");
+      return;
+    }
+    if (event.items && event.items.length > 0) {
+      targetArray.splice(event.key, event.deleteCount, ...event.items);
+    } else {
+      targetArray.splice(event.key, event.deleteCount);
+    }
+  },
+  "array-shift": function(targetArray, _keyIgnored, event) {
+    if (!Array.isArray(targetArray)) {
+      console.warn(`expected array at path ${event.path.join(".")}`);
+      return;
+    }
+    if (targetArray.length > 0) {
+      targetArray.shift();
+    }
+  },
+  "array-unshift": function(targetArray, _keyIgnored, event) {
+    if (!Array.isArray(targetArray)) {
+      console.warn(`expected array at path ${event.path.join(".")}`);
+      return;
+    }
+    if (!event.items) {
+      console.warn("array-unshift event missing items");
+      return;
+    }
+    targetArray.unshift(...event.items);
+  },
+  "map-set": function(targetMap2, _parentKeyIgnored, event) {
+    if (!(targetMap2 instanceof Map)) {
+      console.warn(`expected map at path ${event.path.join(".")}`);
+      return;
+    }
+    replicaMapSet(targetMap2, event.key, event.newValue);
+  },
+  "map-delete": function(targetMap2, _parentKeyIgnored, event) {
+    if (!(targetMap2 instanceof Map)) {
+      console.warn(`expected map at path ${event.path.join(".")}`);
+      return;
+    }
+    replicaMapDelete(targetMap2, event.key);
+  },
+  "map-clear": function(targetMap2, _parentKeyIgnored, event) {
+    if (!(targetMap2 instanceof Map)) {
+      console.warn(`expected map at path ${event.path.join(".")}`);
+      return;
+    }
+    targetMap2.clear();
+    forgetReplicaIndex(targetMap2);
+  },
+  "set-add": function(targetSet, _keyIgnored, event) {
+    if (!(targetSet instanceof Set)) {
+      console.warn(`expected set at path ${event.path.join(".")}`);
+      return;
+    }
+    replicaAdd(targetSet, event.value);
+  },
+  "set-delete": function(targetSet, _keyIgnored, event) {
+    if (!(targetSet instanceof Set)) {
+      console.warn(`expected set at path ${event.path.join(".")}`);
+      return;
+    }
+    replicaDelete(targetSet, event.value);
+  },
+  "set-clear": function(targetSet, _keyIgnored, event) {
+    if (!(targetSet instanceof Set)) {
+      console.warn(`expected set at path ${event.path.join(".")}`);
+      return;
+    }
+    targetSet.clear();
+    forgetReplicaIndex(targetSet);
+  },
+  replace: function(target, _keyIgnored, event) {
+    const newValue = event.newValue;
+    if (newValue === undefined || newValue === null) {
+      console.warn("replace action requires newValue");
+      return;
+    }
+    if (Array.isArray(target) && Array.isArray(newValue)) {
+      target.splice(0, target.length, ...newValue);
+    } else if (target instanceof Map && newValue instanceof Map) {
+      const newValueEntries = [...newValue.entries()];
+      target.clear();
+      forgetReplicaIndex(target);
+      const reactiveTarget = isReactive(target);
+      for (const [key, value] of newValueEntries) {
+        if (reactiveTarget)
+          replicaMapSet(target, key, value);
+        else
+          target.set(key, value);
+      }
+    } else if (target instanceof Set && newValue instanceof Set) {
+      const newValueEntries = [...newValue.values()];
+      target.clear();
+      forgetReplicaIndex(target);
+      const reactiveTarget = isReactive(target);
+      for (const value of newValueEntries) {
+        if (reactiveTarget)
+          replicaAdd(target, value);
+        else
+          target.add(value);
+      }
+    } else if (typeof target === "object" && target !== null && typeof newValue === "object" && newValue !== null) {
+      Object.keys(target).forEach((key) => delete target[key]);
+      Object.assign(target, newValue);
+    } else {
+      console.warn(`Type mismatch or unsupported type for 'replace' action at path ${event.path.join(".")}. Target type: ${typeof target} ${target.constructor.name}, New value type: ${typeof newValue} ${newValue.constructor.name}`);
+    }
+  }
+};
+function updateState(root, event) {
+  const { action, path } = event;
+  if (!path || path.length === 0 && action !== "replace") {
+    console.warn("event path is invalid for action", event);
+    return;
+  }
+  const handler = actionHandlers[action];
+  if (!handler) {
+    console.error(`unhandled action type: ${action}`, event);
+    return;
+  }
+  let targetForHandler;
+  let keyForHandler = null;
+  if (action === "set" || action === "delete") {
+    if (path.length === 1) {
+      targetForHandler = root;
+      keyForHandler = path[0];
+    } else {
+      const parentPath = path.slice(0, -1);
+      const parentPathKey = parentPath.join(".");
+      let parent = pathCache.get(root)?.get(parentPathKey);
+      if (parent !== undefined) {
+        parent = validateCachedPath(root, parentPath, parentPathKey, parent);
+      }
+      if (parent === undefined) {
+        parent = parentPath.reduce((acc, key) => acc ? getValue(acc, key) : undefined, root);
+        if (parent !== undefined)
+          setInPathCache(root, parentPathKey, parent);
+      }
+      if (parent === undefined) {
+        console.warn(`parent path ${parentPathKey} not found for action ${action}`);
+        return;
+      }
+      targetForHandler = parent;
+      keyForHandler = path[path.length - 1];
+    }
+  } else if (action.startsWith("array-") || action.startsWith("map-") || action.startsWith("set-") || action === "replace") {
+    if (path.length === 0 && action === "replace") {
+      targetForHandler = root;
+    } else {
+      const targetPath = path;
+      const targetPathKey = targetPath.join(".");
+      let targetCollection = pathCache.get(root)?.get(targetPathKey);
+      if (targetCollection !== undefined) {
+        targetCollection = validateCachedPath(root, targetPath, targetPathKey, targetCollection);
+      }
+      if (targetCollection === undefined) {
+        targetCollection = targetPath.reduce((acc, key) => acc ? getValue(acc, key) : undefined, root);
+        if (targetCollection !== undefined)
+          setInPathCache(root, targetPathKey, targetCollection);
+      }
+      if (targetCollection === undefined) {
+        console.warn(`target at path ${targetPathKey} not found for action ${action}`);
+        return;
+      }
+      targetForHandler = targetCollection;
+    }
+  } else {
+    console.error(`unexpected action type passed checks: ${action}`);
+    return;
+  }
+  handler(targetForHandler, keyForHandler, event);
+  if (action === "set" && event.newValue != null && typeof event.newValue === "object") {
+    const fullPathKey = path.join(".");
+    evictDescendantsFromPathCache(root, fullPathKey);
+  }
 }
 // src/ref.ts
 var isRefSymbol = Symbol("isRef");

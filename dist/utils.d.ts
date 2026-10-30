@@ -146,14 +146,16 @@ export declare function cloneTreeAfter<T>(value: T, container: object, contents:
 export declare function namedKeys(array: object): (string | symbol)[] | undefined;
 /** `object[key] = value` as an own enumerable data property: no setter runs, and `__proto__` stays a key. */
 export declare function setData(object: object, key: PropertyKey, value: unknown): void;
-/** The token of `member`, a source member (raw); made at its first use. */
-export declare function memberToken(member: object): object;
 /**
- * `copy` is a copy of the source member `source`: it carries the token of
- * `source`. Inside a copy of a payload (see `copyingPayload`), `source` is
- * itself a copy, and `copy` carries the token `source` carries.
+ * Name `member`, a member of `collection` (raw), in a payload whose copy of
+ * it is `copy`, or `member` itself when the event sends the object.
+ * `entering`: the write puts `member` into `collection`. Returns what the
+ * payload carries: `copy`, or a copy that carries the token `member` has in
+ * `collection` when that is not its own token (see `overrides`). Inside a
+ * copy of a payload (see `copyingPayload`), `member` is itself a copy, and
+ * `copy` names the same member.
  */
-export declare function nameMemberCopy(source: unknown, copy: unknown): void;
+export declare function nameMember(member: unknown, copy: unknown, collection: object, entering: boolean): unknown;
 /** `copy` is a copy of the payload copy `source`: it names the same member. */
 export declare function nameCopyOfCopy(source: unknown, copy: unknown): void;
 /** Copy payloads of payloads with `run` (see `copyingPayload`). */
