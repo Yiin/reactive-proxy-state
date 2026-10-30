@@ -85,6 +85,24 @@ describe("a stored object that cannot take the raw object of a proxy it holds", 
   });
 
   for (const [name, lib] of libraries) {
+    test(`a setter is never called, and its object keeps the proxy (${name})`, () => {
+      const sync = mirror(lib, { a: { x: 1 }, cfg: null });
+      let calls = 0;
+      let held: unknown = sync.state.a;
+      const holder = {};
+      Object.defineProperty(holder, "ref", {
+        get: () => held,
+        set: (value) => {
+          calls++;
+          held = value;
+        },
+        enumerable: true,
+      });
+      sync.state.cfg = holder;
+      expect(calls).toBe(0);
+      expect(held).toBe(sync.state.a);
+    });
+
     test(`a frozen object at depth 2, then writes through the kept proxy (${name})`, () => {
       const sync = mirror(lib, { a: { x: 1 }, cfg: null });
       sync.state.cfg = { frozen: Object.freeze({ ref: sync.state.a }) };

@@ -41,14 +41,27 @@ export function unwrapForStore(value: any): any {
   return value
 }
 
+const lookupSetter: ((this: object, key: PropertyKey) => unknown) | undefined = (Object.prototype as any).__lookupSetter__
+
 /**
  * Put the raw object of `child`, a proxy, at `key` of `value`, where an own
- * data property holds it, through `Reflect.set`: a frozen object, a
- * read-only property or a getter keeps the proxy, without a throw in strict
- * or sloppy code, and no setter runs.
+ * data property holds it: a frozen object, a read-only property or a getter
+ * keeps the proxy, without a throw in strict (ESM) or sloppy (CJS) code,
+ * and no setter runs. `__lookupSetter__` finds a setter without making a
+ * descriptor object, which costs a stored spread several times as much;
+ * where it is missing, the descriptor decides.
  */
-function storeRawChild(value: object, key: PropertyKey, child: object): void {
-  if (Reflect.getOwnPropertyDescriptor(value, key)?.value === child) Reflect.set(value, key, toRaw(child))
+function storeRawChild(value: any, key: PropertyKey, child: object): void {
+  if (lookupSetter === undefined) {
+    if (Reflect.getOwnPropertyDescriptor(value, key)?.value === child) Reflect.set(value, key, toRaw(child))
+    return
+  }
+  if (lookupSetter.call(value, key) !== undefined) return
+  try {
+    value[key] = toRaw(child)
+  } catch {
+    // a read-only property or a getter without a setter: strict code throws, sloppy code does not
+  }
 }
 
 const MAX_CACHE_SIZE = 1000;
@@ -1206,6 +1219,18 @@ export function nameMember(member: unknown, copy: unknown, collection: object, e
         return copy;
     }
     return nameRaw(toRaw(member) as object, member, copy, collection, entering);
+}
+
+/**
+ * The object a map event about `key`, a key of `collection` (raw), carries:
+ * `key` itself, or a copy when its token there is not its own (see
+ * `nameMember`). `entering`: the write adds `key`.
+ */
+export function nameKey(key: object, collection: object, entering: boolean): object {
+    const raw = toRaw(key) as object;
+    const own = collectionIdentities.members.get(raw);
+    if (own !== undefined && !own.shared) return key;
+    return nameRaw(raw, key, key, collection, entering);
 }
 
 /** `nameMember` for `raw`, the raw object of `member`. */
