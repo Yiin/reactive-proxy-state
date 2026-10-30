@@ -1352,7 +1352,30 @@ function replicaIndex(collection: object, member: boolean): ReplicaIndex {
     let index = collectionIdentities.indexes.get(collection);
     const size = (collection as Set<unknown>).size;
     if (index === undefined || index.size !== size || index.member !== member) {
-        index = { byToken: member ? memberIndex(collection) : copyIndex(collection), size, member };
+        // the loop stays in this function, which every event calls: a build
+        // then runs as optimized code, not in a function called once
+        const byToken = new Map<Token, unknown>();
+        const overrides = member ? collectionIdentities.overrides.get(collection) : undefined;
+        const members =
+            collection instanceof Map ? Map.prototype.keys.call(collection) : Set.prototype.values.call(collection as Set<unknown>);
+        for (const held of members) {
+            if (held === null || typeof held !== 'object') continue;
+            const raw = toRaw(held) as object;
+            if (member) {
+                // a token of its own replaces a copy's origin
+                const own = overrides?.get(raw) ?? collectionIdentities.members.get(raw);
+                if (own !== undefined) {
+                    byToken.set(own, held);
+                    continue;
+                }
+                const origin = collectionIdentities.copies.get(raw);
+                if (origin !== undefined && !byToken.has(origin)) byToken.set(origin, held);
+            } else {
+                const token = collectionIdentities.copies.get(raw) ?? collectionIdentities.members.get(raw);
+                if (token !== undefined && !byToken.has(token)) byToken.set(token, held);
+            }
+        }
+        index = { byToken, size, member };
         collectionIdentities.indexes.set(collection, index);
         const watch = indexWatches.get(collection);
         if (watch !== undefined) watch.indexed = true;
@@ -1422,40 +1445,6 @@ export function indexRemoved(collection: Set<unknown> | Map<unknown, unknown>, m
     const raw = toRaw(member) as object;
     const token = heldToken(collection, raw) ?? collectionIdentities.copies.get(raw);
     if (token !== undefined && index.byToken.get(token) === member) index.byToken.delete(token);
-}
-
-function membersOf(collection: object): Iterable<unknown> {
-    return collection instanceof Map ? Map.prototype.keys.call(collection) : Set.prototype.values.call(collection as Set<unknown>);
-}
-
-/** `replicaIndex` of a replica that is no reactive state: a copy first stands for the member it was copied from. */
-function copyIndex(collection: object): Map<Token, unknown> {
-    const byToken = new Map<Token, unknown>();
-    for (const member of membersOf(collection)) {
-        if (member === null || typeof member !== 'object') continue;
-        const raw = toRaw(member) as object;
-        const token = collectionIdentities.copies.get(raw) ?? collectionIdentities.members.get(raw);
-        if (token !== undefined && !byToken.has(token)) byToken.set(token, member);
-    }
-    return byToken;
-}
-
-/** `replicaIndex` of a collection of a reactive state: a member's own token first. */
-function memberIndex(collection: object): Map<Token, unknown> {
-    const byToken = new Map<Token, unknown>();
-    const overrides = collectionIdentities.overrides.get(collection);
-    for (const member of membersOf(collection)) {
-        if (member === null || typeof member !== 'object') continue;
-        const raw = toRaw(member) as object;
-        const own = overrides?.get(raw) ?? collectionIdentities.members.get(raw);
-        if (own !== undefined) {
-            byToken.set(own, member);
-            continue;
-        }
-        const origin = collectionIdentities.copies.get(raw);
-        if (origin !== undefined && !byToken.has(origin)) byToken.set(origin, member);
-    }
-    return byToken;
 }
 
 /** After a handler changed `collection` (raw): its index, if it has one, knows its size. */
