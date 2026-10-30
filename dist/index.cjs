@@ -2392,9 +2392,18 @@ function unwrapForStore(value) {
   }
   return value;
 }
+var lookupSetter = Object.prototype.__lookupSetter__;
 function storeRawChild(value, key, child) {
-  if (Reflect.getOwnPropertyDescriptor(value, key)?.value === child)
-    Reflect.set(value, key, toRaw(child));
+  if (lookupSetter === undefined) {
+    if (Reflect.getOwnPropertyDescriptor(value, key)?.value === child)
+      Reflect.set(value, key, toRaw(child));
+    return;
+  }
+  if (lookupSetter.call(value, key) !== undefined)
+    return;
+  try {
+    value[key] = toRaw(child);
+  } catch {}
 }
 var MAX_CACHE_SIZE = 1000;
 var pathCache = new WeakMap;
@@ -3240,6 +3249,13 @@ function nameMember(member, copy, collection, entering) {
     return copy;
   }
   return nameRaw(toRaw(member), member, copy, collection, entering);
+}
+function nameKey(key, collection, entering) {
+  const raw = toRaw(key);
+  const own = collectionIdentities.members.get(raw);
+  if (own !== undefined && !own.shared)
+    return key;
+  return nameRaw(raw, key, key, collection, entering);
 }
 function nameRaw(raw, member, copy, collection, entering) {
   const own = collectionIdentities.members.get(raw);
@@ -5339,7 +5355,7 @@ function wrapMap(map, node) {
           };
           const held = located && heldItems(value2, oldValue);
           if (event !== undefined && isObject4(key))
-            event.key = nameMember(key, key, target, !existed);
+            event.key = nameKey(key, target, !existed);
           const copied = copyPayload(event, located, target, held);
           if (copied === 0 /* Reaches */) {
             copyPayloadReaching(event, located, target, shallowCopy(target).set(key, value2));
@@ -5381,7 +5397,7 @@ function wrapMap(map, node) {
             oldValue
           };
           if (event !== undefined && isObject4(key))
-            event.key = nameMember(key, key, target, false);
+            event.key = nameKey(key, target, false);
           if (copyPayload(event, located, target) === 0 /* Reaches */) {
             const after = shallowCopy(target);
             after.delete(key);

@@ -156,6 +156,12 @@ export declare function setData(object: object, key: PropertyKey, value: unknown
  * `copy` names the same member.
  */
 export declare function nameMember(member: unknown, copy: unknown, collection: object, entering: boolean): unknown;
+/**
+ * The object a map event about `key`, a key of `collection` (raw), carries:
+ * `key` itself, or a copy when its token there is not its own (see
+ * `nameMember`). `entering`: the write adds `key`.
+ */
+export declare function nameKey(key: object, collection: object, entering: boolean): object;
 /** `copy` is a copy of the payload copy `source`: it names the same member. */
 export declare function nameCopyOfCopy(source: unknown, copy: unknown): void;
 /** Copy payloads of payloads with `run` (see `copyingPayload`). */
