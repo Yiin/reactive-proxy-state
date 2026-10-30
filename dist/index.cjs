@@ -3340,7 +3340,29 @@ function replicaIndex(collection, member) {
   let index = collectionIdentities.indexes.get(collection);
   const size = collection.size;
   if (index === undefined || index.size !== size || index.member !== member) {
-    index = { byToken: member ? memberIndex(collection) : copyIndex(collection), size, member };
+    const byToken = new Map;
+    const overrides = member ? collectionIdentities.overrides.get(collection) : undefined;
+    const members = collection instanceof Map ? Map.prototype.keys.call(collection) : Set.prototype.values.call(collection);
+    for (const held of members) {
+      if (held === null || typeof held !== "object")
+        continue;
+      const raw = toRaw(held);
+      if (member) {
+        const own = overrides?.get(raw) ?? collectionIdentities.members.get(raw);
+        if (own !== undefined) {
+          byToken.set(own, held);
+          continue;
+        }
+        const origin = collectionIdentities.copies.get(raw);
+        if (origin !== undefined && !byToken.has(origin))
+          byToken.set(origin, held);
+      } else {
+        const token = collectionIdentities.copies.get(raw) ?? collectionIdentities.members.get(raw);
+        if (token !== undefined && !byToken.has(token))
+          byToken.set(token, held);
+      }
+    }
+    index = { byToken, size, member };
     collectionIdentities.indexes.set(collection, index);
     const watch = indexWatches.get(collection);
     if (watch !== undefined)
@@ -3393,39 +3415,6 @@ function indexRemoved(collection, member) {
   const token = heldToken(collection, raw) ?? collectionIdentities.copies.get(raw);
   if (token !== undefined && index.byToken.get(token) === member)
     index.byToken.delete(token);
-}
-function membersOf(collection) {
-  return collection instanceof Map ? Map.prototype.keys.call(collection) : Set.prototype.values.call(collection);
-}
-function copyIndex(collection) {
-  const byToken = new Map;
-  for (const member of membersOf(collection)) {
-    if (member === null || typeof member !== "object")
-      continue;
-    const raw = toRaw(member);
-    const token = collectionIdentities.copies.get(raw) ?? collectionIdentities.members.get(raw);
-    if (token !== undefined && !byToken.has(token))
-      byToken.set(token, member);
-  }
-  return byToken;
-}
-function memberIndex(collection) {
-  const byToken = new Map;
-  const overrides = collectionIdentities.overrides.get(collection);
-  for (const member of membersOf(collection)) {
-    if (member === null || typeof member !== "object")
-      continue;
-    const raw = toRaw(member);
-    const own = overrides?.get(raw) ?? collectionIdentities.members.get(raw);
-    if (own !== undefined) {
-      byToken.set(own, member);
-      continue;
-    }
-    const origin = collectionIdentities.copies.get(raw);
-    if (origin !== undefined && !byToken.has(origin))
-      byToken.set(origin, member);
-  }
-  return byToken;
 }
 function keepIndexSize(collection) {
   const index = collectionIdentities.indexes.get(collection);
