@@ -3248,7 +3248,13 @@ function nameMember(member, copy, collection, entering) {
     nameCopyOfCopy(member, copy);
     return copy;
   }
-  return nameRaw(toRaw(member), member, copy, collection, entering);
+  const raw = toRaw(member);
+  const own = collectionIdentities.members.get(raw);
+  if (own === undefined || own.shared)
+    return nameRaw(raw, member, copy, collection, entering);
+  if (copy !== member)
+    collectionIdentities.copies.set(copy, own);
+  return copy;
 }
 function nameKey(event, key, collection, entering) {
   const raw = toRaw(key);
@@ -3336,14 +3342,17 @@ function replicaIndex(collection, member) {
   if (index === undefined || index.size !== size || index.member !== member) {
     index = { byToken: member ? memberIndex(collection) : copyIndex(collection), size, member };
     collectionIdentities.indexes.set(collection, index);
-    const node = locationNodes.get(collection);
-    if (node !== undefined)
-      node.indexed = true;
+    const watch = indexWatches.get(collection);
+    if (watch !== undefined)
+      watch.indexed = true;
   }
   return index;
 }
-function hasReplicaIndex(collection) {
-  return collectionIdentities.indexes.has(collection);
+var indexWatches = new WeakMap;
+function watchIndex(collection) {
+  const watch = { indexed: collectionIdentities.indexes.has(collection) };
+  indexWatches.set(collection, watch);
+  return watch;
 }
 function heldToken(collection, member) {
   return collectionIdentities.overrides.get(collection)?.get(member) ?? collectionIdentities.members.get(member);
@@ -3592,11 +3601,10 @@ function getLocationNode(raw) {
 function ensureLocationNode(raw) {
   let node = nodes.get(raw);
   if (node === undefined) {
-    const kind = raw instanceof Map ? 1 /* Map */ : raw instanceof Set ? 2 /* Set */ : 0 /* Plain */;
     node = {
       id: ++nodeCount,
       raw,
-      kind,
+      kind: raw instanceof Map ? 1 /* Map */ : raw instanceof Set ? 2 /* Set */ : 0 /* Plain */,
       places: [],
       root: undefined,
       scope: undefined,
@@ -3610,8 +3618,7 @@ function ensureLocationNode(raw) {
       walk: 0,
       touched: 0,
       pruned: 0,
-      index: undefined,
-      indexed: kind !== 0 /* Plain */ && hasReplicaIndex(raw)
+      index: undefined
     };
     nodes.set(raw, node);
   }
@@ -5369,6 +5376,7 @@ function wrapMap(map, node) {
   if (globalSeen.has(map))
     return globalSeen.get(map);
   const methodCache = {};
+  const watch = watchIndex(map);
   const proxy = new Proxy(map, {
     get(target, prop, receiver) {
       if (prop === "__v_raw" /* RAW */)
@@ -5410,7 +5418,7 @@ function wrapMap(map, node) {
           }
           target.set(key, value2);
           const newSize = target.size;
-          if (node.indexed && !existed)
+          if (watch.indexed && !existed)
             indexAdded(target, key);
           if (isObject4(oldValue))
             detachPlace(oldValue, node, key);
@@ -5455,7 +5463,7 @@ function wrapMap(map, node) {
           }
           const result = target.delete(key);
           const newSize = target.size;
-          if (node.indexed && result)
+          if (watch.indexed && result)
             indexRemoved(target, key);
           if (result) {
             if (isObject4(oldValue))
@@ -5482,7 +5490,7 @@ function wrapMap(map, node) {
           const removed = [...target];
           target.clear();
           const newSize = target.size;
-          if (node.indexed)
+          if (watch.indexed)
             forgetReplicaIndex(target);
           for (const [key, value2] of removed) {
             if (isObject4(value2))
@@ -5584,6 +5592,7 @@ function wrapSet(set, node) {
   if (globalSeen.has(set))
     return globalSeen.get(set);
   const methodCache = {};
+  const watch = watchIndex(set);
   const proxy = new Proxy(set, {
     get(target, prop, receiver) {
       if (prop === "__v_raw" /* RAW */)
@@ -5616,7 +5625,7 @@ function wrapSet(set, node) {
             }
             target.add(value2);
             const newSize = target.size;
-            if (node.indexed)
+            if (watch.indexed)
               indexAdded(target, value2);
             if (isObject5(value2))
               attachValue(value2, node, undefined, copied === 2 /* Fresh */);
@@ -5651,7 +5660,7 @@ function wrapSet(set, node) {
             }
             const result = target.delete(value2);
             const newSize = target.size;
-            if (node.indexed && result)
+            if (watch.indexed && result)
               indexRemoved(target, value2);
             if (result) {
               if (isObject5(value2))
@@ -5679,7 +5688,7 @@ function wrapSet(set, node) {
           const removed = [...target];
           target.clear();
           const newSize = target.size;
-          if (node.indexed)
+          if (watch.indexed)
             forgetReplicaIndex(target);
           for (const member of removed) {
             if (isObject5(member))

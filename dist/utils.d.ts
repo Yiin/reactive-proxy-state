@@ -167,11 +167,20 @@ export declare function nameKey(event: StateEvent, key: object, collection: obje
 export declare function nameCopyOfCopy(source: unknown, copy: unknown): void;
 /** Copy payloads of payloads with `run` (see `copyingPayload`). */
 export declare function copyingPayloads<T>(run: () => T): T;
-/** Does `collection` (raw) have an index by token (see `replicaIndex`)? */
-export declare function hasReplicaIndex(collection: object): boolean;
+/** What the proxy of a Set or Map reads to know whether its collection has an index (see `watchIndex`). */
+export interface IndexWatch {
+    indexed: boolean;
+}
+/**
+ * The `IndexWatch` for a new proxy of `collection` (raw): `indexed` turns
+ * true when the collection gets an index, also one `updateState` made
+ * before the proxy, and the proxy then keeps that index as it changes the
+ * collection (see `indexAdded`).
+ */
+export declare function watchIndex(collection: object): IndexWatch;
 /**
  * The proxy of `collection` (raw), which has an index (see
- * `LocationNode.indexed`), added `member` (a Set member or Map key): the
+ * `watchIndex`), added `member` (a Set member or Map key): the
  * index takes it, so a later event finds it without a rebuild.
  */
 export declare function indexAdded(collection: Set<unknown> | Map<unknown, unknown>, member: unknown): void;
