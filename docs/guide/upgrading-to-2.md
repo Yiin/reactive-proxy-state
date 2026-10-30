@@ -16,7 +16,7 @@ To make that hold, every payload is now a copy, and a few inputs are refused. Mo
    });
    ```
 
-2. **Do not rely on payload identity.** `newValue`, `items`, a `set-add`'s `value` and the initial state are copies. On a root with `{ async: true }`, what a write removes is a copy too. Compare payloads by content or by an id field, never with `===` against your own objects. A replica's Set members are copies as well, and so are its Map keys, except the key of a `map-set` event, which is your source object, as in 1.0.44. Change them through `updateState`, not by looking up your source objects in the replica.
+2. **Do not rely on payload identity.** `newValue`, `items`, a `set-add`'s `value` and the initial state are copies. On a root with `{ async: true }`, what a write removes is a copy too. Compare payloads by content or by an id field, never with `===` against your own objects. A replica's Set members are copies as well, and so are its Map keys, except the key of a `map-set` event, which is your source object, as in 1.0.44. That key is a copy too when another key in that Map already carries its token (see Collection membership below). Change them through `updateState`, not by looking up your source objects in the replica.
 
 3. **Catch the two new errors.** Both are thrown before anything changes, so the state, its proxies and every replica stay as they were.
    - `SnapshotLimitError`, a `RangeError`, from `reactive()` or a write whose payload would copy shared objects more than 100,000 extra times (see [Shared graphs](#shared-graphs-have-a-copy-limit)).
