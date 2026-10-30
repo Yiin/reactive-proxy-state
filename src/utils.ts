@@ -1180,6 +1180,8 @@ interface CollectionIdentities {
     indexes: WeakMap<object, ReplicaIndex>;
     /** By collection: the members whose own shared token another member there carries, and their token there. */
     overrides: WeakMap<object, WeakMap<object, Token>>;
+    /** By collection: what its proxy reads to know whether it has an index (see `watchIndex`). */
+    watches: WeakMap<object, IndexWatch>;
 }
 
 /** A collection's members by token, its size when the index last knew it, and how it was read (see `replicaIndex`). */
@@ -1189,10 +1191,10 @@ interface ReplicaIndex {
     member: boolean;
 }
 
-const collectionIdentityKey = Symbol.for('@yiin/reactive-proxy-state.collection-identities.v3');
+const collectionIdentityKey = Symbol.for('@yiin/reactive-proxy-state.collection-identities.v4');
 const collectionIdentities: CollectionIdentities =
     Reflect.get(globalThis, collectionIdentityKey) ??
-    { members: new WeakMap(), copies: new WeakMap(), indexes: new WeakMap(), overrides: new WeakMap() };
+    { members: new WeakMap(), copies: new WeakMap(), indexes: new WeakMap(), overrides: new WeakMap(), watches: new WeakMap() };
 if (!Reflect.has(globalThis, collectionIdentityKey)) {
     Object.defineProperty(globalThis, collectionIdentityKey, { value: collectionIdentities });
 }
@@ -1393,8 +1395,10 @@ export interface IndexWatch {
     indexed: boolean;
 }
 
-// The `IndexWatch` of each Set and Map that has a proxy, by raw collection.
-const indexWatches = new WeakMap<object, IndexWatch>();
+// The `IndexWatch` of each Set and Map that has a proxy, by raw collection,
+// shared by the ESM and CJS bundles in one realm, like the tokens: a build
+// in one bundle must reach the proxy the other bundle made.
+const indexWatches = collectionIdentities.watches;
 
 /**
  * The `IndexWatch` for a new proxy of `collection` (raw): `indexed` turns
