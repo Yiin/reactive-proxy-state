@@ -11,7 +11,7 @@ import {
   copiedFresh,
   copyingPayloads,
   nameCopyOfCopy,
-  nameMemberCopy,
+  nameMember,
   globalSeen,
   locationNodes,
   setData,
@@ -235,19 +235,30 @@ function hasNoOwnAccessor(target: object): boolean {
 
 /**
  * Does `parent` (the place's container, if it is still alive) still hold
- * `raw` at the place? A raw write outside the proxies can break it.
+ * `raw` at the place? A raw write outside the proxies can break it. A proxy
+ * of `raw` counts as `raw`: a store leaves one where it cannot put the raw
+ * object (a frozen object, a read-only property, a getter).
  */
 function holdsIn(parent: LocationNode | undefined, key: unknown, raw: object): parent is LocationNode {
   if (parent === undefined) return false;
   const container = parent.raw as any;
   switch (parent.kind) {
-    case ContainerKind.Map:
-      return container.get(key) === raw;
+    case ContainerKind.Map: {
+      const held = container.get(key);
+      return held === raw || proxyOf(held, raw);
+    }
     case ContainerKind.Set:
       return container.has(raw);
-    default:
-      return container[key as PropertyKey] === raw;
+    default: {
+      const held = container[key as PropertyKey];
+      return held === raw || proxyOf(held, raw);
+    }
   }
+}
+
+/** Is `held` a proxy of `raw`? */
+function proxyOf(held: unknown, raw: object): boolean {
+  return isObject(held) && (held as any)[ReactiveFlags.RAW] !== undefined && toRaw(held) === raw;
 }
 
 function holds(place: Place, raw: object): boolean {
@@ -655,10 +666,8 @@ export function copyPayload(
     if (!stored) valueCopy = event.oldValue;
   }
   if (isObject(newValue)) event.newValue = newCopy;
-  if (isObject(value)) {
-    nameMemberCopy(value, valueCopy);
-    event.value = valueCopy;
-  }
+  // a set member: `container` is its set, and a `set-add` puts it there
+  if (isObject(value)) event.value = nameMember(value, valueCopy, container, stored);
   if (items !== undefined) event.items = itemsCopy as any[];
   return fresh ? Copied.Fresh : Copied.Done;
 }
@@ -701,10 +710,7 @@ export function copyPayloadAfter(event: StateEvent, target: Target, container: o
       : oldValues;
   if (isObject(newValue)) event.newValue = newCopy;
   if (isObject(oldValue)) event.oldValue = oldCopy;
-  if (isObject(value)) {
-    nameMemberCopy(value, valueCopy);
-    event.value = valueCopy;
-  }
+  if (isObject(value)) event.value = nameMember(value, valueCopy, container, stored);
   if (items !== undefined) event.items = itemsCopy;
   if (oldValues !== undefined) event.oldValues = oldValuesCopy;
 }

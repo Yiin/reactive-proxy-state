@@ -180,15 +180,20 @@ const actionHandlers: { [key: string]: (target: any, key: any, event: StateEvent
             const newValueEntries = [...newValue.entries()];
             target.clear();
             forgetReplicaIndex(target);
+            // a reactive replica takes its members the way the handlers above add them
+            const reactiveTarget = isReactive(target);
             for (const [key, value] of newValueEntries) {
-                target.set(key, value);
+                if (reactiveTarget) replicaMapSet(target, key, value);
+                else target.set(key, value);
             }
         } else if (target instanceof Set && newValue instanceof Set) {
             const newValueEntries = [...newValue.values()];
             target.clear();
             forgetReplicaIndex(target);
+            const reactiveTarget = isReactive(target);
             for (const value of newValueEntries) {
-                target.add(value);
+                if (reactiveTarget) replicaAdd(target, value);
+                else target.add(value);
             }
         } else if (typeof target === 'object' && target !== null && typeof newValue === 'object' && newValue !== null) {
             // plain object replacement

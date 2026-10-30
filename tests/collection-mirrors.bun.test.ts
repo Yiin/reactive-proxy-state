@@ -160,6 +160,145 @@ describe("a root on a replica whose events go back to the source", () => {
     expect(toRaw(B).m.size).toBe(0);
   });
 
+  for (const [async, mute] of [
+    [false, true],
+    [false, false],
+    [true, false],
+  ] as const) {
+    const mode = `${async ? "async" : "sync"}${mute ? ", echo muted" : ""}`;
+    const settle = async () => {
+      for (let i = 0; i < 4; i++) await tick();
+    };
+
+    test(`B's member put into S next to its original (${mode})`, async () => {
+      const { S, B, events } = await bidirectional(async, mute, 100);
+      const original = { id: 1 };
+      S.s.add(original);
+      await settle();
+      const mirrored = [...toRaw(B).s][0];
+      S.s.add(mirrored);
+      await settle();
+      expect(toRaw(S).s.size).toBe(2);
+      expect(toRaw(B).s.size).toBe(2);
+      S.s.delete(mirrored);
+      await settle();
+      expect(toRaw(S).s.size).toBe(1);
+      expect(toRaw(B).s.size).toBe(1);
+      S.s.delete(original);
+      await settle();
+      expect(toRaw(B).s.size).toBe(0);
+      expect(events.S.length + events.B.length).toBeLessThan(20);
+    });
+
+    test(`B adds an object equal to a member S holds, then deletes it (${mode})`, async () => {
+      const { S, B, events } = await bidirectional(async, mute, 100);
+      S.s.add({ id: 1 });
+      await settle();
+      const twin = { id: 1 };
+      B.s.add(twin);
+      await settle();
+      expect(toRaw(S).s.size).toBe(2);
+      expect(toRaw(B).s.size).toBe(2);
+      B.s.delete(twin);
+      await settle();
+      expect(toRaw(S).s.size).toBe(1);
+      expect(toRaw(B).s.size).toBe(1);
+      expect(events.S.length + events.B.length).toBeLessThan(20);
+    });
+
+    test(`a member deleted and added again on each side (${mode})`, async () => {
+      const { S, B, events } = await bidirectional(async, mute, 100);
+      const original = { id: 1 };
+      S.s.add(original);
+      await settle();
+      const mirrored = [...toRaw(B).s][0];
+      B.s.delete(mirrored);
+      await settle();
+      B.s.add(mirrored);
+      await settle();
+      expect(toRaw(S).s.size).toBe(1);
+      expect(toRaw(B).s.size).toBe(1);
+      S.s.delete([...toRaw(S).s][0]);
+      await settle();
+      expect(toRaw(B).s.size).toBe(0);
+      S.s.add(original);
+      await settle();
+      expect(toRaw(B).s.size).toBe(1);
+      expect(text(B.s)).toEqual(text(S.s));
+      expect(events.S.length + events.B.length).toBeLessThan(30);
+    });
+  }
+
+  test("a Set that B assigns, then a member B deletes (sync, echo muted)", async () => {
+    const { S, B } = await bidirectional(false, true);
+    B.x = new Set([{ id: 1 }, { id: 2 }]);
+    B.x.delete([...toRaw(B).x][0]);
+    expect(text(S.x)).toEqual(text(B.x));
+    S.x.delete([...toRaw(S).x][0]);
+    expect(toRaw(B).x.size).toBe(0);
+  });
+
+  test("a chain of three roots, each on the replica of the one before, writing back", () => {
+    let first: any;
+    let second: any;
+    let fromS = false;
+    let fromB = false;
+    let fromC = false;
+    let B: any;
+    let C: any;
+    const S: any = reactive({ s: new Set([{ id: 1 }, { id: 2 }]) }, (event) => {
+      if (event.action === "replace" && event.path.length === 0) first = event.newValue;
+      else if (!fromB) {
+        fromS = true;
+        try {
+          updateState(B, event);
+        } finally {
+          fromS = false;
+        }
+      }
+    });
+    B = reactive(first, (event) => {
+      if (event.action === "replace" && event.path.length === 0) {
+        second = event.newValue;
+        return;
+      }
+      if (!fromS) {
+        fromB = true;
+        try {
+          updateState(S, event);
+        } finally {
+          fromB = false;
+        }
+      }
+      if (!fromC && C !== undefined) {
+        const outer = fromB;
+        fromB = true;
+        try {
+          updateState(C, event);
+        } finally {
+          fromB = outer;
+        }
+      }
+    });
+    C = reactive(second, (event) => {
+      if (event.action === "replace" && event.path.length === 0) return;
+      if (fromB) return;
+      fromC = true;
+      try {
+        updateState(B, event);
+      } finally {
+        fromC = false;
+      }
+    });
+    C.s.delete([...toRaw(C).s][0]);
+    expect([toRaw(S).s.size, toRaw(B).s.size, toRaw(C).s.size]).toEqual([1, 1, 1]);
+    S.s.add({ id: 3 });
+    expect([toRaw(S).s.size, toRaw(B).s.size, toRaw(C).s.size]).toEqual([2, 2, 2]);
+    C.s.delete([...toRaw(C).s].find((member: any) => member.id === 3));
+    expect([toRaw(S).s.size, toRaw(B).s.size, toRaw(C).s.size]).toEqual([1, 1, 1]);
+    expect(text(S.s)).toEqual(text(C.s));
+  });
+
   test("a root made on a replica that already holds members deletes one of them", async () => {
     let replica: any;
     let applyingFromB = false;

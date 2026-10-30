@@ -29,20 +29,26 @@ export function unwrapForStore(value: any): any {
   if (Array.isArray(value)) {
     for (let i = 0; i < value.length; i++) {
       const child = value[i]
-      if (child != null && typeof child === 'object' && child[ReactiveFlags.IS_REACTIVE]) {
-        value[i] = toRaw(child)
-      }
+      if (child != null && typeof child === 'object' && child[ReactiveFlags.IS_REACTIVE]) storeRawChild(value, i, child)
     }
   } else if (!(value instanceof Map) && !(value instanceof Set) && !(value instanceof Date)) {
     for (const key in value) {
       if (!Object.prototype.hasOwnProperty.call(value, key)) continue
       const child = value[key]
-      if (child != null && typeof child === 'object' && child[ReactiveFlags.IS_REACTIVE]) {
-        value[key] = toRaw(child)
-      }
+      if (child != null && typeof child === 'object' && child[ReactiveFlags.IS_REACTIVE]) storeRawChild(value, key, child)
     }
   }
   return value
+}
+
+/**
+ * Put the raw object of `child`, a proxy, at `key` of `value`, where an own
+ * data property holds it, through `Reflect.set`: a frozen object, a
+ * read-only property or a getter keeps the proxy, without a throw in strict
+ * or sloppy code, and no setter runs.
+ */
+function storeRawChild(value: object, key: PropertyKey, child: object): void {
+  if (Reflect.getOwnPropertyDescriptor(value, key)?.value === child) Reflect.set(value, key, toRaw(child))
 }
 
 const MAX_CACHE_SIZE = 1000;
@@ -1069,25 +1075,53 @@ function fillNamed(value: any, identity: object, copy: any, depth: number, named
 function fillMap(value: any, identity: object, copy: Map<unknown, unknown>, depth: number, named: Named): boolean {
     const below = depth + 1;
     enterPath(identity, copy, depth);
-    Map.prototype.forEach.call(toRaw(value), (entry: unknown, key: unknown) => {
+    const entries = toRaw(value);
+    Map.prototype.forEach.call(entries, (entry: unknown, key: unknown) => {
         const keyCopy = cloneValue(key, below, named);
-        if (key !== null && typeof key === "object") nameMemberCopy(key, keyCopy);
-        copy.set(keyCopy, cloneValue(entry, below, named));
+        copy.set(nameMember(key, keyCopy, entries, false), cloneValue(entry, below, named));
     });
-    fillCollectionProperties(toRaw(value), copy, below, named);
+    fillCollectionProperties(entries, copy, below, named);
     return true;
 }
 
+/**
+ * A store keeps one member for a proxy and its raw object, at the place of
+ * the first of them (see `swapMembers` in location.ts), so the copy keeps
+ * one member for both there too.
+ */
 function fillSet(value: any, identity: object, copy: Set<unknown>, depth: number, named: Named): boolean {
     const below = depth + 1;
     enterPath(identity, copy, depth);
-    Set.prototype.forEach.call(toRaw(value), (entry: unknown) => {
-        const entryCopy = cloneValue(entry, below, named);
-        if (entry !== null && typeof entry === "object") nameMemberCopy(entry, entryCopy);
+    const members = toRaw(value) as Set<unknown>;
+    let later: Set<unknown> | undefined;
+    Set.prototype.forEach.call(members, (entry: unknown) => {
+        if (entry === null || typeof entry !== "object") {
+            copy.add(entry);
+            return;
+        }
+        const raw = toRaw(entry) as object;
+        if (raw !== entry && later === undefined && Set.prototype.has.call(members, raw)) later = laterTwins(members);
+        if (later !== undefined && later.has(entry)) return;
+        const entryCopy = cloneValue(entry, below, named) as object;
+        if (copyingPayload) nameCopyOfCopy(entry, entryCopy);
+        else nameRaw(raw, entry, entryCopy, members, false);
         copy.add(entryCopy);
     });
-    fillCollectionProperties(toRaw(value), copy, below, named);
+    fillCollectionProperties(members, copy, below, named);
     return true;
+}
+
+/** The members of `set` whose raw object a member before them has: a proxy and its raw object. */
+function laterTwins(set: Set<unknown>): Set<unknown> {
+    const seen = new Set<object>();
+    const later = new Set<unknown>();
+    Set.prototype.forEach.call(set, (member: unknown) => {
+        if (member === null || typeof member !== "object") return;
+        const raw = toRaw(member) as object;
+        if (seen.has(raw)) later.add(member);
+        else seen.add(raw);
+    });
+    return later;
 }
 
 function fillCollectionProperties(value: any, copy: object, depth: number, named: Named): void {
@@ -1101,60 +1135,139 @@ function fillCollectionProperties(value: any, copy: object, depth: number, named
 }
 
 // Collection members across copies. A replica's Set members and Map keys
-// are copies, so an event names its member by a token, not by identity:
-// - `members`: the token of a source member (a Set member or Map key in a
-//   state), one per member, made when a copy or an event first names it;
+// are copies, so an event names its member by a token, not by identity. A
+// token is unique inside the collection that holds its member.
+// - `members`: the token of an object as a member (raw), made when an
+//   event or a copy first names it in a collection;
 // - `copies`: the token of the member each library copy was made from.
-// A copy that goes into a source collection is a member of its own there,
-// with its own token, so it stays apart from the member it was copied from.
-// A replica collection keeps its members by token in `indexes` (see
-// `replicaIndex`), so an event finds its member without a scan. Tokens are
-// plain objects in weak maps: they keep no member alive. ESM and CJS
-// bundles in one realm share these maps.
+// A copy that a write puts into a collection is a member of its own there,
+// with a new token. A copy that `updateState` puts into a reactive replica,
+// or that a collection already holds when the library first names it (a
+// root made on a replica), takes the token of the member it was copied
+// from, unless that collection holds another member with that token: a
+// root on a replica then names its members as the source does, and its
+// events find them there. Such a token is `shared`. An object with a
+// shared token that joins a collection where another member carries that
+// token gets a token of its own in that collection (`overrides`); an event
+// that would send the object itself sends a copy that carries that token.
+// A collection whose tokens were looked up keeps its members by token in
+// `indexes` (see `replicaIndex`), so an event finds its member without a
+// scan. Tokens are plain objects in weak maps: they keep no member alive.
+// ESM and CJS bundles in one realm share these maps.
+
+/** A member's identity. `shared`: more than one object carries it as its own. */
+interface Token {
+    shared: boolean;
+}
+
 interface CollectionIdentities {
-    members: WeakMap<object, object>;
-    copies: WeakMap<object, object>;
+    members: WeakMap<object, Token>;
+    copies: WeakMap<object, Token>;
     indexes: WeakMap<object, ReplicaIndex>;
+    /** By collection: the members whose own shared token another member there carries, and their token there. */
+    overrides: WeakMap<object, WeakMap<object, Token>>;
 }
 
-/** A replica collection's members by token, and its size when `updateState` last changed it. */
+/** A collection's members by token, its size when the index last knew it, and how it was read (see `replicaIndex`). */
 interface ReplicaIndex {
-    byToken: Map<object, unknown>;
+    byToken: Map<Token, unknown>;
     size: number;
+    member: boolean;
 }
 
-const collectionIdentityKey = Symbol.for('@yiin/reactive-proxy-state.collection-identities.v2');
+const collectionIdentityKey = Symbol.for('@yiin/reactive-proxy-state.collection-identities.v3');
 const collectionIdentities: CollectionIdentities =
     Reflect.get(globalThis, collectionIdentityKey) ??
-    { members: new WeakMap(), copies: new WeakMap(), indexes: new WeakMap() };
+    { members: new WeakMap(), copies: new WeakMap(), indexes: new WeakMap(), overrides: new WeakMap() };
 if (!Reflect.has(globalThis, collectionIdentityKey)) {
     Object.defineProperty(globalThis, collectionIdentityKey, { value: collectionIdentities });
 }
 
-/** The token of `member`, a source member (raw); made at its first use. */
-export function memberToken(member: object): object {
-    const raw = toRaw(member) as object;
-    let token = collectionIdentities.members.get(raw);
-    if (token === undefined) {
-        token = {};
-        collectionIdentities.members.set(raw, token);
-    }
+/** A new token for `member` (raw), its own. */
+function ownToken(member: object): Token {
+    const token: Token = { shared: false };
+    collectionIdentities.members.set(member, token);
     return token;
 }
 
 /**
- * `copy` is a copy of the source member `source`: it carries the token of
- * `source`. Inside a copy of a payload (see `copyingPayload`), `source` is
- * itself a copy, and `copy` carries the token `source` carries.
+ * Name `member`, a member of `collection` (raw), in a payload whose copy of
+ * it is `copy`, or `member` itself when the event sends the object.
+ * `entering`: the write puts `member` into `collection`. Returns what the
+ * payload carries: `copy`, or a copy that carries the token `member` has in
+ * `collection` when that is not its own token (see `overrides`). Inside a
+ * copy of a payload (see `copyingPayload`), `member` is itself a copy, and
+ * `copy` names the same member.
  */
-export function nameMemberCopy(source: unknown, copy: unknown): void {
-    if (source === null || typeof source !== 'object' || copy === null || typeof copy !== 'object') return;
+export function nameMember(member: unknown, copy: unknown, collection: object, entering: boolean): unknown {
+    if (member === null || typeof member !== 'object' || copy === null || typeof copy !== 'object') return copy;
     if (copyingPayload) {
-        nameCopyOfCopy(source, copy);
-        return;
+        nameCopyOfCopy(member, copy);
+        return copy;
     }
-    const token = memberToken(source);
-    if (copy !== source) collectionIdentities.copies.set(copy, token);
+    return nameRaw(toRaw(member) as object, member, copy, collection, entering);
+}
+
+/** `nameMember` for `raw`, the raw object of `member`. */
+function nameRaw(raw: object, member: object, copy: object, collection: object, entering: boolean): object {
+    const own = collectionIdentities.members.get(raw);
+    let token: Token;
+    if (own === undefined) token = entering ? ownToken(raw) : namedInPlace(raw, collection);
+    else if (!own.shared) token = own;
+    else token = sharedTokenIn(raw, own, collection, entering);
+    if (copy !== member) {
+        collectionIdentities.copies.set(copy, token);
+        return copy;
+    }
+    return own === undefined || token === own ? copy : carrier(raw, token);
+}
+
+/**
+ * The token of `member` (raw), held by `collection` and named there for the
+ * first time: a copy takes the token it was copied from, unless another
+ * member of `collection` carries that token; anything else gets its own.
+ */
+function namedInPlace(member: object, collection: object): Token {
+    const origin = collectionIdentities.copies.get(member);
+    if (origin === undefined) return ownToken(member);
+    const index = replicaIndex(collection, true);
+    const held = heldMember(collection, index, origin);
+    if (held !== undefined && held !== member) {
+        const token = ownToken(member);
+        index.byToken.set(token, member);
+        return token;
+    }
+    origin.shared = true;
+    collectionIdentities.members.set(member, origin);
+    index.byToken.set(origin, member);
+    return origin;
+}
+
+/**
+ * The token of `member` (raw), whose own token `token` is shared, in
+ * `collection`: its own, unless it joins (`entering`) a collection where
+ * another member carries the token it has there; then a new one, for that
+ * collection only.
+ */
+function sharedTokenIn(member: object, token: Token, collection: object, entering: boolean): Token {
+    let inCollection = collectionIdentities.overrides.get(collection);
+    const current = inCollection?.get(member) ?? token;
+    if (!entering) return current;
+    const index = replicaIndex(collection, true);
+    const held = heldMember(collection, index, current);
+    if (held === undefined || held === member) return current;
+    const other: Token = { shared: false };
+    if (inCollection === undefined) collectionIdentities.overrides.set(collection, (inCollection = new WeakMap()));
+    inCollection.set(member, other);
+    index.byToken.set(other, member);
+    return other;
+}
+
+/** A copy of `member` (raw) that an event sends in its place: it carries `token`. */
+function carrier(member: object, token: Token): object {
+    const copy = cloneTree(member, Named.All);
+    collectionIdentities.copies.set(copy, token);
+    return copy;
 }
 
 /** `copy` is a copy of the payload copy `source`: it names the same member. */
@@ -1187,39 +1300,65 @@ export function copyingPayloads<T>(run: () => T): T {
  * event, the value of a synchronous set-delete), is named by its own token;
  * a payload copy by the token of the member it was copied from.
  */
-function eventToken(member: object): object | undefined {
+function eventToken(member: object): Token | undefined {
     const raw = toRaw(member) as object;
     return collectionIdentities.members.get(raw) ?? collectionIdentities.copies.get(raw);
 }
 
 /**
- * The member a replica member stands for: the one it was copied from, else
- * itself (a member the replica shares with its source).
+ * The members of `collection` (raw) by token. Made at the first lookup,
+ * kept by the replica handlers below, and made again when the collection's
+ * size changed outside them, or when it is read for the other kind of
+ * collection. A replica that is no reactive state (`member` false) holds
+ * copies that stand for the members they were copied from, also when the
+ * same object is a member of its own in a source collection. In a
+ * collection of a reactive state (`member` true) each member stands for
+ * the token it has there (see `overrides`) or its own token, and a copy
+ * not named there yet for the token it was copied from, unless a member
+ * with that token of its own is there too.
  */
-function heldToken(member: object): object | undefined {
-    const raw = toRaw(member) as object;
-    return collectionIdentities.copies.get(raw) ?? collectionIdentities.members.get(raw);
-}
-
-/**
- * The members of a replica collection (raw) by token. Made at the first
- * event that names an object member, kept by the handlers below, and made
- * again when the collection's size changed outside them.
- */
-function replicaIndex(collection: Set<unknown> | Map<unknown, unknown>): ReplicaIndex {
+function replicaIndex(collection: object, member: boolean): ReplicaIndex {
     let index = collectionIdentities.indexes.get(collection);
-    if (index === undefined || index.size !== collection.size) {
-        const byToken = new Map<object, unknown>();
-        const members = collection instanceof Map ? Map.prototype.keys.call(collection) : Set.prototype.values.call(collection);
-        for (const member of members) {
-            if (member === null || typeof member !== 'object') continue;
-            const token = heldToken(member);
-            if (token !== undefined && !byToken.has(token)) byToken.set(token, member);
-        }
-        index = { byToken, size: collection.size };
+    const size = (collection as Set<unknown>).size;
+    if (index === undefined || index.size !== size || index.member !== member) {
+        index = { byToken: member ? memberIndex(collection) : copyIndex(collection), size, member };
         collectionIdentities.indexes.set(collection, index);
     }
     return index;
+}
+
+function membersOf(collection: object): Iterable<unknown> {
+    return collection instanceof Map ? Map.prototype.keys.call(collection) : Set.prototype.values.call(collection as Set<unknown>);
+}
+
+/** `replicaIndex` of a replica that is no reactive state: a copy first stands for the member it was copied from. */
+function copyIndex(collection: object): Map<Token, unknown> {
+    const byToken = new Map<Token, unknown>();
+    for (const member of membersOf(collection)) {
+        if (member === null || typeof member !== 'object') continue;
+        const raw = toRaw(member) as object;
+        const token = collectionIdentities.copies.get(raw) ?? collectionIdentities.members.get(raw);
+        if (token !== undefined && !byToken.has(token)) byToken.set(token, member);
+    }
+    return byToken;
+}
+
+/** `replicaIndex` of a collection of a reactive state: a member's own token first. */
+function memberIndex(collection: object): Map<Token, unknown> {
+    const byToken = new Map<Token, unknown>();
+    const overrides = collectionIdentities.overrides.get(collection);
+    for (const member of membersOf(collection)) {
+        if (member === null || typeof member !== 'object') continue;
+        const raw = toRaw(member) as object;
+        const own = overrides?.get(raw) ?? collectionIdentities.members.get(raw);
+        if (own !== undefined) {
+            byToken.set(own, member);
+            continue;
+        }
+        const origin = collectionIdentities.copies.get(raw);
+        if (origin !== undefined && !byToken.has(origin)) byToken.set(origin, member);
+    }
+    return byToken;
 }
 
 /** After a handler changed `collection` (raw): its index, if it has one, knows its size. */
@@ -1229,28 +1368,36 @@ function keepIndexSize(collection: Set<unknown> | Map<unknown, unknown>): void {
 }
 
 /**
- * The replica's member that `token` names, or undefined when it holds none.
+ * The member of `raw` that `token` names, or undefined when it holds none.
  * A member the index names but the collection no longer holds does not count.
  */
-function heldMember(raw: Set<unknown> | Map<unknown, unknown>, index: ReplicaIndex, token: object): unknown {
+function heldMember(raw: object, index: ReplicaIndex, token: Token): unknown {
     const held = index.byToken.get(token);
-    return held !== undefined && raw.has(held) ? held : undefined;
+    return held !== undefined && (raw as Set<unknown>).has(held) ? held : undefined;
 }
 
 /**
  * The object a replica adds for an event's `member` named by `token`: the
  * member itself, unless the replica holds that object already for another
  * member (a source member that is also a copy the replica holds); then a
- * copy that carries `token`.
+ * copy that carries `token`. In a reactive replica (`reactive`), a copy
+ * with no token of its own takes `token`, so the replica's own events name
+ * it the way its source does.
  */
-function newMember(raw: Set<unknown> | Map<unknown, unknown>, member: object, token: object): object {
-    if (!raw.has(member)) return member;
-    const copy = cloneTree(member, Named.All);
-    collectionIdentities.copies.set(copy, token);
-    return copy;
+function newMember(raw: Set<unknown> | Map<unknown, unknown>, member: object, token: Token, reactive: boolean): object {
+    let added = member;
+    if (raw.has(member)) {
+        added = cloneTree(member, Named.All);
+        collectionIdentities.copies.set(added, token);
+    }
+    if (reactive && !collectionIdentities.members.has(added)) {
+        token.shared = true;
+        collectionIdentities.members.set(added, token);
+    }
+    return added;
 }
 
-function objectToken(value: unknown): object | undefined {
+function objectToken(value: unknown): Token | undefined {
     return value !== null && typeof value === 'object' ? eventToken(value) : undefined;
 }
 
@@ -1263,9 +1410,9 @@ export function replicaAdd(set: Set<unknown>, value: unknown): void {
         keepIndexSize(raw);
         return;
     }
-    const index = replicaIndex(raw);
+    const index = replicaIndex(raw, raw !== set);
     if (heldMember(raw, index, token) !== undefined) return;
-    const member = newMember(raw, toRaw(value) as object, token);
+    const member = newMember(raw, toRaw(value) as object, token, set !== raw);
     set.add(member);
     index.byToken.set(token, member);
     index.size = raw.size;
@@ -1280,7 +1427,7 @@ export function replicaDelete(set: Set<unknown>, value: unknown): void {
         keepIndexSize(raw);
         return;
     }
-    const index = replicaIndex(raw);
+    const index = replicaIndex(raw, raw !== set);
     const held = heldMember(raw, index, token);
     set.delete(held === undefined ? value : held);
     index.byToken.delete(token);
@@ -1296,13 +1443,13 @@ export function replicaMapSet(map: Map<unknown, unknown>, key: unknown, value: u
         keepIndexSize(raw);
         return;
     }
-    const index = replicaIndex(raw);
+    const index = replicaIndex(raw, raw !== map);
     const held = heldMember(raw, index, token);
     if (held !== undefined) {
         map.set(held, value);
         return;
     }
-    const member = newMember(raw, toRaw(key) as object, token);
+    const member = newMember(raw, toRaw(key) as object, token, map !== raw);
     map.set(member, value);
     index.byToken.set(token, member);
     index.size = raw.size;
@@ -1317,7 +1464,7 @@ export function replicaMapDelete(map: Map<unknown, unknown>, key: unknown): void
         keepIndexSize(raw);
         return;
     }
-    const index = replicaIndex(raw);
+    const index = replicaIndex(raw, raw !== map);
     const held = heldMember(raw, index, token);
     map.delete(held === undefined ? key : held);
     index.byToken.delete(token);
