@@ -3194,7 +3194,14 @@ function nameMember(member, copy, collection, entering) {
 function nameKey(event, key, collection, entering) {
   const raw = toRaw(key);
   const own = collectionIdentities.members.get(raw);
-  if (own !== undefined && !own.shared)
+  if (own === undefined) {
+    if (entering)
+      ownToken(raw);
+    else
+      namedInPlace(raw, collection);
+    return;
+  }
+  if (!own.shared)
     return;
   event.key = nameRaw(raw, own, key, key, collection, entering);
 }
@@ -5341,7 +5348,7 @@ function wrapMap(map, node) {
           }
           target.set(key, value2);
           const newSize = target.size;
-          if (watch.indexed && !existed)
+          if (!existed && watch.indexed)
             indexAdded(target, key);
           if (isObject4(oldValue))
             detachPlace(oldValue, node, key);
