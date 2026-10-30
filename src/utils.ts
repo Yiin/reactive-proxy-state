@@ -1235,7 +1235,13 @@ export function nameMember(member: unknown, copy: unknown, collection: object, e
 export function nameKey(event: StateEvent, key: object, collection: object, entering: boolean): void {
     const raw = toRaw(key) as object;
     const own = collectionIdentities.members.get(raw);
-    if (own !== undefined && !own.shared) return;
+    if (own === undefined) {
+        // named for the first time: the event carries the key itself
+        if (entering) ownToken(raw);
+        else namedInPlace(raw, collection);
+        return;
+    }
+    if (!own.shared) return;
     event.key = nameRaw(raw, own, key, key, collection, entering);
 }
 

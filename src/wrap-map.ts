@@ -98,7 +98,7 @@ export function wrapMap<K, V>(map: Map<K, V>, node: LocationNode): Map<K, V> {
           }
           target.set(key, value);
           const newSize = target.size;
-          if (watch.indexed && !existed) indexAdded(target, key);
+          if (!existed && watch.indexed) indexAdded(target, key);
 
           // move places before anything can write again (emit may throw)
           if (isObject(oldValue)) detachPlace(oldValue, node, key);
