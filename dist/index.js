@@ -3166,8 +3166,8 @@ function fillCollectionProperties(value, copy, depth, named) {
       setData(copy, symbols[i], cloneValue(value[symbols[i]], depth, named));
   }
 }
-var collectionIdentityKey = Symbol.for("@yiin/reactive-proxy-state.collection-identities.v3");
-var collectionIdentities = Reflect.get(globalThis, collectionIdentityKey) ?? { members: new WeakMap, copies: new WeakMap, indexes: new WeakMap, overrides: new WeakMap };
+var collectionIdentityKey = Symbol.for("@yiin/reactive-proxy-state.collection-identities.v4");
+var collectionIdentities = Reflect.get(globalThis, collectionIdentityKey) ?? { members: new WeakMap, copies: new WeakMap, indexes: new WeakMap, overrides: new WeakMap, watches: new WeakMap };
 if (!Reflect.has(globalThis, collectionIdentityKey)) {
   Object.defineProperty(globalThis, collectionIdentityKey, { value: collectionIdentities });
 }
@@ -3311,7 +3311,7 @@ function replicaIndex(collection, member) {
   }
   return index;
 }
-var indexWatches = new WeakMap;
+var indexWatches = collectionIdentities.watches;
 function watchIndex(collection) {
   const watch = { indexed: collectionIdentities.indexes.has(collection) };
   indexWatches.set(collection, watch);
