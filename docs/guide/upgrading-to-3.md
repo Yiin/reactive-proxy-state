@@ -6,7 +6,7 @@
 
 1. **Use Vue 3.5.** The peers are now `vue ^3.5.0` and `@vue/reactivity ^3.5.0`. The tracker builds on Vue 3.5's effects.
 
-2. **Have one copy of `@vue/reactivity`.** The library imports `@vue/reactivity` and no longer bundles its own copy. Most package managers place it next to `vue`. With an isolated layout (pnpm, `bun install --linker isolated`) add it as a direct dependency. With Vite, set `resolve.dedupe: ['vue', '@vue/reactivity']`.
+2. **Have one copy of `@vue/reactivity`.** The library imports `@vue/reactivity` and no longer bundles its own copy. The peer is optional, so the library uses the copy `vue` installs. With an isolated layout (pnpm, `bun install --linker isolated`) add it as a direct dependency at the version `vue` uses. With Vite, set `resolve.dedupe: ['vue', '@vue/reactivity']`.
 
 3. **Pass the object `reactive()` returned.** Creation now throws a `TypeError` for a plain object, and for a proxy made by another copy of `@vue/reactivity`. 2.x accepted both and sent nothing.
 

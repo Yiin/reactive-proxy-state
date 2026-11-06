@@ -59,7 +59,10 @@ Notes
 ## Requirements
 
 - Vue 3.5: the peers are `vue ^3.5.0` and `@vue/reactivity ^3.5.0`.
-- One copy of `@vue/reactivity`. The library imports it and does not bundle it. A proxy from another copy would never trigger the tracker, so creation throws a `TypeError` that names the cause. With Vite, set `resolve.dedupe: ['vue', '@vue/reactivity']`. A package manager with an isolated layout (pnpm, `bun install --linker isolated`) needs `@vue/reactivity` as a direct dependency of the app.
+- One copy of `@vue/reactivity`. The library imports it and does not bundle it. A proxy from another copy would never trigger the tracker, so creation throws a `TypeError` that names the cause.
+  - The `@vue/reactivity` peer is optional, so the library uses the copy `vue` brings. `vue` pins its own exact version; a required peer made npm install the newest 3.5 next to it, a second copy.
+  - With Vite, set `resolve.dedupe: ['vue', '@vue/reactivity']`.
+  - A package manager with an isolated layout (pnpm, `bun install --linker isolated`) needs `@vue/reactivity` as a direct dependency of the app, at the version `vue` uses.
 
 ## Example
 
