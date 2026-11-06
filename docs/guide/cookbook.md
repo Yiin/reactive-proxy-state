@@ -182,10 +182,17 @@ export const state = vueReactive({
 });
 
 // Vue -> main
-const stop = trackVueReactiveEvents(state, (ev: StateEvent) => ipcRenderer?.send('state:mutation', ev));
+const tracking = trackVueReactiveEvents(state, (ev: StateEvent) => ipcRenderer?.send('state:mutation', ev));
 
-// main -> Vue
-ipcRenderer?.on('state:mutation', (_evt: any, ev: StateEvent) => updateState(state, ev));
+// main -> Vue, not sent back
+ipcRenderer?.on('state:mutation', (_evt: any, ev: StateEvent) => {
+  tracking.pause();
+  try {
+    updateState(state, ev);
+  } finally {
+    tracking.resume();
+  }
+});
 ```
 
 ```vue

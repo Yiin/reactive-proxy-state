@@ -25,6 +25,7 @@ export default defineConfig({
             { text: 'Cookbook', link: '/guide/cookbook' },
             { text: 'Troubleshooting', link: '/guide/troubleshooting' },
             { text: 'Upgrading to 2.0', link: '/guide/upgrading-to-2' },
+            { text: 'Upgrading to 3.0', link: '/guide/upgrading-to-3' },
           ]
         }
       ],

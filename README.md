@@ -20,6 +20,8 @@ bun add @yiin/reactive-proxy-state
 
 Version 2 needs ES2021 or later (it uses `WeakRef`). Coming from 1.x? Read [Upgrading to 2.0.0](./docs/guide/upgrading-to-2.md) first: payloads are copies now, and a few inputs are refused.
 
+Version 3 changes only the Vue tracker, `trackVueReactiveEvents`: it needs Vue 3.5 and the app's own `@vue/reactivity`. See [Upgrading to 3.0.0](./docs/guide/upgrading-to-3.md).
+
 ## Quick Start
 
 The most common use case is creating reactive state for local applications:

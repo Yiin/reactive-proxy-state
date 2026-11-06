@@ -92,12 +92,12 @@ const bridge = createRendererBridgeEmitter({
 });
 
 // Emit Vue mutations as StateEvents
-const stopVue = trackVueReactiveEvents(vueState, bridge.emit, {
+const tracking = trackVueReactiveEvents(vueState, bridge.emit, {
   // If main sends the first snapshot, set this to false
   emitInitialReplace: true,
 });
 
-// Later: stopVue(); bridge.stop();
+// Later: tracking.stop(); bridge.stop();
 ```
 
 ### Main (RPS state ↔ renderers)
@@ -138,5 +138,5 @@ BrowserWindow.getAllWindows().forEach(w => w.webContents.send(CHANNEL, initial))
 - Use `mute(() => { ...bulk update... })` if you need to apply multiple events or a snapshot locally without emitting.
 - Keep `seenLimit` reasonably bounded for long-lived processes.
 - Apply events to reactive targets (not raw) so your local UI/effects update.
-- With Vue, prefer `flush: 'sync'` in `trackVueReactiveEvents` if you need immediate main sync.
+- `trackVueReactiveEvents` sends each event inside the write that caused it, so main hears of a change at once.
 
