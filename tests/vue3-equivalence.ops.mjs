@@ -14,9 +14,11 @@
 //   new value equal) are left out of the comparison on both sides.
 // - 2.0.0 compares Map values with deepEqual, which takes a Map, Set, Date or
 //   object with no own keys for any other of them, so it misses such a change
-//   and its copy goes stale. The candidate sends it. After such an edit the
-//   reference tracker and its replica start over from the current state
-//   (counted in `referenceMisses`), once the candidate's replica is checked.
+//   and its copy goes stale. The candidate sends it. Later events of 2.0.0 in
+//   the same edit then carry old values from that stale copy, so such an edit
+//   is not compared event by event: only the candidate's replica is checked.
+//   Then the reference tracker and its replica start over from the current
+//   state (counted in `referenceMisses`).
 // - Delete order inside one diff can differ (deletes name different keys), so
 //   events that differ only in order across paths count as `reordered`.
 //
@@ -323,7 +325,7 @@ export function runEquivalenceFuzz({ lib, reference, candidate, seeds, ops, firs
         }
       }
       if (paused && compared[1].length) problems.push("paused edit emitted");
-      if (compared[0].join("\n") !== compared[1].join("\n")) {
+      if (!missed.length && compared[0].join("\n") !== compared[1].join("\n")) {
         if ([...compared[0]].sort().join("\n") === [...compared[1]].sort().join("\n")) reordered += 1;
         else problems.push("events differ");
       }
