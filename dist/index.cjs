@@ -2,79 +2,70 @@ var __defProp = Object.defineProperty;
 var __getOwnPropNames = Object.getOwnPropertyNames;
 var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
 var __hasOwnProp = Object.prototype.hasOwnProperty;
-function __accessProp(key) {
-  return this[key];
-}
+var __moduleCache = /* @__PURE__ */ new WeakMap;
 var __toCommonJS = (from) => {
-  var entry = (__moduleCache ??= new WeakMap).get(from), desc;
+  var entry = __moduleCache.get(from), desc;
   if (entry)
     return entry;
   entry = __defProp({}, "__esModule", { value: true });
-  if (from && typeof from === "object" || typeof from === "function") {
-    for (var key of __getOwnPropNames(from))
-      if (!__hasOwnProp.call(entry, key))
-        __defProp(entry, key, {
-          get: __accessProp.bind(from, key),
-          enumerable: !(desc = __getOwnPropDesc(from, key)) || desc.enumerable
-        });
-  }
+  if (from && typeof from === "object" || typeof from === "function")
+    __getOwnPropNames(from).map((key) => !__hasOwnProp.call(entry, key) && __defProp(entry, key, {
+      get: () => from[key],
+      enumerable: !(desc = __getOwnPropDesc(from, key)) || desc.enumerable
+    }));
   __moduleCache.set(from, entry);
   return entry;
 };
-var __moduleCache;
-var __returnValue = (v) => v;
-function __exportSetter(name, newValue) {
-  this[name] = __returnValue.bind(null, newValue);
-}
 var __export = (target, all) => {
   for (var name in all)
     __defProp(target, name, {
       get: all[name],
       enumerable: true,
       configurable: true,
-      set: __exportSetter.bind(all, name)
+      set: (newValue) => all[name] = () => newValue
     });
 };
 
 // src/index.ts
 var exports_src = {};
 __export(exports_src, {
-  SNAPSHOT_SHARED_COPY_LIMIT: () => SNAPSHOT_SHARED_COPY_LIMIT,
-  SnapshotLimitError: () => SnapshotLimitError,
-  UnsupportedStateError: () => UnsupportedStateError,
-  activeEffect: () => activeEffect,
-  cleanupEffect: () => cleanupEffect,
-  computed: () => computed,
-  createBridgeEmitter: () => createBridgeEmitter,
-  createMainBridgeEmitter: () => createMainBridgeEmitter,
-  createRendererBridgeEmitter: () => createRendererBridgeEmitter,
-  deepClone: () => deepClone,
-  deepEqual: () => deepEqual,
-  deepToRaw: () => deepToRaw,
-  getProxyStats: () => getProxyStats,
-  isComputed: () => isComputed,
-  isReactive: () => isReactive,
-  isRef: () => isRef,
-  isRefSymbol: () => isRefSymbol,
-  markRaw: () => markRaw,
-  reactive: () => reactive,
-  ref: () => ref,
-  resetProxyStats: () => resetProxyStats,
-  runCleanupFunctions: () => runCleanupFunctions,
-  setActiveEffect: () => setActiveEffect,
-  toRaw: () => toRaw,
-  toRef: () => toRef,
-  toRefs: () => toRefs,
-  track: () => track,
-  trackVueReactiveEvents: () => trackVueReactiveEvents,
-  trigger: () => trigger,
-  triggerRef: () => triggerRef,
-  unref: () => unref,
-  updateState: () => updateState,
+  watchEffect: () => watchEffect,
   watch: () => watch,
-  watchEffect: () => watchEffect
+  updateState: () => updateState,
+  unref: () => unref,
+  triggerRef: () => triggerRef,
+  trigger: () => trigger,
+  trackVueReactiveEvents: () => trackVueReactiveEvents,
+  track: () => track,
+  toRefs: () => toRefs,
+  toRef: () => toRef,
+  toRaw: () => toRaw,
+  setActiveEffect: () => setActiveEffect,
+  runCleanupFunctions: () => runCleanupFunctions,
+  resetProxyStats: () => resetProxyStats,
+  ref: () => ref,
+  reactive: () => reactive,
+  markRaw: () => markRaw,
+  isRefSymbol: () => isRefSymbol,
+  isRef: () => isRef,
+  isReactive: () => isReactive,
+  isComputed: () => isComputed,
+  getProxyStats: () => getProxyStats,
+  deepToRaw: () => deepToRaw,
+  deepEqual: () => deepEqual,
+  deepClone: () => deepClone,
+  createRendererBridgeEmitter: () => createRendererBridgeEmitter,
+  createMainBridgeEmitter: () => createMainBridgeEmitter,
+  createBridgeEmitter: () => createBridgeEmitter,
+  computed: () => computed,
+  cleanupEffect: () => cleanupEffect,
+  activeEffect: () => activeEffect,
+  UnsupportedStateError: () => UnsupportedStateError,
+  SnapshotLimitError: () => SnapshotLimitError,
+  SNAPSHOT_SHARED_COPY_LIMIT: () => SNAPSHOT_SHARED_COPY_LIMIT
 });
 module.exports = __toCommonJS(exports_src);
+
 // src/utils.ts
 function toRaw(observed) {
   let value = observed;
@@ -414,10 +405,10 @@ var cloneSeen;
 var cloneNamed = 0 /* None */;
 function copySmall(value, container, checkFresh, named) {
   if (!Array.isArray(value)) {
-    const copy = copyLeaf(value);
-    if (copy !== undefined && checkFresh)
+    const copy2 = copyLeaf(value);
+    if (copy2 !== undefined && checkFresh)
       copiedFresh = locationNodes.get(value) === undefined;
-    return copy;
+    return copy2;
   }
   const length = value.length;
   if (length > 8)
@@ -603,10 +594,10 @@ function entriesOf(source, identity) {
     const names = keepsNamed(cloneNamed, identity === cloneTop ? 0 : 1) ? namedKeys(source) : undefined;
     if (names === undefined)
       return source;
-    const entries = source.slice();
+    const entries2 = source.slice();
     for (let i = 0;i < names.length; i++)
-      entries.push(source[names[i]]);
-    return entries;
+      entries2.push(source[names[i]]);
+    return entries2;
   }
   const entries = [];
   if (source instanceof Map) {
@@ -2366,7 +2357,7 @@ function evictDeep(value, parent) {
       for (let i = 0;i < raw.length; i++)
         pushProxied(raw[i], node, i, pending);
     } else if (raw instanceof Map) {
-      Map.prototype.forEach.call(raw, (child, key) => pushProxied(child, node, key, pending));
+      Map.prototype.forEach.call(raw, (child, key2) => pushProxied(child, node, key2, pending));
     } else if (raw instanceof Set) {
       for (const child of Set.prototype.values.call(raw))
         pushProxied(child, node, undefined, pending);
@@ -2602,18 +2593,18 @@ function unwrapItems(items) {
 function planReorder(target, prop, method, args) {
   const length = target.length;
   if (prop === "fill" || prop === "copyWithin") {
-    const fill = prop === "fill";
-    const to = fill ? 0 : clampIndex(toIntegerOrInfinity(args[0]), length);
+    const fill2 = prop === "fill";
+    const to = fill2 ? 0 : clampIndex(toIntegerOrInfinity(args[0]), length);
     const start = clampIndex(toIntegerOrInfinity(args[1]), length);
     const end = args[2] === undefined ? length : clampIndex(toIntegerOrInfinity(args[2]), length);
-    const after = target.slice();
-    method.call(after, fill ? args[0] : to, start, end);
-    const size = after.length;
-    if (fill)
-      return { after, first: Math.min(start, size), last: Math.min(end, size), skip: -1 };
+    const after2 = target.slice();
+    method.call(after2, fill2 ? args[0] : to, start, end);
+    const size = after2.length;
+    if (fill2)
+      return { after: after2, first: Math.min(start, size), last: Math.min(end, size), skip: -1 };
     const from = Math.min(to, size);
     const count = Math.min(Math.min(end, size) - Math.min(start, size), size - from);
-    return { after, first: from, last: from + Math.max(count, 0), skip: -1 };
+    return { after: after2, first: from, last: from + Math.max(count, 0), skip: -1 };
   }
   const after = target.slice();
   method.apply(after, args);
@@ -2917,10 +2908,10 @@ function wrapArray(arr, node) {
               const idx = Array.prototype.findIndex.call(target, predicate, thisArg);
               if (idx === -1)
                 return;
-              const value = target[idx];
-              if (!isObject3(value))
-                return value;
-              return wrapChild(value, node, idx);
+              const value2 = target[idx];
+              if (!isObject3(value2))
+                return value2;
+              return wrapChild(value2, node, idx);
             };
           }
           return methodCache[prop];
@@ -2928,18 +2919,18 @@ function wrapArray(arr, node) {
         case "at": {
           track(target, Symbol.iterator);
           if (!methodCache[prop]) {
-            methodCache[prop] = function(index) {
-              let idx = Number(index);
+            methodCache[prop] = function(index2) {
+              let idx = Number(index2);
               if (!Number.isInteger(idx))
                 idx = Math.trunc(idx);
               if (idx < 0)
                 idx = target.length + idx;
               if (idx < 0 || idx >= target.length)
                 return;
-              const value = target[idx];
-              if (!isObject3(value))
-                return value;
-              return wrapChild(value, node, idx);
+              const value2 = target[idx];
+              if (!isObject3(value2))
+                return value2;
+              return wrapChild(value2, node, idx);
             };
           }
           return methodCache[prop];
@@ -3097,15 +3088,15 @@ function wrapMap(map, node) {
         return methodCache[prop];
       }
       if (prop === "set") {
-        methodCache[prop] = function(key, value) {
-          if (value != null && typeof value === "object")
-            value = unwrapForStore(value);
+        methodCache[prop] = function(key, value2) {
+          if (value2 != null && typeof value2 === "object")
+            value2 = unwrapForStore(value2);
           const existed = target.has(key);
           const oldValue = target.get(key);
           const oldSize = target.size;
-          if (oldValue === value)
+          if (oldValue === value2)
             return receiver;
-          if (oldValue && typeof oldValue === "object" && value && typeof value === "object" && deepEqual(oldValue, value))
+          if (oldValue && typeof oldValue === "object" && value2 && typeof value2 === "object" && deepEqual(oldValue, value2))
             return receiver;
           const located = locate(node);
           const event = located && {
@@ -3113,23 +3104,23 @@ function wrapMap(map, node) {
             path: located.paths[0],
             key,
             oldValue,
-            newValue: value
+            newValue: value2
           };
-          const held = located && heldItems(value, oldValue);
+          const held = located && heldItems(value2, oldValue);
           if (event !== undefined && isObject4(key))
             nameKey(event, key, target, !existed);
           const copied = copyPayload(event, located, target, held);
           if (copied === 0 /* Reaches */) {
-            copyPayloadReaching(event, located, target, shallowCopy(target).set(key, value));
+            copyPayloadReaching(event, located, target, shallowCopy(target).set(key, value2));
           }
-          target.set(key, value);
+          target.set(key, value2);
           const newSize = target.size;
           if (!existed && watch.indexed)
             indexAdded(target, key);
           if (isObject4(oldValue))
             detachPlace(oldValue, node, key);
-          if (isObject4(value))
-            attachValue(value, node, key, copied === 2 /* Fresh */, located && oldValue, held);
+          if (isObject4(value2))
+            attachValue(value2, node, key, copied === 2 /* Fresh */, located && oldValue, held);
           if (event !== undefined)
             dispatch(located, event);
           if (!existed) {
@@ -3198,9 +3189,9 @@ function wrapMap(map, node) {
           const newSize = target.size;
           if (watch.indexed)
             forgetReplicaIndex(target);
-          for (const [key, value] of removed) {
-            if (isObject4(value))
-              detachPlace(value, node, key);
+          for (const [key, value2] of removed) {
+            if (isObject4(value2))
+              detachPlace(value2, node, key);
           }
           const located = locate(node);
           if (located !== undefined) {
@@ -3214,9 +3205,9 @@ function wrapMap(map, node) {
           if (oldSize !== newSize) {
             trigger(target, "size");
           }
-          for (const [, value] of removed) {
-            if (isObject4(value))
-              evictDeep(value);
+          for (const [, value2] of removed) {
+            if (isObject4(value2))
+              evictDeep(value2);
           }
         };
         return methodCache[prop];
@@ -3224,10 +3215,10 @@ function wrapMap(map, node) {
       if (prop === "get") {
         methodCache[prop] = function(key) {
           track(target, String(key));
-          const value = target.get(key);
-          if (!value || typeof value !== "object")
-            return value;
-          return wrapChild(value, node, key);
+          const value2 = target.get(key);
+          if (!value2 || typeof value2 !== "object")
+            return value2;
+          return wrapChild(value2, node, key);
         };
         return methodCache[prop];
       }
@@ -3244,19 +3235,19 @@ function wrapMap(map, node) {
         if (prop === "forEach") {
           methodCache[prop] = (callbackfn, thisArg) => {
             const entriesIterator = proxy.entries();
-            for (const [key, value] of entriesIterator) {
-              callbackfn.call(thisArg, value, key, proxy);
+            for (const [key, value2] of entriesIterator) {
+              callbackfn.call(thisArg, value2, key, proxy);
             }
           };
           return methodCache[prop];
         }
         methodCache[prop] = function* () {
-          for (const [key, value] of target.entries()) {
+          for (const [key, value2] of target.entries()) {
             if (prop === "keys") {
               yield key;
               continue;
             }
-            const wrappedValue = isObject4(value) ? wrapChild(value, node, key) : value;
+            const wrappedValue = isObject4(value2) ? wrapChild(value2, node, key) : value2;
             if (prop === "values") {
               yield wrappedValue;
               continue;
@@ -3313,28 +3304,28 @@ function wrapSet(set, node) {
         return methodCache[prop];
       }
       if (prop === "add") {
-        methodCache[prop] = function(value) {
-          if (value != null && typeof value === "object")
-            value = unwrapForStore(value);
-          const existed = target.has(value);
+        methodCache[prop] = function(value2) {
+          if (value2 != null && typeof value2 === "object")
+            value2 = unwrapForStore(value2);
+          const existed = target.has(value2);
           const oldSize = target.size;
           if (!existed) {
             const located = locate(node);
             const event = located && {
               action: "set-add",
               path: located.paths[0],
-              value
+              value: value2
             };
             const copied = copyPayload(event, located, target);
             if (copied === 0 /* Reaches */) {
-              copyPayloadReaching(event, located, target, shallowCopy(target).add(value));
+              copyPayloadReaching(event, located, target, shallowCopy(target).add(value2));
             }
-            target.add(value);
+            target.add(value2);
             const newSize = target.size;
             if (watch.indexed)
-              indexAdded(target, value);
-            if (isObject5(value))
-              attachValue(value, node, undefined, copied === 2 /* Fresh */);
+              indexAdded(target, value2);
+            if (isObject5(value2))
+              attachValue(value2, node, undefined, copied === 2 /* Fresh */);
             if (event !== undefined)
               dispatch(located, event);
             trigger(target, Symbol.iterator);
@@ -3347,38 +3338,38 @@ function wrapSet(set, node) {
         return methodCache[prop];
       }
       if (prop === "delete") {
-        methodCache[prop] = function(value) {
-          const existed = target.has(value);
+        methodCache[prop] = function(value2) {
+          const existed = target.has(value2);
           const oldSize = target.size;
           if (existed) {
-            const oldValue = value;
+            const oldValue = value2;
             const located = locate(node);
             const event = located && {
               action: "set-delete",
               path: located.paths[0],
-              value,
+              value: value2,
               oldValue
             };
             if (copyPayload(event, located, target) === 0 /* Reaches */) {
               const after = shallowCopy(target);
-              after.delete(value);
+              after.delete(value2);
               copyPayloadReaching(event, located, target, after);
             }
-            const result = target.delete(value);
+            const result = target.delete(value2);
             const newSize = target.size;
             if (result) {
               if (watch.indexed)
-                indexRemoved(target, value);
-              if (isObject5(value))
-                detachPlace(value, node, undefined);
+                indexRemoved(target, value2);
+              if (isObject5(value2))
+                detachPlace(value2, node, undefined);
               if (event !== undefined)
                 dispatch(located, event);
               trigger(target, Symbol.iterator);
               if (oldSize !== newSize) {
                 trigger(target, "size");
               }
-              if (isObject5(value))
-                evictDeep(value);
+              if (isObject5(value2))
+                evictDeep(value2);
             }
             return result;
           }
@@ -3421,11 +3412,11 @@ function wrapSet(set, node) {
       }
       if (prop === "has") {
         track(target, Symbol.iterator);
-        methodCache[prop] = function(value) {
-          if (typeof value === "string" || typeof value === "number" || typeof value === "symbol") {
-            track(target, String(value));
+        methodCache[prop] = function(value2) {
+          if (typeof value2 === "string" || typeof value2 === "number" || typeof value2 === "symbol") {
+            track(target, String(value2));
           }
-          return target.has(value);
+          return target.has(value2);
         }.bind(target);
         return methodCache[prop];
       }
@@ -3435,8 +3426,8 @@ function wrapSet(set, node) {
         if (prop === "forEach") {
           methodCache[prop] = (callbackfn, thisArg) => {
             const valuesIterator = proxy.values();
-            for (const value of valuesIterator) {
-              callbackfn.call(thisArg, value, value, proxy);
+            for (const value2 of valuesIterator) {
+              callbackfn.call(thisArg, value2, value2, proxy);
             }
           };
           return methodCache[prop];
@@ -3781,27 +3772,27 @@ var actionHandlers = {
     }
     targetArray.unshift(...event.items);
   },
-  "map-set": function(targetMap, _parentKeyIgnored, event) {
-    if (!(targetMap instanceof Map)) {
+  "map-set": function(targetMap2, _parentKeyIgnored, event) {
+    if (!(targetMap2 instanceof Map)) {
       console.warn(`expected map at path ${event.path.join(".")}`);
       return;
     }
-    replicaMapSet(targetMap, event.key, event.newValue);
+    replicaMapSet(targetMap2, event.key, event.newValue);
   },
-  "map-delete": function(targetMap, _parentKeyIgnored, event) {
-    if (!(targetMap instanceof Map)) {
+  "map-delete": function(targetMap2, _parentKeyIgnored, event) {
+    if (!(targetMap2 instanceof Map)) {
       console.warn(`expected map at path ${event.path.join(".")}`);
       return;
     }
-    replicaMapDelete(targetMap, event.key);
+    replicaMapDelete(targetMap2, event.key);
   },
-  "map-clear": function(targetMap, _parentKeyIgnored, event) {
-    if (!(targetMap instanceof Map)) {
+  "map-clear": function(targetMap2, _parentKeyIgnored, event) {
+    if (!(targetMap2 instanceof Map)) {
       console.warn(`expected map at path ${event.path.join(".")}`);
       return;
     }
-    targetMap.clear();
-    forgetReplicaIndex(targetMap);
+    targetMap2.clear();
+    forgetReplicaIndex(targetMap2);
   },
   "set-add": function(targetSet, _keyIgnored, event) {
     if (!(targetSet instanceof Set)) {
@@ -3980,8 +3971,8 @@ function toRef(object, key) {
     }
   };
 }
-function triggerRef(ref) {
-  trigger(ref, "value");
+function triggerRef(ref2) {
+  trigger(ref2, "value");
 }
 
 // src/computed.ts
@@ -4296,10 +4287,10 @@ class TrackedNode extends import_reactivity.ReactiveEffect {
     }
     if (this.kind === "array") {
       const length = proxy.length;
-      const shadow = new Array(length);
-      this.shadow = shadow;
+      const shadow2 = new Array(length);
+      this.shadow = shadow2;
       for (let index = 0;index < length; index++)
-        shadow[index] = this.adopt(index, proxy[index]);
+        shadow2[index] = this.adopt(index, proxy[index]);
       return;
     }
     const keys = Object.keys(proxy);
@@ -4352,7 +4343,7 @@ class TrackedNode extends import_reactivity.ReactiveEffect {
     const scanId = ++this.tracker.scans;
     const oldChildren = this.children;
     let children = null;
-    let nodes = null;
+    let nodes2 = null;
     for (let index = 0;index < length; index++) {
       const value = values[index];
       if (!isNodeValue(value))
@@ -4362,19 +4353,19 @@ class TrackedNode extends import_reactivity.ReactiveEffect {
       if (children === null) {
         children = new Map;
         this.pending = children;
-        nodes = new Array(length);
+        nodes2 = new Array(length);
       }
       children.set(key, child);
-      nodes[index] = child;
+      nodes2[index] = child;
     }
     this.rawIndex = null;
     for (const child of oldChildren.values())
       if (child.claim !== scanId)
         child.dispose();
     if (isArray)
-      this.diffArray(values, nodes, oldChildren);
+      this.diffArray(values, nodes2, oldChildren);
     else
-      this.diffObject(keys, values, nodes, oldChildren, scanId);
+      this.diffObject(keys, values, nodes2, oldChildren, scanId);
     this.pending = null;
     if (this.disposed) {
       if (children !== null)
@@ -4406,7 +4397,7 @@ class TrackedNode extends import_reactivity.ReactiveEffect {
     }
     return this.createChild(key, value);
   }
-  diffArray(values, nodes, oldChildren) {
+  diffArray(values, nodes2, oldChildren) {
     const tracker = this.tracker;
     const shadow = this.shadow;
     const emitting = tracker.emitting;
@@ -4414,7 +4405,7 @@ class TrackedNode extends import_reactivity.ReactiveEffect {
     const length = values.length;
     const oldLength = shadow.length;
     for (let index = 0;index < length; index++) {
-      const child = nodes === null ? undefined : nodes[index];
+      const child = nodes2 === null ? undefined : nodes2[index];
       const existed = index < oldLength;
       const before = shadow[index];
       const after = child !== undefined ? child.shadow : copyValue(values[index]);
@@ -4437,7 +4428,7 @@ class TrackedNode extends import_reactivity.ReactiveEffect {
       shadow.length = length;
     }
   }
-  diffObject(keys, values, nodes, oldChildren, scanId) {
+  diffObject(keys, values, nodes2, oldChildren, scanId) {
     const tracker = this.tracker;
     const raw = this.raw;
     const shadow = this.shadow;
@@ -4457,7 +4448,7 @@ class TrackedNode extends import_reactivity.ReactiveEffect {
     }
     for (let index = 0;index < keys.length; index++) {
       const key = keys[index];
-      const child = nodes === null ? undefined : nodes[index];
+      const child = nodes2 === null ? undefined : nodes2[index];
       const existed = hasOwn2.call(shadow, key);
       const before = shadow[key];
       const after = child !== undefined ? child.shadow : copyValue(values[index]);
@@ -4543,20 +4534,20 @@ function copyValue(value) {
     return new Date(raw.getTime());
   if (Array.isArray(raw)) {
     const length = raw.length;
-    const copy = new Array(length);
+    const copy2 = new Array(length);
     for (let index = 0;index < length; index++)
-      copy[index] = copyValue(raw[index]);
-    return copy;
+      copy2[index] = copyValue(raw[index]);
+    return copy2;
   }
   if (raw instanceof Map) {
-    const copy = new Map;
-    raw.forEach((entry, key) => copy.set(copyValue(key), copyValue(entry)));
-    return copy;
+    const copy2 = new Map;
+    raw.forEach((entry, key) => copy2.set(copyValue(key), copyValue(entry)));
+    return copy2;
   }
   if (raw instanceof Set) {
-    const copy = new Set;
-    raw.forEach((entry) => copy.add(copyValue(entry)));
-    return copy;
+    const copy2 = new Set;
+    raw.forEach((entry) => copy2.add(copyValue(entry)));
+    return copy2;
   }
   const copy = {};
   const keys = Object.keys(raw);
