@@ -20,8 +20,10 @@ type DiffErrorContext = { key: string; path: (string | number | symbol)[]; error
 
 ## Parameters
 
-- `vueState`: the object Vue's `reactive()` returned (`shallowReactive()` and `readonly()` work too). It must come from the copy of `@vue/reactivity` this library imports, see [Requirements](#requirements).
+- `vueState`: the object Vue's `reactive()` returned (`shallowReactive()` works too, and so does `readonly()` over a `reactive()` object; `readonly()` over a plain object is accepted but tracks nothing). It must come from the copy of `@vue/reactivity` this library imports, see [Requirements](#requirements).
 - `emit`: gets each event synchronously, inside the write that caused it. Vue tracking is paused while it runs, so reads it makes do not subscribe the tracker to anything.
+  - The listener may write only to entries of the object whose event it received. The tracker then compares that object once more and sends the write. The second compare runs once: a write made during it changes the state, but the tracker sends it only with the next change to that object, and with a wrong `oldValue`.
+  - Any other write must leave the listener, for example through `queueMicrotask`. A write into another object while a compare runs can send an event twice, the first one with a wrong `oldValue`.
 - `options.emitInitialReplace` (default `true`): first send `{ action: 'replace', path: [], newValue }`, where `newValue` is a copy of the whole state.
 - `options.onDiffError`: called when `emit` throws, or when reading the state throws (a getter). `path` is the event's path for an `emit` error, else the path of the object that failed. `key` is the first key of `path`, or `''` when the failure is in the root object.
   - After an `emit` error the tracker goes on and sends the rest of that change.
