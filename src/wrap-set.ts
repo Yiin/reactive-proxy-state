@@ -240,14 +240,15 @@ export function wrapSet<T>(set: Set<T>, node: LocationNode): Set<T> {
       }
 
       const value = Reflect.get(target, prop, receiver);
-      // `union`, `isSubsetOf` and the other set methods read every value
-      // (Set.prototype's own: a polyfill elsewhere is read again each time)
-      if (typeof value === "function" && setReaders.has(prop) && hasOwn.call(Set.prototype, prop) && (Set.prototype as any)[prop] === value) {
-        methodCache[prop] = function (this: unknown) {
+      // `union`, `isSubsetOf` and the other set methods read every value.
+      // Set.prototype's own are cached; a subclass's are read again each time.
+      if (typeof value === "function" && setReaders.has(prop)) {
+        const method = function (this: unknown) {
           track(target, Symbol.iterator);
           return value.apply(target, arguments);
         };
-        return methodCache[prop];
+        if (hasOwn.call(Set.prototype, prop) && (Set.prototype as any)[prop] === value) methodCache[prop] = method;
+        return method;
       }
       return collectionMember(target, prop, value);
     },

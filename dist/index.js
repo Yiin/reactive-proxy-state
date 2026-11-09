@@ -4021,12 +4021,14 @@ function wrapSet(set, node) {
         return Set;
       }
       const value = Reflect.get(target, prop, receiver);
-      if (typeof value === "function" && setReaders.has(prop) && hasOwn.call(Set.prototype, prop) && Set.prototype[prop] === value) {
-        methodCache[prop] = function() {
+      if (typeof value === "function" && setReaders.has(prop)) {
+        const method = function() {
           track(target, Symbol.iterator);
           return value.apply(target, arguments);
         };
-        return methodCache[prop];
+        if (hasOwn.call(Set.prototype, prop) && Set.prototype[prop] === value)
+          methodCache[prop] = method;
+        return method;
       }
       return collectionMember(target, prop, value);
     },
