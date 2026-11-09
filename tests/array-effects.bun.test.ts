@@ -22,7 +22,12 @@ type Probe = { first: Item; nine: Item };
 const ids = (items: readonly (Item | undefined)[]) => items.map((item) => item?.id ?? null);
 const byId = (a: Item | undefined, b: Item | undefined) => (a?.id ?? 0) - (b?.id ?? 0);
 
-/** Every way an effect can read the array as a whole, and index reads. */
+/**
+ * Every way an effect can read the array as a whole, and index reads.
+ * `in`, `Object.keys`, `Object.entries` and `for...in` are not tracked:
+ * `has` and `ownKeys` traps made `[].concat(list)` up to 40% and
+ * `Object.keys(list)` 70% slower for every caller.
+ */
 const readers: Record<string, (list: Item[], probe: Probe) => unknown> = {
   map: (list) => list.map((item) => item?.id),
   filter: (list) => ids(list.filter((item) => item.id !== 2)),
@@ -63,14 +68,6 @@ const readers: Record<string, (list: Item[], probe: Probe) => unknown> = {
   spread: (list) => ids([...list]),
   "Array.from": (list) => ids(Array.from(list)),
   at: (list) => [list.at(0)?.id, list.at(-1)?.id],
-  "Object.keys": (list) => Object.keys(list),
-  "Object.entries": (list) => Object.entries(list).map(([key, item]) => [key, item.id]),
-  "for...in": (list) => {
-    const keys: string[] = [];
-    for (const key in list) keys.push(key);
-    return keys;
-  },
-  in: (list) => [0 in list, 1 in list, 2 in list, 3 in list],
   hasOwnProperty: (list) => [list.hasOwnProperty(0), list.hasOwnProperty(3)],
   length: (list) => list.length,
   "index reads": (list) => [list[0]?.id, list[2]?.id, list[3]?.id],

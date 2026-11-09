@@ -670,16 +670,6 @@ export function wrapArray<T extends any[]>(arr: T, node: LocationNode): T {
       }
       return result;
     },
-    // `i in list` reads one index
-    has(target: T, prop: string | symbol): boolean {
-      track(target, prop);
-      return Reflect.has(target, prop);
-    },
-    // `Object.keys`, `for...in` and `Object.entries` read every index
-    ownKeys(target: T): (string | symbol)[] {
-      trackIteration(target);
-      return Reflect.ownKeys(target);
-    },
   });
 
   globalSeen.set(arr, proxy);
