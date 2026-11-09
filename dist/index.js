@@ -1604,16 +1604,16 @@ function watchEffect(effectCallback, options = {}) {
 // src/listener.ts
 var delivery;
 var emittingEffect = null;
-var inListener = false;
+var listenerState = 0 /* Inactive */;
 var MAX_LISTENER_WRITE_ROUNDS = 100;
 function beginDelivery() {
   if (delivery !== undefined)
     return false;
-  delivery = { writes: 0, error: undefined };
+  delivery = { rounds: 0, error: undefined };
   return true;
 }
 function endDelivery(ownsDelivery) {
-  if (!ownsDelivery || (batchDepth > 0 || flushing) || inListener)
+  if (!ownsDelivery || (batchDepth > 0 || flushing) || listenerState !== 0 /* Inactive */)
     return;
   const error = delivery?.error;
   delivery = undefined;
@@ -1621,23 +1621,35 @@ function endDelivery(ownsDelivery) {
     throw error;
 }
 function checkListenerWrite() {
-  if (!inListener)
+  if (listenerState !== 1 /* BeforeWrite */)
     return;
-  const current = delivery ??= { writes: 0, error: undefined };
-  if (current.writes < MAX_LISTENER_WRITE_ROUNDS) {
-    current.writes++;
+  const current = delivery ??= { rounds: 0, error: undefined };
+  if (current.rounds < MAX_LISTENER_WRITE_ROUNDS) {
+    current.rounds++;
+    listenerState = 2 /* AfterWrite */;
     return;
   }
   current.error ??= new RangeError(`reactive-proxy-state: listeners exceeded ${MAX_LISTENER_WRITE_ROUNDS} nested write rounds. ` + `Filter event paths to stop listener writes from repeating`);
   throw current.error;
 }
 function emitListener(emit, event, queuedDelivery = delivery) {
-  const previousDelivery = delivery;
-  const previousListener = inListener;
+  const previousListener = listenerState;
   const previousEffect = activeEffect;
+  if (previousEffect === null && queuedDelivery === delivery) {
+    listenerState = 1 /* BeforeWrite */;
+    try {
+      emit(event);
+    } finally {
+      listenerState = previousListener;
+      if (delivery !== undefined && batchDepth === 0 && !flushing)
+        endDelivery(true);
+    }
+    return;
+  }
+  const previousDelivery = delivery;
   const previousEmittingEffect = emittingEffect;
   delivery = queuedDelivery;
-  inListener = true;
+  listenerState = 1 /* BeforeWrite */;
   if (previousEffect !== null) {
     emittingEffect = previousEffect;
     setActiveEffect(null);
@@ -1650,7 +1662,7 @@ function emitListener(emit, event, queuedDelivery = delivery) {
       emittingEffect = previousEmittingEffect;
     }
     const current = delivery;
-    inListener = previousListener;
+    listenerState = previousListener;
     delivery = previousDelivery ?? (batchDepth > 0 || flushing ? current : undefined);
     if (previousDelivery !== current && batchDepth === 0 && !flushing && current?.error !== undefined)
       throw current.error;

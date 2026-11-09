@@ -185,7 +185,7 @@ test("async branching writes share the bound and recover after the error", async
   const result = JSON.parse(output);
   expect(result.errors).toHaveLength(1);
   expect(result.errors[0]).toContain("100 nested write rounds");
-  expect(result.state).toEqual({ n: 51, other: 200 });
+  expect(result.state).toEqual({ n: 101, other: 200 });
   expect(result.remote).toEqual(result.state);
 });
 
@@ -264,4 +264,16 @@ test("cached collection reads in listeners stay untracked and later effect reads
   state.map.set("effect", 1);
   expect(runs).toBe(3);
   stop();
+});
+
+
+test("one listener round can forward a large initial state to a reactive replica", () => {
+  const replica = reactive<Record<string, number>>({});
+  const initial = Object.fromEntries(Array.from({ length: 1000 }, (_, index) => [String(index), index]));
+  let failure: unknown;
+  reactive(initial, event => {
+    try { updateState(replica, event); } catch (error) { failure = error; }
+  });
+  expect(failure).toBeUndefined();
+  expect(toRaw(replica)).toEqual(initial);
 });

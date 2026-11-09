@@ -124,7 +124,8 @@ What to check when you upgrade:
 ## 3.0.7: listener loops stop and queued old values stay stable
 
 The core permits 100 nested listener-write rounds per caller write.
-Each listener-caused mutation uses one round.
+A round is one listener call that attempts state writes.
+All writes in that call share its round.
 All descendant events share the same budget, including alias events and queued events.
 This bounds branching loops as well as direct recursion.
 The bound also applies to async roots and writes between roots.
