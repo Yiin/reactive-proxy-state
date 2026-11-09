@@ -147,7 +147,7 @@ export declare function isAttached(node: LocationNode): boolean;
  * `items`), all made before the first emit, so a listener that changes one
  * cannot change another, and two remote places never share one object.
  * The first path gets `event` itself. What the write removed is copied per
- * path only where `copyPayload` copied it (an async root); otherwise every
+ * path only where `copyPayload` copied it (a queued event); otherwise every
  * path carries the removed value itself, shared by the events.
  */
 export declare function dispatch(target: Target, event: StateEvent): void;
@@ -197,10 +197,9 @@ export declare const enum Copied {
  * What the write stores (`newValue`, `value`, `items`) is always copied: it
  * stays in the tree, where later writes change it, and a replica needs it
  * as it was. What the write removes (`oldValue`, `oldValues`, and the
- * `value` of a `set-delete`) is copied only for an async root
- * (`target.root.async`), whose events wait for a microtask. A synchronous
- * root delivers the event before the write returns, and sends the removed
- * value itself, as 1.0.44 did, so it never refuses a removal. Assignment
+ * `value` of a `set-delete`) is copied when the event will wait: an async
+ * root, an active queue, or several paths for one write. An immediate
+ * single-path event sends the removed value itself. Assignment
  * `newValue` copies keep array items only. Reorders keep properties on
  * nested arrays; the other fields keep every array's properties (see `Named`).
  *
