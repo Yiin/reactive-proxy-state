@@ -223,6 +223,27 @@ export function methodCacheCases(lib) {
     assert.deepEqual(log, []);
   };
 
+  // A write goes to the target, except through an own setter, which runs
+  // with the proxy as `this`: its own writes send their events.
+  cases["an own setter of an array runs with the proxy as this, also one defined through the proxy"] = () => {
+    const { log, emit } = eventLog();
+    const raw = [1];
+    Object.defineProperty(raw, "first", { set(value) { this.store = value; }, configurable: true });
+    const state = reactive({ list: raw }, emit);
+    const list = state.list;
+    log.length = 0;
+    list.first = 5;
+    Object.defineProperty(list, "second", { set(value) { this.other = value; }, configurable: true });
+    list.second = 6;
+    list[0] = 2;
+    assert.deepEqual(log, [
+      ["set", "list.store", "5"],
+      ["set", "list.other", "6"],
+      ["set", "list.0", "2"],
+    ]);
+    assert.deepEqual([raw.store, raw.other, raw[0]], [5, 6, 2]);
+  };
+
   for (const kind of ["Map", "Set"]) {
     cases[`a method defined on a ${kind} proxy after the proxy cached it is the one read`] = () => {
       const { log, emit } = eventLog();

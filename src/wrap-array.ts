@@ -267,8 +267,6 @@ export function wrapArray<T extends any[]>(arr: T, node: LocationNode): T {
 
   // cache for wrapped methods to avoid re-creating them on each call
   const methodCache = newMethodCache();
-  // the key `set` is writing: `Reflect.set` ends in `defineProperty` on the proxy
-  let writing: string | symbol | undefined;
 
   const handler = {
     get(target: T, prop: string | symbol, receiver: any): any {
@@ -661,7 +659,8 @@ export function wrapArray<T extends any[]>(arr: T, node: LocationNode): T {
         (typeof prop === "string" && !isNaN(parseInt(prop)));
       // emit event and trigger effects only if the set was successful and wasn't intercepted by a setter
       // (unless it's a direct numeric index set, which doesn't have a descriptor.set; `length` never has one)
-      const emits = descriptor !== undefined || isNumericIndex || prop === "length" || !writesThroughSetter(target, prop, node);
+      const throughSetter = !isNumericIndex && prop !== "length" && writesThroughSetter(target, prop, node);
+      const emits = descriptor !== undefined || !throughSetter;
       // direct length grow (e.g. arr.length = N) — emit ascending per-index sets
       // instead of a bare length event so the remote fills every index and never
       // ends up with a hole.
@@ -682,17 +681,15 @@ export function wrapArray<T extends any[]>(arr: T, node: LocationNode): T {
         copyPayloadReaching(event!, located!, target, after);
       }
       const oldLength = target.length;
-      let result: boolean;
-      if (descriptor !== undefined) {
-        result = Reflect.defineProperty(target, prop, { ...descriptor, value });
-      } else {
-        writing = prop;
-        try {
-          result = Reflect.set(target, prop, value, receiver);
-        } finally {
-          writing = undefined;
-        }
-      }
+      // An own setter runs with the proxy as `this`. Any other write through
+      // the proxy goes to the target: through `receiver` it would end in the
+      // proxy's `defineProperty` trap.
+      const result =
+        descriptor !== undefined
+          ? Reflect.defineProperty(target, prop, { ...descriptor, value })
+          : receiver === proxy && !throughSetter
+            ? Reflect.set(target, prop, value)
+            : Reflect.set(target, prop, value, receiver);
 
       if (result && emits) {
         // move places before anything can write again (emit may throw)
@@ -784,8 +781,6 @@ export function wrapArray<T extends any[]>(arr: T, node: LocationNode): T {
       return result;
     },
     defineProperty(target: T, prop: string | symbol, descriptor: PropertyDescriptor): boolean {
-      // the last step of a write through `set`
-      if (prop === writing) return Reflect.defineProperty(target, prop, descriptor);
       // a value is written as `set` writes it: the same event, and the same effects rerun
       if ("value" in descriptor) return handler.set(target, prop, descriptor.value, proxy, descriptor);
       // an accessor, or new flags: effects rerun, and no event is sent
