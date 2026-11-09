@@ -31,6 +31,7 @@ const counts = {
   writes: 0,
   events: 0,
   errors: 0,
+  boundReports: 0,
   sameAsBaseline: 0,
   baselineReplicaDiffers: 0,
 };
@@ -46,6 +47,7 @@ for (let seed = 1; seed <= seeds; seed++) {
       counts.writes += spec.writes.length;
       counts.events += ours.log.filter((line) => !line.startsWith("threw ") && !line.startsWith("skipped ")).length;
       counts.errors += ours.log.filter((line) => line.startsWith("threw ")).length;
+      counts.boundReports += ours.log.filter(line => line.includes("100 nested write rounds")).length;
       if (comparable(spec)) counts.comparable++;
       for (const kind of ["srjbj9", "hooks", "listenerReads", "queued"]) if (kinds[kind]) counts[kind]++;
       if (same) counts.sameAsBaseline++;
