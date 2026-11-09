@@ -214,3 +214,28 @@ test("pausing listener tracking preserves the writing effect's self-trigger supp
   expect(state.n).toBe(2);
   stop();
 });
+
+test("separate roots share the listener-write budget", () => {
+  let armed = false;
+  const first = reactive({ n: 0 }, () => { if (armed) second.n++; });
+  const second = reactive({ n: 0 }, () => { if (armed) first.n++; });
+  armed = true;
+  expect(() => { first.n = 1; }).toThrow("100 nested write rounds");
+  expect(first.n + second.n).toBe(101);
+});
+
+test("listener writes caused by effects share the caller's budget", () => {
+  let armed = false;
+  const state = reactive({ a: 0, b: 0, input: 0 }, event => {
+    if (armed && event.path[0] === "b") state.input++;
+  });
+  const stopFirst = watchEffect(() => { state.a = state.input; });
+  const stopSecond = watchEffect(() => { state.b = state.a; });
+  armed = true;
+  expect(() => { state.input = 1; }).toThrow("100 nested write rounds");
+  expect(state.input).toBe(101);
+  expect(state.a).toBe(101);
+  expect(state.b).toBe(101);
+  stopFirst();
+  stopSecond();
+});
