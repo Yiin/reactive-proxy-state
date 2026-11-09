@@ -35,6 +35,11 @@ export function verifyReview303(lib) {
   for (const method of ["getOrInsert", "getOrInsertComputed"]) {
     const events = [];
     const map = reactive(new Map(), event => events.push(event));
+    // Node 24 has no Map getOrInsert: the proxy has none either
+    if (typeof Map.prototype[method] !== "function") {
+      assert.equal(typeof map[method], "undefined", method);
+      continue;
+    }
     events.length = 0;
     const value = method === "getOrInsert" ? map[method]("key", { n: 1 }) : map[method]("key", () => ({ n: 1 }));
     value.n = 2;
