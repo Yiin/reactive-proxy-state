@@ -1,3 +1,4 @@
+import { beginDelivery, checkListenerWrite, emitListener, endDelivery } from "./listener";
 import { ReactiveFlags } from "./constants";
 import type { EmitFunction, Path, StateEvent } from "./types";
 import {
@@ -399,6 +400,7 @@ function buildPath(base: Path, reversed: string[] | undefined, tail: PropertyKey
  * A write that finds no root is counted in `proxyStats.detachedWrites`.
  */
 export function locate(node: LocationNode, tail?: PropertyKey): Target | undefined {
+  checkListenerWrite();
   const single = chain(node, tail);
   if (single !== undefined) {
     if (single === null) {
@@ -491,18 +493,18 @@ function attachedBefore(node: LocationNode, former: LocationNode | undefined): b
  * `items`), all made before the first emit, so a listener that changes one
  * cannot change another, and two remote places never share one object.
  * The first path gets `event` itself. What the write removed is copied per
- * path only where `copyPayload` copied it (an async root); otherwise every
+ * path only where `copyPayload` copied it (a queued event); otherwise every
  * path carries the removed value itself, shared by the events.
  */
 export function dispatch(target: Target, event: StateEvent): void {
   const { root, paths } = target;
   if (paths.length === 1) {
-    if (root.undelivered === undefined) root.emit!(event);
+    if (root.undelivered === undefined) emitListener(root.emit!, event);
     else deliver(root, [event]);
     return;
   }
   // copies of the payload copies: their set members and map keys name the same members
-  deliver(root, copyingPayloads(() => copiesPerPath(event, paths, root.async)));
+  deliver(root, copyingPayloads(() => copiesPerPath(event, paths, copiesRemoved(target))));
 }
 
 /** `event` for its first path, and a copy of it for each other path (see `dispatch`). */
@@ -554,20 +556,24 @@ export function deliver(root: LocationRoot, events: StateEvent[]): void {
   const emit = root.emit!;
   const waiting = root.undelivered;
   if (waiting !== undefined) {
-    for (let i = 0; i < events.length; i++) waiting.events.push(events[i]);
+    for (let i = 0; i < events.length; i++) {
+      waiting.events.push(events[i]);
+    }
     return;
   }
   if (events.length === 1) {
-    emit(events[0]);
+    emitListener(emit, events[0]);
     return;
   }
   const queue: Undelivered = (root.undelivered = { events, next: 0 });
+  const ownsDelivery = beginDelivery();
   let failed = false;
   let failure: unknown;
   try {
     while (queue.next < queue.events.length) {
       try {
-        emit(queue.events[queue.next++]);
+        const index = queue.next++;
+        emitListener(emit, queue.events[index]);
       } catch (error) {
         if (!failed) {
           failed = true;
@@ -577,8 +583,14 @@ export function deliver(root: LocationRoot, events: StateEvent[]): void {
     }
   } finally {
     root.undelivered = undefined;
+    endDelivery(ownsDelivery);
   }
   if (failed) throw failure;
+}
+
+/** Removed values must survive every queue, including the other paths of an alias. */
+function copiesRemoved(target: Target): boolean {
+  return target.root.async || target.root.undelivered !== undefined || target.paths.length > 1;
 }
 
 /** What `copyPayload` did. */
@@ -608,10 +620,9 @@ export const enum Copied {
  * What the write stores (`newValue`, `value`, `items`) is always copied: it
  * stays in the tree, where later writes change it, and a replica needs it
  * as it was. What the write removes (`oldValue`, `oldValues`, and the
- * `value` of a `set-delete`) is copied only for an async root
- * (`target.root.async`), whose events wait for a microtask. A synchronous
- * root delivers the event before the write returns, and sends the removed
- * value itself, as 1.0.44 did, so it never refuses a removal. Assignment
+ * `value` of a `set-delete`) is copied when the event will wait: an async
+ * root, an active queue, or several paths for one write. An immediate
+ * single-path event sends the removed value itself. Assignment
  * `newValue` copies keep array items only. Reorders keep properties on
  * nested arrays; the other fields keep every array's properties (see `Named`).
  *
@@ -630,7 +641,7 @@ export function copyPayload(
   held?: Set<object>
 ): Copied {
   if (event === undefined) return Copied.Done;
-  const removed = target!.root.async;
+  const removed = copiesRemoved(target!);
   const { newValue, oldValue, value, items, oldValues } = event;
   // a set's deleted member is a removed value (it is the `oldValue` too)
   const stored = event.action !== "set-delete";
@@ -659,13 +670,11 @@ export function copyPayload(
     fresh &&= copiedFresh;
   }
   if (removed) {
-    const oldCopy = isObject(oldValue) ? cloneTreeUnless(oldValue, container, Named.All) : oldValue;
-    if (oldCopy === REACHES) return Copied.Reaches;
+    const oldCopy = isObject(oldValue) ? cloneTree(oldValue, Named.All) : oldValue;
     const oldValuesCopy =
       oldValues !== undefined && holdsObject(oldValues)
-        ? cloneTreeUnless(oldValues, container, Named.Below)
+        ? cloneTree(oldValues, Named.Below)
         : oldValues;
-    if (oldValuesCopy === REACHES) return Copied.Reaches;
     if (isObject(oldValue)) event.oldValue = oldCopy;
     if (oldValues !== undefined) event.oldValues = oldValuesCopy as any[];
     if (!stored) valueCopy = event.oldValue;
@@ -685,7 +694,7 @@ export function copyPayload(
  * read. `after` comes from `shallowCopy`, which refuses the container's own.
  */
 export function copyPayloadReaching(event: StateEvent, target: Target, container: object, after: object): void {
-  refuseAccessors(event, target.root.async, container, after);
+  refuseAccessors(event, copiesRemoved(target), container, after);
   copyPayloadAfter(event, target, container, after);
 }
 
@@ -698,10 +707,10 @@ export function copyPayloadReaching(event: StateEvent, target: Target, container
  */
 export function copyPayloadAfter(event: StateEvent, target: Target, container: object, after: object): void {
   const { newValue, oldValue, value, items, oldValues } = event;
-  const removed = target.root.async;
+  const removed = copiesRemoved(target);
   const stored = event.action !== "set-delete";
   const newCopy = isObject(newValue) ? cloneTreeAfter(newValue, container, after, event.action === "replace" ? Named.Below : Named.None) : newValue;
-  const oldCopy = removed && isObject(oldValue) ? cloneTreeAfter(oldValue, container, after, Named.All) : oldValue;
+  const oldCopy = removed && isObject(oldValue) ? cloneTree(oldValue, Named.All) : oldValue;
   const valueCopy = !isObject(value)
     ? value
     : stored
@@ -711,7 +720,7 @@ export function copyPayloadAfter(event: StateEvent, target: Target, container: o
     items !== undefined && holdsObject(items) ? cloneTreeAfter(items, container, after, Named.Below) : items;
   const oldValuesCopy =
     removed && oldValues !== undefined && holdsObject(oldValues)
-      ? cloneTreeAfter(oldValues, container, after, Named.Below)
+      ? cloneTree(oldValues, Named.Below)
       : oldValues;
   if (isObject(newValue)) event.newValue = newCopy;
   if (isObject(oldValue)) event.oldValue = oldCopy;

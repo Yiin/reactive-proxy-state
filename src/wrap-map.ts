@@ -213,6 +213,7 @@ export function wrapMap<K, V>(map: Map<K, V>, node: LocationNode): Map<K, V> {
           const oldSize = target.size;
           if (oldSize === 0) return;
 
+          const located = locate(node);
           const removed = [...target];
           target.clear();
           if (watch.indexed) forgetReplicaIndex(target);
@@ -221,7 +222,6 @@ export function wrapMap<K, V>(map: Map<K, V>, node: LocationNode): Map<K, V> {
             if (isObject(value)) detachPlace(value, node, key);
           }
 
-          const located = locate(node);
           beginWrite();
           try {
             triggerCleared(target, removed.map(([key]) => key));

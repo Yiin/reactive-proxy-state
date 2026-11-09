@@ -1,3 +1,4 @@
+import { delivery, emitListener, type Delivery } from "./listener";
 import { EmitFunction, Path, ReactiveOptions, StateEvent } from "./types";
 import {
   Named,
@@ -59,19 +60,23 @@ export function isReactive(value: any): boolean {
  */
 function createAsyncEmit(emit: EmitFunction): EmitFunction {
   const queue: StateEvent[] = []
+  const deliveries: (Delivery | undefined)[] = []
   let flushScheduled = false
 
   return (event: StateEvent) => {
     queue.push(event)
+    deliveries.push(delivery)
     if (!flushScheduled) {
       flushScheduled = true
       queueMicrotask(() => {
         let failed = false
         let failure: unknown
         let next = 0
+        try {
         while (next < queue.length) {
           try {
-            emit(queue[next++])
+            const index = next++
+            emitListener(emit, queue[index], deliveries[index])
           } catch (error) {
             if (!failed) {
               failed = true
@@ -81,11 +86,15 @@ function createAsyncEmit(emit: EmitFunction): EmitFunction {
           // a flush that listeners keep growing lets go of what it delivered
           if (next === FLUSH_CHUNK) {
             queue.splice(0, next)
+            deliveries.splice(0, next)
             next = 0
           }
         }
-        queue.length = 0
-        flushScheduled = false
+        } finally {
+          queue.length = 0
+          deliveries.length = 0
+          flushScheduled = false
+        }
         if (failed) throw failure
       })
     }
@@ -138,7 +147,7 @@ export function reactive<T extends object>(
     try {
       const newValue = cloneStored(obj, undefined, Named.All);
       fresh = copiedFresh;
-      emit({ action: "replace", path: [], newValue });
+      emitListener(emit, { action: "replace", path: [], newValue });
     } catch (error) {
       if (error instanceof SnapshotLimitError) throw error;
       console.error("Failed to emit initial reactive state:", error);

@@ -119,3 +119,42 @@ What to check when you upgrade:
 - **A listener that catches errors of its own writes.** A listener's write no longer throws an effect's error: the outer write throws it after its effects ran. While several events are delivered, the listener's write throws no listener's error either; the outer write throws the first one after every event was delivered.
 - **A mute scope around a listener's write** drops that write's events only when nothing waits. Move the write out of the listener (`queueMicrotask`) to mute it every time.
 
+
+
+## 3.0.7: listener loops stop and queued old values stay stable
+
+The core permits 100 nested listener-write rounds per caller write.
+Each listener-caused mutation uses one round.
+All descendant events share the same budget, including alias events and queued events.
+This bounds branching loops as well as direct recursion.
+The bound also applies to async roots and writes between roots.
+Round 101 is refused before mutation.
+The library drains committed events and waiting effects, then throws a `RangeError`.
+An async root reports the error from its delivery microtask.
+Catching the refused write inside the listener does not hide the final error.
+A later caller write starts a new chain.
+
+Replace temporary reentry guards with event-path filters.
+A queued event can arrive after a temporary guard has cleared.
+Filter every path that the listener itself writes:
+
+```ts
+const state = reactive({ count: 0, version: 0 }, event => {
+	forward(event);
+	if (event.path.length === 0 || event.path[0] === "version") return;
+	state.version++;
+});
+```
+
+If the listener must write before forwarding, forward from a `finally` block.
+A refused write throws inside the callback, like other invalid writes.
+
+Queued events snapshot removed payloads before mutation.
+This covers `oldValue`, `oldValues`, and the removed `value` of `set-delete`.
+A retained object changed before delivery no longer changes these payloads.
+Snapshots obey the existing copy limit, so an oversized queued removal can fail before mutation.
+Immediate single-path removals keep their existing behavior.
+
+Listener reads no longer become dependencies of the effect whose write called the listener.
+This includes initial events, queued events, and listener errors.
+Effects and computed values created or evaluated inside listeners still track their own reads.

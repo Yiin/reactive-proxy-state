@@ -168,6 +168,7 @@ export function wrapSet<T>(set: Set<T>, node: LocationNode): Set<T> {
           const oldSize = target.size;
           if (oldSize === 0) return;
 
+          const located = locate(node);
           const removed = [...target];
           target.clear();
           if (watch.indexed) forgetReplicaIndex(target);
@@ -175,7 +176,6 @@ export function wrapSet<T>(set: Set<T>, node: LocationNode): Set<T> {
           for (const member of removed) {
             if (isObject(member)) detachPlace(member, node, undefined);
           }
-          const located = locate(node);
           beginWrite();
           try {
             triggerCleared(target, removed);
