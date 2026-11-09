@@ -3,6 +3,7 @@
 // native array behavior and a replica in sync. Run after `bun run build`:
 //   node scripts/dist-smoke.mjs
 import assert from "node:assert/strict";
+import { verifyReview303 } from "../tests/review-303.node.mjs";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 
@@ -82,5 +83,6 @@ function replica(lib) {
 for (const [name, lib] of [["ESM", esm], ["CJS", cjs]]) {
   const count = nativeArrays(lib);
   replica(lib);
-  console.log(`${name}: ${count} native array cases and a replica round trip pass`);
+  verifyReview303(lib);
+  console.log(`${name}: ${count} native array cases, a replica round trip, and 3.0.3 regressions pass`);
 }
