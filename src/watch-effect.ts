@@ -50,7 +50,7 @@ export function setActiveEffect(effect: TrackedEffect<any> | null) {
  */
 class Dep extends Set<TrackedEffect<any>> {
   /** Readers of membership or keys only, skipped on a Map value update. */
-  membershipOnly?: WeakSet<TrackedEffect<any>>;
+  membershipOnly?: WeakSet<TrackedEffect<unknown>>;
   constructor(public owner: Deps | WeakRef<Deps>, readonly key: unknown) {
     super();
   }
