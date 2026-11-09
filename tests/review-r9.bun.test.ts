@@ -27,7 +27,7 @@ for (const async of [false, true]) {
   });
 }
 
-test("a caught listener error does not discard a committed nested event", () => {
+test("a listener error does not discard a committed nested event", () => {
   const shared = { n: 0 };
   let state: any;
   let replica: any;
@@ -51,7 +51,12 @@ test("a caught listener error does not discard a committed nested event", () => 
     }
     if (path === "b.n") throw new Error("listener failed after applying its event");
   });
-  state.a.n = 1;
+  // the delivery that runs sends b.n and c after the listener returns, so
+  // the error reaches the outer write after every event. 3.0.4 threw it
+  // into the listener's own write, where the listener caught it
+  expect(() => {
+    state.a.n = 1;
+  }).toThrow("listener failed after applying its event");
   expect(paths).toContain("c");
   expect(replica).toEqual(toRaw(state));
 });
