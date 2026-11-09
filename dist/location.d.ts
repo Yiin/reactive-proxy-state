@@ -159,12 +159,12 @@ export declare function dispatch(target: Target, event: StateEvent): void;
  * state after the events still waiting (the other places of an alias, the
  * other indexes of a longer `length`), so its own events go after them in
  * the root's queue, and the delivery already running sends them in turn.
- * So events reach `emit` in the order the state changed, and none reaches
- * it while a listener has not yet forwarded an earlier one: 3.0.4 and
- * earlier sent the queue from inside the listener's write, and a replica
- * got a later write before the event that listener held. A write made
- * while nothing waits is delivered at once, inside the listener call that
- * made it.
+ * So events reach `emit` in the order the state changed, and a listener's
+ * write never sends a later event of the queue while that listener still
+ * holds an earlier one: 3.0.4 and earlier sent the queue from inside the
+ * listener's write, and a replica got a later write before the event that
+ * listener held. A write made while nothing waits is delivered at once,
+ * inside the listener call that made it.
  *
  * An `emit` that throws does not stop the others: every event in the queue
  * is delivered once, each for a write that already changed the state, then
