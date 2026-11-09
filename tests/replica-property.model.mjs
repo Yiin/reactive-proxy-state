@@ -422,6 +422,8 @@ export function runCase(lib, spec, { stopLoops = false } = {}) {
  * Map trimming reads keys. Since 3.0.9 it skips value-only updates, so its
  * effect or trigger hook can throw fewer times. Every event byte and every
  * other error must still match; the effect oracle checks the run counts.
+ * The current log must be a subsequence of the baseline. Each effect can
+ * lose at most one error line per skipped run, shared by its hook and body.
  */
 export function sameEventLog(spec, current, baseline) {
   const errorEffects = new Map();

@@ -6,6 +6,8 @@
  * write, or when a case 3.0.6's order applies to (see `comparable`, and
  * `comparableWhenFinite` for listener writes 3.0.6 ends) sends other
  * events than 3.0.6.
+ * `exact` compares every case and every log byte with the baseline.
+ * `catch` compares listeners that catch errors and retry writes.
  */
 import fc from "fast-check";
 import { listenerCatchArbitrary, runListenerCatchCase } from "./listener-catch.model.mjs";
@@ -98,7 +100,7 @@ for (let seed = 1; seed <= seeds; seed++) {
       seed,
       spec,
       ours: runCase(lib, spec),
-      baseline: comparable(spec) ? runCase(baseline, spec) : comparableWhenFinite(spec) ? runCase(baseline, spec, { stopLoops: true }) : "excluded: listener tracking",
+      baseline: mode === "exact" || comparable(spec) ? runCase(baseline, spec) : comparableWhenFinite(spec) ? runCase(baseline, spec, { stopLoops: true }) : "excluded: listener tracking",
       kinds: classify(spec),
     });
     if (failures.length >= 3) break;

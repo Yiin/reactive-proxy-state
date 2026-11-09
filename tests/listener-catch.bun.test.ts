@@ -14,12 +14,15 @@ test("listeners catch errors, retry writes, and keep replicas equal after every 
     expect(result.retryValue).toBe(spec.initial + result.attempts);
     expect(result.caught).toBeGreaterThan(0);
     if (spec.refusal) {
+      expect(result.attempts).toBe(101 * spec.rounds + 1);
       expect(result.loop).toBe(100 * spec.rounds);
       expect(result.callerErrors).toBe(spec.rounds);
       expect(result.rejected).toBe(result.attempts - 1);
     } else {
+      expect(result.attempts).toBe(spec.depth * spec.rounds + 1);
       expect(result.loop).toBe(spec.depth * spec.rounds);
       expect(result.rejected).toBe(0);
+      expect(result.callerErrors).toBe(spec.swallow ? 0 : spec.rounds);
     }
   }), { seed: Number(process.env.RPS_PROPERTY_SEED ?? 20261109), numRuns: Number(process.env.RPS_PROPERTY_RUNS ?? 500) });
 });
