@@ -252,7 +252,10 @@ function trimTo(state, target, limit) {
     if (state.list.length > limit) state.list.splice(0, state.list.length - limit);
   } else {
     const collection = state[target];
-    while (collection.size > limit) collection.delete(collection.keys().next().value);
+    // A listener can reinsert a removed member. One effect invocation visits
+    // its original excess keys once; subsequent reactions belong to the library.
+    const excess = [...collection.keys()].slice(0, Math.max(0, collection.size - limit));
+    for (const key of excess) collection.delete(key);
   }
 }
 

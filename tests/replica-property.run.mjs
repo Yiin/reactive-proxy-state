@@ -37,6 +37,7 @@ const counts = {
 };
 const failures = [];
 for (let seed = 1; seed <= seeds; seed++) {
+  console.error(`replica seed ${seed}/${seeds}`);
   const result = fc.check(
     fc.property(caseArbitrary(), (spec) => {
       const ours = runCase(lib, spec);
