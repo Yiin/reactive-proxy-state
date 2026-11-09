@@ -108,3 +108,48 @@ describe("Map membership, keys and values have separate dependencies", () => {
     stop();
   });
 });
+
+for (const readers of [["has", "get"], ["get", "has"], ["keys", "values"], ["values", "keys"]] as const) {
+  test(`Map readers keep their subscription order: ${readers.join(", ")}`, () => {
+    const map = reactive(new Map<string, number>());
+    const order: string[] = [];
+    const stops = readers.map(reader => watchEffect(() => {
+      if (reader === "has") map.has("a");
+      else if (reader === "get") map.get("a");
+      else if (reader === "keys") [...map.keys()];
+      else [...map.values()];
+      order.push(reader);
+    }));
+    for (const write of [() => map.set("a", 1), () => map.delete("a"), () => map.set("a", 2), () => map.clear()]) {
+      order.length = 0;
+      write();
+      expect(order).toEqual([...readers]);
+    }
+    stops.forEach(stop => stop());
+  });
+}
+
+for (const iteration of [false, true]) {
+  test(`an effect can switch between membership and value reads (iteration=${iteration})`, () => {
+    const state = reactive({ values: true, map: new Map([["a", 1]]) });
+    let runs = 0;
+    const stop = watchEffect(() => {
+      runs++;
+      if (state.values) {
+        if (iteration) [...state.map.values()];
+        else state.map.get("a");
+      }
+      if (iteration) [...state.map.keys()];
+      else state.map.has("a");
+    });
+    state.map.set("a", 2);
+    expect(runs).toBe(2);
+    state.values = false;
+    state.map.set("a", 3);
+    expect(runs).toBe(3);
+    state.values = true;
+    state.map.set("a", 4);
+    expect(runs).toBe(5);
+    stop();
+  });
+}

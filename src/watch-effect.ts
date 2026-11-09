@@ -49,6 +49,8 @@ export function setActiveEffect(effect: TrackedEffect<any> | null) {
  * under that key, so the last effect to leave can remove it.
  */
 class Dep extends Set<TrackedEffect<any>> {
+  /** Readers of membership or keys only, skipped on a Map value update. */
+  membershipOnly?: WeakSet<TrackedEffect<any>>;
   constructor(public owner: Deps | WeakRef<Deps>, readonly key: unknown) {
     super();
   }
@@ -64,8 +66,6 @@ const targetMap = new WeakMap<object, Deps>();
 // shares a dependency with a property ("get", "size"), and keyed by the entry itself,
 // as the collection keys it (1 and "1" are two entries, NaN is one)
 const entryMap = new WeakMap<object, Deps>();
-/** Map membership changes independently of the value stored at a key. */
-const membershipMap = new WeakMap<object, Deps>();
 
 /**
  * Dependencies a cleanup at the start of a run left without effects, the
@@ -112,8 +112,8 @@ function depsOf(maps: WeakMap<object, Deps>, target: object): Map<unknown, Dep> 
  * has no map.
  * @internal
  */
-export function dependencyCounts(target: object): { properties?: number; entries?: number; membership?: number } {
-  return { properties: targetMap.get(target)?.size, entries: entryMap.get(target)?.size, membership: membershipMap.get(target)?.size };
+export function dependencyCounts(target: object): { properties?: number; entries?: number } {
+  return { properties: targetMap.get(target)?.size, entries: entryMap.get(target)?.size };
 }
 
 /**
@@ -221,13 +221,38 @@ export function track(target: object, key: string | symbol): void {
  */
 export function trackEntry(target: object, entry: unknown): void {
   if (!activeEffect || !activeEffect.active) return;
-  addDep(depFor(entryMap, target, entry), target, entry);
+  const dep = depFor(entryMap, target, entry);
+  dep.membershipOnly?.delete(activeEffect);
+  addDep(dep, target, entry);
 }
 
 /** Tracks whether a Map holds `entry`, without reading its value. @internal */
 export function trackMembership(target: object, entry: unknown): void {
   if (!activeEffect || !activeEffect.active) return;
-  addDep(depFor(membershipMap, target, entry), target, entry);
+  trackMembershipDep(depFor(entryMap, target, entry), target, entry);
+}
+
+/** Keep the shared subscription order when membership and value readers both run. */
+function trackMembershipDep(dep: Dep, target: object, key: unknown): void {
+  if (!dep.has(activeEffect!)) {
+    dep.membershipOnly ??= new WeakSet();
+    dep.membershipOnly.add(activeEffect!);
+  }
+  addDep(dep, target, key);
+}
+
+/** Track ordered Map keys, separately from value changes. @internal */
+export function trackMapKeys(target: object): void {
+  if (!activeEffect || !activeEffect.active) return;
+  trackMembershipDep(depFor(targetMap, target, Symbol.iterator), target, Symbol.iterator);
+}
+
+/** Track Map values, including changes at existing keys. @internal */
+export function trackMapValues(target: object): void {
+  if (!activeEffect || !activeEffect.active) return;
+  const dep = depFor(targetMap, target, Symbol.iterator);
+  dep.membershipOnly?.delete(activeEffect);
+  addDep(dep, target, Symbol.iterator);
 }
 
 /**
@@ -372,9 +397,10 @@ export function endWrite(): void {
  * triggers its own readers now, so every computed a write makes stale is
  * stale before any effect runs.
  */
-function queueEffects(dep: Dep | undefined, target: object, key: unknown): void {
+function queueEffects(dep: Dep | undefined, target: object, key: unknown, valuesOnly = false): void {
   if (dep === undefined) return;
   dep.forEach(effect => {
+    if (valuesOnly && dep.membershipOnly?.has(effect)) return;
     // avoid queuing the effect if it's the one currently running (prevents infinite loops)
     // also ensure the effect hasn't been stopped
     if (effect === (activeEffect ?? emittingEffect) || !effect.active) return;
@@ -562,18 +588,13 @@ function unchanged(from: number, to: number, same: (index: number) => boolean): 
 export function triggerCollection(target: object, entry: unknown, sizeChanged: boolean): void {
   const depsMap = depsOf(targetMap, target);
   const entryDeps = depsOf(entryMap, target);
-  const membershipDeps = sizeChanged ? depsOf(membershipMap, target) : undefined;
-  if (!depsMap && !entryDeps && !membershipDeps) return; // no effects tracked for this target
+  if (!depsMap && !entryDeps) return; // no effects tracked for this target
   startBatch();
   try {
-    if (entryDeps) queueEffects(entryDeps.get(entry), target, entry);
-    if (membershipDeps) queueEffects(membershipDeps.get(entry), target, entry);
+    if (entryDeps) queueEffects(entryDeps.get(entry), target, entry, !sizeChanged);
     if (depsMap) {
-      if (sizeChanged) {
-        queueEffects(depsMap.get("size"), target, "size");
-        queueEffects(depsMap.get(keysKey), target, keysKey);
-      }
-      queueEffects(depsMap.get(Symbol.iterator), target, Symbol.iterator);
+      if (sizeChanged) queueEffects(depsMap.get("size"), target, "size");
+      queueEffects(depsMap.get(Symbol.iterator), target, Symbol.iterator, !sizeChanged);
     }
   } finally {
     endBatch();
@@ -589,18 +610,13 @@ export function triggerCollection(target: object, entry: unknown, sizeChanged: b
 export function triggerCleared(target: object, removed: readonly unknown[]): void {
   const depsMap = depsOf(targetMap, target);
   const entryDeps = depsOf(entryMap, target);
-  const membershipDeps = depsOf(membershipMap, target);
-  if (!depsMap && !entryDeps && !membershipDeps) return; // no effects tracked for this target
+  if (!depsMap && !entryDeps) return; // no effects tracked for this target
   startBatch();
   try {
     if (entryDeps) {
       for (let i = 0; i < removed.length; i++) queueEffects(entryDeps.get(removed[i]), target, removed[i]);
     }
-    if (membershipDeps) {
-      for (let i = 0; i < removed.length; i++) queueEffects(membershipDeps.get(removed[i]), target, removed[i]);
-    }
     if (depsMap) {
-      queueEffects(depsMap.get(keysKey), target, keysKey);
       queueEffects(depsMap.get("size"), target, "size");
       queueEffects(depsMap.get(Symbol.iterator), target, Symbol.iterator);
     }

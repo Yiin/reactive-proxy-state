@@ -43,6 +43,8 @@ __export(exports_src, {
   trackingVersion: () => trackingVersion,
   trackVueReactiveEvents: () => trackVueReactiveEvents,
   trackMembership: () => trackMembership,
+  trackMapValues: () => trackMapValues,
+  trackMapKeys: () => trackMapKeys,
   trackKeys: () => trackKeys,
   trackEntry: () => trackEntry,
   track: () => track,
@@ -1260,6 +1262,7 @@ function setActiveEffect(effect) {
 class Dep extends Set {
   owner;
   key;
+  membershipOnly;
   constructor(owner, key) {
     super();
     this.owner = owner;
@@ -1269,7 +1272,6 @@ class Dep extends Set {
 var ownerRefs = new WeakMap;
 var targetMap = new WeakMap;
 var entryMap = new WeakMap;
-var membershipMap = new WeakMap;
 var emptiedDeps = [];
 var emptiedCount = 0;
 function releaseDep(dep) {
@@ -1296,7 +1298,7 @@ function depsOf(maps, target) {
   return;
 }
 function dependencyCounts(target) {
-  return { properties: targetMap.get(target)?.size, entries: entryMap.get(target)?.size, membership: membershipMap.get(target)?.size };
+  return { properties: targetMap.get(target)?.size, entries: entryMap.get(target)?.size };
 }
 function detachEffect(effect, defer) {
   const dependencies = effect.dependencies;
@@ -1376,12 +1378,33 @@ function track(target, key) {
 function trackEntry(target, entry) {
   if (!activeEffect || !activeEffect.active)
     return;
-  addDep(depFor(entryMap, target, entry), target, entry);
+  const dep = depFor(entryMap, target, entry);
+  dep.membershipOnly?.delete(activeEffect);
+  addDep(dep, target, entry);
 }
 function trackMembership(target, entry) {
   if (!activeEffect || !activeEffect.active)
     return;
-  addDep(depFor(membershipMap, target, entry), target, entry);
+  trackMembershipDep(depFor(entryMap, target, entry), target, entry);
+}
+function trackMembershipDep(dep, target, key) {
+  if (!dep.has(activeEffect)) {
+    dep.membershipOnly ??= new WeakSet;
+    dep.membershipOnly.add(activeEffect);
+  }
+  addDep(dep, target, key);
+}
+function trackMapKeys(target) {
+  if (!activeEffect || !activeEffect.active)
+    return;
+  trackMembershipDep(depFor(targetMap, target, Symbol.iterator), target, Symbol.iterator);
+}
+function trackMapValues(target) {
+  if (!activeEffect || !activeEffect.active)
+    return;
+  const dep = depFor(targetMap, target, Symbol.iterator);
+  dep.membershipOnly?.delete(activeEffect);
+  addDep(dep, target, Symbol.iterator);
 }
 var keysKey = Symbol("keys");
 function trackKeys(target) {
@@ -1480,10 +1503,12 @@ function beginWrite() {
 function endWrite() {
   endBatch();
 }
-function queueEffects(dep, target, key) {
+function queueEffects(dep, target, key, valuesOnly = false) {
   if (dep === undefined)
     return;
   dep.forEach((effect) => {
+    if (valuesOnly && dep.membershipOnly?.has(effect))
+      return;
     if (effect === (activeEffect ?? emittingEffect) || !effect.active)
       return;
     const onTrigger = effect.options?.onTrigger;
@@ -1604,21 +1629,16 @@ function unchanged(from, to, same) {
 function triggerCollection(target, entry, sizeChanged) {
   const depsMap = depsOf(targetMap, target);
   const entryDeps = depsOf(entryMap, target);
-  const membershipDeps = sizeChanged ? depsOf(membershipMap, target) : undefined;
-  if (!depsMap && !entryDeps && !membershipDeps)
+  if (!depsMap && !entryDeps)
     return;
   startBatch();
   try {
     if (entryDeps)
-      queueEffects(entryDeps.get(entry), target, entry);
-    if (membershipDeps)
-      queueEffects(membershipDeps.get(entry), target, entry);
+      queueEffects(entryDeps.get(entry), target, entry, !sizeChanged);
     if (depsMap) {
-      if (sizeChanged) {
+      if (sizeChanged)
         queueEffects(depsMap.get("size"), target, "size");
-        queueEffects(depsMap.get(keysKey), target, keysKey);
-      }
-      queueEffects(depsMap.get(Symbol.iterator), target, Symbol.iterator);
+      queueEffects(depsMap.get(Symbol.iterator), target, Symbol.iterator, !sizeChanged);
     }
   } finally {
     endBatch();
@@ -1627,8 +1647,7 @@ function triggerCollection(target, entry, sizeChanged) {
 function triggerCleared(target, removed) {
   const depsMap = depsOf(targetMap, target);
   const entryDeps = depsOf(entryMap, target);
-  const membershipDeps = depsOf(membershipMap, target);
-  if (!depsMap && !entryDeps && !membershipDeps)
+  if (!depsMap && !entryDeps)
     return;
   startBatch();
   try {
@@ -1636,12 +1655,7 @@ function triggerCleared(target, removed) {
       for (let i = 0;i < removed.length; i++)
         queueEffects(entryDeps.get(removed[i]), target, removed[i]);
     }
-    if (membershipDeps) {
-      for (let i = 0;i < removed.length; i++)
-        queueEffects(membershipDeps.get(removed[i]), target, removed[i]);
-    }
     if (depsMap) {
-      queueEffects(depsMap.get(keysKey), target, keysKey);
       queueEffects(depsMap.get("size"), target, "size");
       queueEffects(depsMap.get(Symbol.iterator), target, Symbol.iterator);
     }
@@ -3593,9 +3607,9 @@ class MapProxyIterator {
       return { value: undefined, done: true };
     if (activeEffect !== null && this.trackedAt !== trackingVersion) {
       if (this.kind === "keys")
-        trackKeys(this.target);
+        trackMapKeys(this.target);
       else
-        track(this.target, Symbol.iterator);
+        trackMapValues(this.target);
       this.trackedAt = trackingVersion;
     }
     const step = this.iterator.next();
