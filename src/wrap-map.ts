@@ -146,7 +146,9 @@ export function wrapMap<K, V>(map: Map<K, V>, node: LocationNode): Map<K, V> {
         };
         return methodCache[prop];
       }
-      if (prop === "getOrInsert" || prop === "getOrInsertComputed") {
+      // only where the raw map has them: a feature check on the proxy
+      // answers as on the map
+      if ((prop === "getOrInsert" || prop === "getOrInsertComputed") && typeof (target as any)[prop] === "function") {
         methodCache[prop] = function (key: K, value: V | ((key: K) => V)): V | undefined {
           if (prop === "getOrInsertComputed" && typeof value !== "function") {
             throw new TypeError("Map.getOrInsertComputed callback must be a function");

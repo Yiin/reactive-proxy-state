@@ -37,10 +37,11 @@ function make() {
 
 describe("3.0.3 listener ordering review", () => {
   for (const [name, { read, write }] of Object.entries(writes)) {
-    test(`${name}: listeners and nested effects read fresh computed chains`, () => {
+    test(`${name}: listeners read fresh computed chains, and effects wait for the outer write`, () => {
       let armed = false;
       let nested = false;
       const observed: unknown[][] = [];
+      const totals: string[] = [];
       const events: StateEvent[] = [];
       const raw = make();
       const remote = structuredClone(raw);
@@ -52,7 +53,7 @@ describe("3.0.3 listener ordering review", () => {
           nested = true;
           observed.push([read(state), first.value, second.value]);
           state.tick++;
-          expect(state.total).toBe(JSON.stringify([read(state), first.value, second.value]));
+          totals.push(state.total);
         }
       });
       const first = computed(() => read(state));
@@ -62,10 +63,15 @@ describe("3.0.3 listener ordering review", () => {
         state.total = JSON.stringify([read(state), first.value, second.value]);
       });
       remote.total = state.total;
+      const before = state.total;
       armed = true;
       write(state);
       const value = read(state);
       expect(observed).toEqual([[value, value, value]]);
+      // 3.0.4 ran the effect when the listener's write ended. Effects now
+      // wait for the outermost write, so a listener that writes before it
+      // forwards an event cannot have an effect's event sent first
+      expect(totals).toEqual([before]);
       expect(events.filter(event => event.path[0] === "total").map(event => event.newValue)).toEqual([JSON.stringify([value, value, value])]);
       expect(remote.total).toBe(state.total);
       stop(); first.stop(); second.stop();
@@ -88,7 +94,7 @@ describe("3.0.3 listener ordering review", () => {
       stop();
     });
   }
-  test("source effects run in source order and a nested write finishes its cycle", () => {
+  test("source effects run in source order when the outermost write ends", () => {
     const order: string[] = [];
     let armed = false;
     const state = reactive({ a: 0, b: 0 }, event => {
@@ -103,7 +109,8 @@ describe("3.0.3 listener ordering review", () => {
     const b = watchEffect(() => { state.b; if (armed) order.push("effect:b"); });
     armed = true;
     state.a++;
-    expect(order).toEqual(["event:a", "event:b", "effect:a", "effect:b", "nested-return"]);
+    // 3.0.4 ran both effects before the listener's write returned
+    expect(order).toEqual(["event:a", "event:b", "nested-return", "effect:a", "effect:b"]);
     a(); b();
   });
   test("method replacement and deletion take effect inside listeners", () => {

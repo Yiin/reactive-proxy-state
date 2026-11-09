@@ -242,7 +242,7 @@ const queue: TrackedEffect<any>[] = [];
 // Debug hooks are user code too. Run them after invalidation and event delivery.
 const triggerNotifications: (() => void)[] = [];
 let flushing = false;
-// open trigger calls: effects run when the outermost one ends
+// open writes and trigger calls: effects run when the outermost one ends
 let batchDepth = 0;
 let flushCount = 0;
 
@@ -330,19 +330,18 @@ function endBatch(): void {
   if (--batchDepth === 0 && !flushing && (queue.length > 0 || triggerNotifications.length > 0)) flushEffects();
 }
 
-/** Hold effects while a write invalidates dependencies and delivers its events. @internal */
-export function beginWrite(): void {
-  startBatch();
-}
-
 /**
- * Finish a write's delivery. Nested listener writes drain the same queue,
- * in source order, before returning to their listener. @internal
+ * Hold effects while a write invalidates dependencies and delivers its
+ * events. A write a listener makes while it receives an event is nested in
+ * that write: its effects wait for the outermost write to end, so the
+ * listener forwards the event it received before any effect writes. 3.0.4
+ * ran them when the nested write ended, and a replica got an effect's
+ * event before the event that set it off. @internal
  */
-export function endWrite(): void {
-  batchDepth--;
-  if (!flushing && (queue.length > 0 || triggerNotifications.length > 0)) flushEffects();
-}
+export const beginWrite = startBatch;
+
+/** Finish a write; the outermost one runs the effects and hooks it queued. @internal */
+export const endWrite = endBatch;
 
 /**
  * Queue the effects of `dep`, the effects that read `key` of `target`. The

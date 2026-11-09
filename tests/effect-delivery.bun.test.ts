@@ -126,7 +126,7 @@ describe("a listener that throws while it receives an event", () => {
 
 describe("a listener that writes while it receives an event", () => {
   for (const async of [false, true]) {
-    test(`reruns the effects once per write, and the replica follows${async ? " (async root)" : ""}`, async () => {
+    test(`runs the effects after the outermost write, and the replica follows${async ? " (async root)" : ""}`, async () => {
       let nested = true;
       const sync = wire((event, state) => {
         if (nested && event.action === "map-set") {
@@ -142,9 +142,11 @@ describe("a listener that writes while it receives an event", () => {
       });
       sync.state.map.set("a", 2);
       if (async) await Promise.resolve();
-      // A nested write drains waiting effects once; the outer write cannot queue them again.
+      // The listener's writes are nested in the write it receives: the effect
+      // runs once, when that write ends. An async root delivers after the
+      // write, so each write the listener makes runs the effect
       expect(seen).toEqual(
-        async ? ["a|1|3", "a|1|3", "a,b|1|3", "a,b|1,5|3", "a,b|1,5|4"] : ["a|1|3", "a,b|1|3", "a,b|1,5|3", "a,b|1,5|4"]
+        async ? ["a|1|3", "a|1|3", "a,b|1|3", "a,b|1,5|3", "a,b|1,5|4"] : ["a|1|3", "a,b|1,5|4"]
       );
       expect(sync.events).toEqual(["map-set:map", "map-set:map", "set-add:set", "array-push:list"]);
       expect(treeText(sync.remote)).toBe(treeText(toRaw(sync.state)));

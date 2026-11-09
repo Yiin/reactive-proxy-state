@@ -238,7 +238,9 @@ function wrapObject<T extends object>(obj: T, node: LocationNode, options?: Reac
 
       const oldValue = (target as any)[prop];
 
-      // avoid unnecessary triggers if the value hasn't changed
+      // avoid unnecessary triggers if the value hasn't changed. An inherited
+      // value is not the object's own: writing it adds the key, and a
+      // replica that copies own keys needs the event
       // fast path for primitives
       if (oldValue === value && hasOwn.call(target, prop)) return true;
       // deep equality check for objects/arrays — skip when async emit is
@@ -248,6 +250,7 @@ function wrapObject<T extends object>(obj: T, node: LocationNode, options?: Reac
         !options?.async &&
         isObject(oldValue) &&
         isObject(value) &&
+        hasOwn.call(target, prop) &&
         deepEqual(oldValue, value)
       )
         return true;
