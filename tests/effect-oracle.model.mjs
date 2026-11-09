@@ -11,6 +11,25 @@ export const oracleArbitrary = fc.record({
   throws: fc.boolean(),
 });
 
+/**
+ * Wide cases: 101 to 160 effects that all read `shared`, and a listener
+ * that stamps every effect write. An effect writes its run count, so every
+ * run is a listener write, and a write that changes `shared` makes more
+ * than 100 of them. 3.0.7 counted those and threw.
+ */
+const sharedNames = ["a", "b", "sum", "list.length", "list.sum", "map.size", "map.values", "set.size"];
+export const wideOracleArbitrary = fc.record({
+  shared: fc.constantFrom(...sharedNames),
+  reads: fc.array(fc.uniqueArray(fc.constantFrom(...names), { maxLength: 2 }), { minLength: 101, maxLength: 160 }),
+  writes: fc.array(fc.record({ op: fc.constantFrom("a", "b", "list.push", "list.pop", "list.0", "map.k0", "map.k1", "map.delete", "map.clear", "set.add", "set.delete", "set.clear"), value: small }), { minLength: 2, maxLength: 10 }),
+  throws: fc.boolean(),
+}).map(({ shared, reads, writes, throws }) => ({
+  reads: reads.map(names => [shared, ...names.filter(name => name !== shared)]),
+  writes,
+  throws,
+  stamp: true,
+}));
+
 function read(state, name, sum) {
   switch (name) {
     case "a": return state.a;
@@ -77,21 +96,25 @@ export function runOracle(lib, spec) {
   const stops = spec.reads.map((reads, index) => lib.watchEffect(() => {
     actual[index]++;
     const value = reads.reduce((total, name) => total + read(state, name, sum), 0);
-    state.outputs[index] = value;
+    state.outputs[index] = spec.stamp ? actual[index] : value;
     if (armed && spec.throws && value % 3 === 2) throw new Error("oracle effect");
   }));
   armed = true;
   let failure;
+  // the most effect runs one write set off: each is a listener write when `spec.stamp`
+  let widest = 0;
   for (const [step, command] of spec.writes.entries()) {
     const before = structuredClone(model);
     write(model, command);
     const changed = affected(before, model, command);
-    spec.reads.forEach((reads, index) => { if (reads.some(name => changed.has(name))) expected[index]++; });
+    let reruns = 0;
+    spec.reads.forEach((reads, index) => { if (reads.some(name => changed.has(name))) { expected[index]++; reruns++; } });
+    widest = Math.max(widest, reruns);
     try { write(state, command); } catch (error) { if (error.message !== "oracle effect") throw error; }
     if (actual.some((count, index) => count !== expected[index])) { failure = { step, command, actual: [...actual], expected: [...expected] }; break; }
     if (stateText(lib, state) !== stateText(lib, remote)) { failure = { step, replica: true }; break; }
   }
   stops.forEach(stop => stop());
   sum.stop();
-  return { failure, runs: actual.reduce((a, b) => a + b, 0), writes: spec.writes.length };
+  return { failure, runs: actual.reduce((a, b) => a + b, 0), writes: spec.writes.length, widest };
 }
