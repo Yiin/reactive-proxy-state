@@ -528,6 +528,11 @@ var cloneWork = [];
 var FILL_DEPTH = 256;
 var hasOwn = Object.prototype.hasOwnProperty;
 var isEnumerable = Object.prototype.propertyIsEnumerable;
+function MethodCacheObject() {}
+MethodCacheObject.prototype = Object.create(null);
+function newMethodCache() {
+  return new MethodCacheObject;
+}
 function enterPath(identity, copy, depth) {
   cloneAncestors.push(identity);
   cloneCopies.push(copy);
@@ -2999,7 +3004,6 @@ function trackIteration(target) {
   if (activeEffect !== null)
     track(target, Symbol.iterator);
 }
-
 class ArrayProxyIterator {
   node;
   kind;
@@ -3013,15 +3017,17 @@ class ArrayProxyIterator {
   next() {
     const target = this.target;
     if (target !== undefined) {
-      trackIteration(target);
+      if (activeEffect !== null)
+        track(target, Symbol.iterator);
       const index = this.index;
       if (index < target.length) {
         this.index = index + 1;
-        if (this.kind === "keys")
+        const kind = this.kind;
+        if (kind === 1 /* Keys */)
           return { value: index, done: false };
         const value = target[index];
         const item = isObject3(value) ? wrapChild(value, this.node, index) : value;
-        return { value: this.kind === "entries" ? [index, item] : item, done: false };
+        return { value: kind === 0 /* Values */ ? item : [index, item], done: false };
       }
       this.target = undefined;
     }
@@ -3035,7 +3041,7 @@ function wrapArray(arr, node) {
     return cachedProxy;
   if (globalSeen.has(arr))
     return globalSeen.get(arr);
-  const methodCache = {};
+  const methodCache = newMethodCache();
   const proxy = new Proxy(arr, {
     get(target, prop, receiver) {
       if (prop === "__v_raw" /* RAW */)
@@ -3044,7 +3050,7 @@ function wrapArray(arr, node) {
         return true;
       track(target, prop);
       const cached = methodCache[prop];
-      if (cached !== undefined && hasOwn.call(methodCache, prop))
+      if (cached !== undefined)
         return cached;
       switch (prop) {
         case "sort":
@@ -3344,7 +3350,7 @@ function wrapArray(arr, node) {
         case "keys": {
           if (hasOwn.call(target, prop))
             break;
-          const kind = prop === "entries" ? "entries" : prop === "keys" ? "keys" : "values";
+          const kind = prop === "entries" ? 2 /* Entries */ : prop === "keys" ? 1 /* Keys */ : 0 /* Values */;
           methodCache[prop] = function() {
             trackIteration(target);
             return new ArrayProxyIterator(target, node, kind);
@@ -3547,7 +3553,7 @@ function wrapMap(map, node) {
     return cachedProxy;
   if (globalSeen.has(map))
     return globalSeen.get(map);
-  const methodCache = {};
+  const methodCache = newMethodCache();
   const watch = watchIndex(map);
   const proxy = new Proxy(map, {
     get(target, prop, receiver) {
@@ -3556,7 +3562,7 @@ function wrapMap(map, node) {
       if (prop === "__v_isReactive" /* IS_REACTIVE */)
         return true;
       const cached = methodCache[prop];
-      if (cached !== undefined && hasOwn.call(methodCache, prop))
+      if (cached !== undefined)
         return cached;
       if (prop === "set") {
         methodCache[prop] = function(key, value2) {
@@ -3818,7 +3824,7 @@ function wrapSet(set, node) {
     return cachedProxy;
   if (globalSeen.has(set))
     return globalSeen.get(set);
-  const methodCache = {};
+  const methodCache = newMethodCache();
   const watch = watchIndex(set);
   const proxy = new Proxy(set, {
     get(target, prop, receiver) {
@@ -3827,7 +3833,7 @@ function wrapSet(set, node) {
       if (prop === "__v_isReactive" /* IS_REACTIVE */)
         return true;
       const cached = methodCache[prop];
-      if (cached !== undefined && hasOwn.call(methodCache, prop))
+      if (cached !== undefined)
         return cached;
       if (prop === "add") {
         methodCache[prop] = function(value2) {

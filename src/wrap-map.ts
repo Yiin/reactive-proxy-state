@@ -1,7 +1,7 @@
 import {
   deepEqual,
   forgetReplicaIndex,
-  hasOwn,
+  newMethodCache,
   indexAdded,
   indexRemoved,
   nameKey,
@@ -72,8 +72,7 @@ export function wrapMap<K, V>(map: Map<K, V>, node: LocationNode): Map<K, V> {
   if (cachedProxy) return cachedProxy as Map<K, V>;
   if (globalSeen.has(map)) return globalSeen.get(map);
 
-  // only its own entries count: until 3.0.1 a read of `constructor` found Object.prototype's in it
-  const methodCache: { [key: string | symbol]: Function } = {};
+  const methodCache = newMethodCache();
   // the proxy keeps the collection's index by token, once it has one
   const watch = watchIndex(map);
 
@@ -86,7 +85,7 @@ export function wrapMap<K, V>(map: Map<K, V>, node: LocationNode): Map<K, V> {
       // until 3.0.2 `const values = map.values` before an effect gave values
       // that tracked nothing
       const cached = methodCache[prop];
-      if (cached !== undefined && hasOwn.call(methodCache, prop)) return cached;
+      if (cached !== undefined) return cached;
 
       if (prop === "set") {
         methodCache[prop] = function (key: K, value: V): Map<K, V> {

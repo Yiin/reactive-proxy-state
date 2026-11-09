@@ -767,6 +767,23 @@ const FILL_DEPTH = 256;
 export const hasOwn = Object.prototype.hasOwnProperty;
 const isEnumerable = Object.prototype.propertyIsEnumerable;
 
+/** A proxy's wrapped methods by name. @internal */
+export type MethodCache = { [key: string | symbol]: Function | undefined };
+
+// The prototype of every method cache. It has no prototype itself, so a read
+// finds only the methods put in a cache: until 3.0.1 a plain object found
+// Object.prototype's `toString`, `constructor` and `__proto__` in it, and
+// `${list}` gave "[object Array]". An object made by a constructor stays in
+// V8's fast mode; `Object.create(null)` made `Set.has` 12% slower, and an own
+// entry check on every read made a cached method read 15% slower.
+function MethodCacheObject(): void {}
+MethodCacheObject.prototype = Object.create(null);
+
+/** A new, empty method cache. @internal */
+export function newMethodCache(): MethodCache {
+  return new (MethodCacheObject as unknown as new () => MethodCache)();
+}
+
 /** What a copy is filled with. */
 const enum Fill {
     Object,

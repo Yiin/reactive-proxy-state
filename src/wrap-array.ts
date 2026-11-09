@@ -3,6 +3,7 @@ import {
   arrayIndex,
   deepEqual,
   hasOwn,
+  newMethodCache,
   unwrapForStore,
   wrapperCache,
   globalSeen,
@@ -207,8 +208,15 @@ function trackIteration(target: unknown[]): void {
   if (activeEffect !== null) track(target, Symbol.iterator);
 }
 
+/** What each step of an array iterator gives: the item, its index, or both. */
+const enum IteratorKind {
+  Values,
+  Keys,
+  Entries,
+}
+
 /**
- * The iterator of `[Symbol.iterator]()`, `values()` and `entries()` of an
+ * The iterator of `[Symbol.iterator]()`, `values()`, `keys()` and `entries()` of an
  * array proxy, so also of `for...of`, spread, `Array.from` and
  * destructuring. It steps like the native one: the length is read at every
  * step, and once done it stays done. An item is what an index read gives:
@@ -220,21 +228,23 @@ class ArrayProxyIterator {
   private target: unknown[] | undefined;
   private index = 0;
 
-  constructor(target: unknown[], private readonly node: LocationNode, private readonly kind: "keys" | "values" | "entries") {
+  constructor(target: unknown[], private readonly node: LocationNode, private readonly kind: IteratorKind) {
     this.target = target;
   }
 
   next(): IteratorResult<unknown> {
     const target = this.target;
     if (target !== undefined) {
-      trackIteration(target);
+      // a step tracks, also of an iterator made before the effect ran
+      if (activeEffect !== null) track(target, Symbol.iterator);
       const index = this.index;
       if (index < target.length) {
         this.index = index + 1;
-        if (this.kind === "keys") return { value: index, done: false };
+        const kind = this.kind;
+        if (kind === IteratorKind.Keys) return { value: index, done: false };
         const value = target[index];
         const item = isObject(value) ? wrapChild(value, this.node, index) : value;
-        return { value: this.kind === "entries" ? [index, item] : item, done: false };
+        return { value: kind === IteratorKind.Values ? item : [index, item], done: false };
       }
       this.target = undefined;
     }
@@ -255,12 +265,8 @@ export function wrapArray<T extends any[]>(arr: T, node: LocationNode): T {
   if (cachedProxy) return cachedProxy as T;
   if (globalSeen.has(arr)) return globalSeen.get(arr);
 
-  // cache for wrapped methods to avoid re-creating them on each call. Only
-  // its own entries count: until 3.0.1 a read of `toString`, `constructor`
-  // or `__proto__` found Object.prototype's in it, so `${list}` gave
-  // "[object Array]". (V8 keeps an object without a prototype in slower
-  // dictionary mode.)
-  const methodCache: { [key: string | symbol]: Function | undefined } = {};
+  // cache for wrapped methods to avoid re-creating them on each call
+  const methodCache = newMethodCache();
 
   const proxy: T = new Proxy(arr, {
     get(target: T, prop: string | symbol, receiver: any): any {
@@ -270,7 +276,7 @@ export function wrapArray<T extends any[]>(arr: T, node: LocationNode): T {
       track(target, prop);
 
       const cached = methodCache[prop];
-      if (cached !== undefined && hasOwn.call(methodCache, prop)) return cached;
+      if (cached !== undefined) return cached;
 
       // handle specific array mutation methods that require custom logic and event emission
       switch (prop) {
@@ -565,7 +571,7 @@ export function wrapArray<T extends any[]>(arr: T, node: LocationNode): T {
         case "entries":
         case "keys": {
           if (hasOwn.call(target, prop)) break;
-          const kind = prop === "entries" ? "entries" : prop === "keys" ? "keys" : "values";
+          const kind = prop === "entries" ? IteratorKind.Entries : prop === "keys" ? IteratorKind.Keys : IteratorKind.Values;
           methodCache[prop] = function (): ArrayProxyIterator {
             trackIteration(target);
             return new ArrayProxyIterator(target, node, kind);
@@ -595,7 +601,7 @@ export function wrapArray<T extends any[]>(arr: T, node: LocationNode): T {
       }
 
       // functions run on the raw target. The methods left (`map`, `filter`,
-      // `slice`, `join`, `keys`, `with` and the rest) read the whole array,
+      // `slice`, `join`, `with` and the rest) read the whole array,
       // and track it when they run, not when they are read: until 3.0.2
       // `const slice = list.slice` before an effect gave a slice that tracked
       // nothing. `constructor` is a class, and `valueOf` gives its receiver:

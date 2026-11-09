@@ -1,4 +1,4 @@
-import { forgetReplicaIndex, hasOwn, indexAdded, indexRemoved, unwrapForStore, watchIndex, wrapperCache, globalSeen, proxyStats } from "./utils";
+import { forgetReplicaIndex, indexAdded, indexRemoved, newMethodCache, unwrapForStore, watchIndex, wrapperCache, globalSeen, proxyStats } from "./utils";
 import { wrapChild } from "./reactive";
 import {
   Copied,
@@ -68,8 +68,7 @@ export function wrapSet<T>(set: Set<T>, node: LocationNode): Set<T> {
   if (cachedProxy) return cachedProxy as Set<T>;
   if (globalSeen.has(set)) return globalSeen.get(set);
 
-  // only its own entries count: until 3.0.1 a read of `constructor` found Object.prototype's in it
-  const methodCache: { [key: string | symbol]: Function } = {};
+  const methodCache = newMethodCache();
   // the proxy keeps the collection's index by token, once it has one
   const watch = watchIndex(set);
 
@@ -82,7 +81,7 @@ export function wrapSet<T>(set: Set<T>, node: LocationNode): Set<T> {
       // until 3.0.2 `const values = set.values` before an effect gave values
       // that tracked nothing
       const cached = methodCache[prop];
-      if (cached !== undefined && hasOwn.call(methodCache, prop)) return cached;
+      if (cached !== undefined) return cached;
 
       if (prop === "add") {
         methodCache[prop] = function (value: T): Set<T> {
