@@ -6,6 +6,7 @@ import {
   copiedFresh,
   deepEqual,
   globalSeen,
+  hasOwn,
   proxyStats,
   setData,
   toRaw,
@@ -33,7 +34,7 @@ import {
 import { wrapArray } from "./wrap-array";
 import { wrapMap } from "./wrap-map";
 import { wrapSet } from "./wrap-set";
-import { track, trigger } from "./watch-effect";
+import { track, trigger, triggerKeyChange } from "./watch-effect";
 import { ReactiveFlags } from "./constants";
 
 // avoid repeated typeof checks
@@ -272,6 +273,7 @@ function wrapObject<T extends object>(obj: T, node: LocationNode, options?: Reac
         if (descriptor === undefined || descriptor.enumerable) setData(after, prop, value);
         copyPayloadReaching(event!, located!, target, after);
       }
+      const had = hasOwn.call(target, prop);
       const result = Reflect.set(target, prop, value, receiver);
 
       // only emit and trigger if the set was successful and wasn't intercepted by a setter
@@ -280,16 +282,20 @@ function wrapObject<T extends object>(obj: T, node: LocationNode, options?: Reac
         if (isObject(oldValue)) detachPlace(oldValue, node, prop);
         if (isObject(value)) attachValue(value, node, prop, copied === Copied.Fresh, located && oldValue, held);
 
-        if (event !== undefined) dispatch(located!, event);
+        try {
+          if (event !== undefined) dispatch(located!, event);
+        } finally {
+          // notify effects watching this property, also when a listener
+          // threw; a new key reruns every effect that read the object
+          if (!had && hasOwn.call(target, prop)) triggerKeyChange(target);
+          else trigger(target, prop);
 
-        // notify effects watching this property
-        trigger(target, prop);
-
-        // Evict the old object tree from proxy caches so GC can collect
-        // stale proxies and their methodCache closures. A part of it that
-        // still sits in the tree keeps its proxy.
-        if (isObject(oldValue)) {
-          evictDeep(oldValue);
+          // Evict the old object tree from proxy caches so GC can collect
+          // stale proxies and their methodCache closures. A part of it that
+          // still sits in the tree keeps its proxy.
+          if (isObject(oldValue)) {
+            evictDeep(oldValue);
+          }
         }
       }
       return result;
@@ -314,14 +320,17 @@ function wrapObject<T extends object>(obj: T, node: LocationNode, options?: Reac
       if (hadProperty && result) {
         if (isObject(oldValue)) detachPlace(oldValue, node, prop);
 
-        if (event !== undefined) dispatch(located!, event);
+        try {
+          if (event !== undefined) dispatch(located!, event);
+        } finally {
+          // a deleted key reruns every effect that read the object, also
+          // when a listener threw
+          triggerKeyChange(target);
 
-        // notify effects watching this property
-        trigger(target, prop);
-
-        // Recursively evict stale proxy for deleted value
-        if (isObject(oldValue)) {
-          evictDeep(oldValue);
+          // Recursively evict stale proxy for deleted value
+          if (isObject(oldValue)) {
+            evictDeep(oldValue);
+          }
         }
       }
 

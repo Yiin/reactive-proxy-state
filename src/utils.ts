@@ -265,46 +265,6 @@ function isObject(val: any): val is object {
 }
 
 /**
- * recursively traverses an object or array, accessing each property/element.
- * used by `watch` with `deep: true` to establish dependencies on all nested properties.
- * the actual tracking is done by the proxy `get` handlers triggered during traversal.
- */
-export function traverse(value: any, seen: Set<any> = new Set()) {
-  if (!isObject(value) || seen.has(value)) {
-    return value;
-  }
-  seen.add(value);
-
-  if (Array.isArray(value)) {
-    value.length; // track length to catch push/pop/assign beyond length
-    for (let i = 0; i < value.length; i++) {
-      traverse(value[i], seen);
-    }
-  } else if (value instanceof Set || value instanceof Map) {
-      // For reactive Map/Set, use the raw object to avoid triggering iterator tracking
-      // But still touch size on the reactive wrapper to establish a dependency for add/delete
-      (value as any).size;
-      const rawValue = (value as any).__v_raw || value;
-      for (const v of rawValue) {
-          if (Array.isArray(v)) { // map entries [key, value]
-              traverse(v[0], seen); // key
-              traverse(v[1], seen); // value
-          } else { // set values
-              traverse(v, seen);
-          }
-      }
-      return value; // no need to iterate plain object keys for map/set
-  } else {
-      // Touch keys length explicitly to register ITERATE dependency for property add/delete
-      Object.keys(value as any).length;
-      for (const key in value) {
-          traverse((value as any)[key], seen);
-      }
-  }
-  return value;
-}
-
-/**
  * The most copies one snapshot may make beyond the first copy of each
  * object. A snapshot copies a shared object once per place, so a graph
  * that shares objects at many places (each level holding the one below

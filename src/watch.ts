@@ -1,11 +1,38 @@
-import { deepEqual } from './utils';
-import { watchEffect } from './watch-effect';
-import { traverse, deepClone } from './utils';
+import { deepClone, deepEqual, toRaw } from './utils';
+import { trackKeys, watchEffect } from './watch-effect';
 import { isRef } from './ref';
 import { isComputed } from './computed';
 import { WatchSource, UnwrapWatchSource, UnwrapWatchSources } from './types';
 
 type WatchCallback<T, O> = (newValue: T, oldValue: O) => void;
+
+/**
+ * Reads everything below `value` for a deep watch, so a write anywhere
+ * below reruns it: every index of an array and its length, every key and
+ * value of a Map, every value of a Set, and every key of an object. An
+ * object also tracks its keys, so a key added to it or deleted from it
+ * reruns the watch, also when the object had no key to read.
+ */
+function traverse(value: unknown, seen: Set<unknown> = new Set()): unknown {
+  if (value === null || typeof value !== 'object' || seen.has(value)) return value;
+  seen.add(value);
+  if (Array.isArray(value)) {
+    for (let i = 0; i < value.length; i++) traverse(value[i], seen);
+  } else if (value instanceof Map) {
+    // through the proxy: it tracks the entries and gives proxies of the values
+    value.forEach((item, key) => {
+      traverse(key, seen);
+      traverse(item, seen);
+    });
+  } else if (value instanceof Set) {
+    value.forEach((item) => traverse(item, seen));
+  } else {
+    const raw = toRaw(value);
+    if (raw !== value) trackKeys(raw);
+    for (const key in value) traverse((value as any)[key], seen);
+  }
+  return value;
+}
 type WatchStopHandle = () => void;
 
 export interface WatchOptions {
