@@ -1,4 +1,5 @@
 import { StateEvent } from './types';
+import { arrayIndex } from './utils';
 
 type EffectCallback<T = any> = (onCleanup: (cleanupFn: () => void) => void) => T;
 type Scheduler = (job: () => void) => void;
@@ -167,46 +168,50 @@ function flushEffects() {
 }
 
 /**
- * triggers all active effects associated with a specific object property.
- * called by proxy setters/deleters or ref setters.
- * now batches effects to run in the same tick.
+ * Queue the effects of `dep`, the effects that read `key` of `target`, at
+ * trigger depth `triggerLevel`.
  */
-export function trigger(target: object, key: string | symbol): void {
+function queueEffects(
+  dep: Set<TrackedEffect<any>> | undefined,
+  target: object,
+  key: string | symbol,
+  triggerLevel: number
+): void {
+  if (dep === undefined) return;
+  dep.forEach(effect => {
+    // avoid queuing the effect if it's the one currently running (prevents infinite loops)
+    // also ensure the effect hasn't been stopped
+    if (effect !== activeEffect && effect.active) {
+      // Trigger the onTrigger debug hook if provided
+      if (effect.options?.onTrigger) {
+        effect.options.onTrigger({ effect: effect._rawCallback, target, key, type: 'trigger' });
+      }
+
+      // Store or update the effect with the current trigger depth
+      // Only update if the new depth is lower (higher priority)
+      if (!queuedEffects.has(effect) || triggerLevel < queuedEffects.get(effect)!) {
+        queuedEffects.set(effect, triggerLevel);
+      }
+    }
+  });
+}
+
+/**
+ * triggers all active effects associated with a specific object property,
+ * and with `otherKey` when given. An effect that read both runs once.
+ * called by proxy setters/deleters or ref setters.
+ */
+export function trigger(target: object, key: string | symbol, otherKey?: string | symbol): void {
   const depsMap = targetMap.get(target);
   if (!depsMap) return; // no effects tracked for this target
 
   // Increment the trigger depth when we start a new trigger cycle
   // This is used to batch effects by the level at which they were triggered
-  currentTriggerDepth++;
-  const triggerLevel = currentTriggerDepth;
+  const triggerLevel = ++currentTriggerDepth;
 
   try {
-    // helper to add effects from a specific dependency set to the queue
-    const addEffects = (depKey: string | symbol) => {
-      const dep = depsMap.get(depKey);
-      if (dep) {
-        dep.forEach(effect => {
-          // avoid queuing the effect if it's the one currently running (prevents infinite loops)
-          // also ensure the effect hasn't been stopped
-          if (effect !== activeEffect && effect.active) {
-            // Trigger the onTrigger debug hook if provided
-            if (effect.options?.onTrigger) {
-              effect.options.onTrigger({ effect: effect._rawCallback, target, key, type: 'trigger' });
-            }
-            
-            // Store or update the effect with the current trigger depth
-            // Only update if the new depth is lower (higher priority)
-            if (!queuedEffects.has(effect) || triggerLevel < queuedEffects.get(effect)!) {
-              queuedEffects.set(effect, triggerLevel);
-            }
-          }
-        });
-      }
-    };
-
-    // add effects associated with the specific key that changed
-    addEffects(key);
-    // todo: consider adding effects associated with iteration keys (like Symbol.iterator or 'length' for arrays) if applicable
+    queueEffects(depsMap.get(key), target, key, triggerLevel);
+    if (otherKey !== undefined) queueEffects(depsMap.get(otherKey), target, otherKey, triggerLevel);
 
     // If we have queued effects, run them immediately
     if (queuedEffects.size > 0) {
@@ -216,6 +221,59 @@ export function trigger(target: object, key: string | symbol): void {
     // Decrement the trigger depth when we're done with this trigger cycle
     currentTriggerDepth--;
   }
+}
+
+/**
+ * Triggers the effects that read what a write changed in the array
+ * `target`: each index from `from` up to `to`, `length` when
+ * `lengthChanged`, and the array as a whole, the `Symbol.iterator` key that
+ * every reader of all items tracks (`map`, `filter`, `indexOf`, `for...of`
+ * and the rest), so it also runs on every length change. With `before`,
+ * the array as it was, an index that holds what it held is skipped. Each
+ * effect runs once.
+ */
+export function triggerArray(
+  target: unknown[],
+  from: number,
+  to: number,
+  lengthChanged: boolean,
+  before?: readonly unknown[]
+): void {
+  const depsMap = targetMap.get(target);
+  if (!depsMap) return; // no effects tracked for this target
+
+  const triggerLevel = ++currentTriggerDepth;
+
+  try {
+    if (to - from <= depsMap.size) {
+      for (let index = from; index < to; index++) {
+        if (before !== undefined && sameAt(before, target, index)) continue;
+        const key = String(index);
+        queueEffects(depsMap.get(key), target, key, triggerLevel);
+      }
+    } else {
+      // a wide range: look only at the indexes effects read
+      depsMap.forEach((dep, key) => {
+        const index = arrayIndex(key);
+        if (index < from || index >= to) return;
+        if (before !== undefined && sameAt(before, target, index)) return;
+        queueEffects(dep, target, key, triggerLevel);
+      });
+    }
+    if (lengthChanged) queueEffects(depsMap.get("length"), target, "length", triggerLevel);
+    queueEffects(depsMap.get(Symbol.iterator), target, Symbol.iterator, triggerLevel);
+
+    if (queuedEffects.size > 0) {
+      flushEffects();
+    }
+  } finally {
+    currentTriggerDepth--;
+  }
+}
+
+/** Does `index` hold the same value in `before` and `after`, as `Object.is` tells, and the same hole or not? */
+function sameAt(before: readonly unknown[], after: readonly unknown[], index: number): boolean {
+  return Object.is(before[index], after[index]) && index in before === index in after;
 }
 
 // options for configuring watchEffect behavior

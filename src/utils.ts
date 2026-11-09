@@ -626,7 +626,7 @@ function noteFresh(value: object): void {
 export function namedKeys(array: object): (string | symbol)[] | undefined {
     const keys = Object.keys(array);
     let start = keys.length;
-    while (start > 0 && !isIndexKey(keys[start - 1])) start--;
+    while (start > 0 && arrayIndex(keys[start - 1]) < 0) start--;
     const symbols = Object.getOwnPropertySymbols(array);
     let names: (string | symbol)[] | undefined = start === keys.length ? undefined : keys.slice(start);
     for (let i = 0; i < symbols.length; i++) {
@@ -635,17 +635,20 @@ export function namedKeys(array: object): (string | symbol)[] | undefined {
     return names;
 }
 
-/** Is `key` an array index: "0", or digits without a leading zero, below 2^32 - 1? */
-function isIndexKey(key: string): boolean {
-    const length = key.length;
-    if (length === 0 || length > 10) return false;
+/**
+ * A canonical array index ("0", "17": digits without a leading zero, below
+ * 2^32 - 1) as a number, or -1.
+ */
+export function arrayIndex(key: string | symbol): number {
+    if (typeof key !== "string" || key.length === 0 || key.length > 10) return -1;
     const first = key.charCodeAt(0);
-    if (first < 48 || first > 57 || (first === 48 && length > 1)) return false;
-    for (let i = 1; i < length; i++) {
+    if (first < 48 || first > 57 || (first === 48 && key.length > 1)) return -1;
+    for (let i = 1; i < key.length; i++) {
         const code = key.charCodeAt(i);
-        if (code < 48 || code > 57) return false;
+        if (code < 48 || code > 57) return -1;
     }
-    return length < 10 || Number(key) < 4294967295;
+    const index = Number(key);
+    return index < 4294967295 ? index : -1;
 }
 
 /** `object[key] = value` as an own enumerable data property: no setter runs, and `__proto__` stays a key. */

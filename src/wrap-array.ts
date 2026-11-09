@@ -1,5 +1,6 @@
 import { StateEvent } from "./types";
 import {
+  arrayIndex,
   deepEqual,
   unwrapForStore,
   wrapperCache,
@@ -25,25 +26,12 @@ import {
   copyPayloadAfter,
   copyPayloadReaching,
 } from "./location";
-import { activeEffect, track, trigger } from "./watch-effect";
+import { activeEffect, track, trigger, triggerArray } from "./watch-effect";
 import { ReactiveFlags } from "./constants";
 
 // avoid repeated typeof checks
 function isObject(v: any): v is object {
   return v && typeof v === "object";
-}
-
-/** A canonical array index ("0", "17") as a number, or -1. */
-function arrayIndex(prop: string | symbol): number {
-  if (typeof prop !== "string" || prop.length === 0 || prop.length > 10) return -1;
-  const first = prop.charCodeAt(0);
-  if (first < 48 || first > 57 || (first === 48 && prop.length > 1)) return -1;
-  for (let i = 1; i < prop.length; i++) {
-    const code = prop.charCodeAt(i);
-    if (code < 48 || code > 57) return -1;
-  }
-  const index = Number(prop);
-  return index < 4294967295 ? index : -1;
 }
 
 /** Place key for an array property: the index as a number, else the name. */
@@ -196,11 +184,12 @@ function evictRemoved(removed: readonly unknown[]): void {
   }
 }
 
-/** Track what a loop over `target` reads: its items and its length. */
+/**
+ * Track what a loop over `target` reads: its items and its length. Every
+ * write of an index or the length triggers `Symbol.iterator`.
+ */
 function trackIteration(target: unknown[]): void {
-  if (activeEffect === null) return;
-  track(target, Symbol.iterator);
-  track(target, "length");
+  if (activeEffect !== null) track(target, Symbol.iterator);
 }
 
 /**
@@ -294,7 +283,7 @@ export function wrapArray<T extends any[]>(arr: T, node: LocationNode): T {
             writeReorder(target, reorder);
             relinkReorder(node, target, before, prop === "fill" ? [args[0]] : undefined);
             if (event !== undefined) dispatch(located!, event);
-            trigger(target, Symbol.iterator);
+            triggerArray(target, reorder.first, reorder.last, false, before);
             evictRemoved(before);
             return proxy;
           };
@@ -324,10 +313,7 @@ export function wrapArray<T extends any[]>(arr: T, node: LocationNode): T {
             if (items.length > 0) {
               relinkArray(node, target, oldLength, undefined, items, copied === Copied.Fresh);
               if (event !== undefined) dispatch(located!, event);
-              trigger(target, Symbol.iterator);
-              if (oldLength !== newLength) {
-                trigger(target, "length");
-              }
+              triggerArray(target, oldLength, newLength, oldLength !== newLength);
             }
             return result;
           };
@@ -356,10 +342,7 @@ export function wrapArray<T extends any[]>(arr: T, node: LocationNode): T {
             if (isObject(oldValue)) detachPlace(oldValue, node, poppedIndex);
             if (event !== undefined) dispatch(located!, event);
             if (isObject(oldValue)) evictDeep(oldValue);
-            trigger(target, Symbol.iterator);
-            if (oldLength !== newLength) {
-              trigger(target, "length");
-            }
+            triggerArray(target, newLength, oldLength, oldLength !== newLength);
             return result;
           };
           return methodCache[prop];
@@ -386,10 +369,8 @@ export function wrapArray<T extends any[]>(arr: T, node: LocationNode): T {
             relinkArray(node, target, 0, [oldValue]);
             if (event !== undefined) dispatch(located!, event);
             if (isObject(oldValue)) evictDeep(oldValue);
-            trigger(target, Symbol.iterator);
-            if (oldLength !== newLength) {
-              trigger(target, "length");
-            }
+            // every index moved
+            triggerArray(target, 0, oldLength, oldLength !== newLength);
             return result;
           };
           return methodCache[prop];
@@ -416,10 +397,8 @@ export function wrapArray<T extends any[]>(arr: T, node: LocationNode): T {
             if (items.length > 0) {
               relinkArray(node, target, 0, undefined, items, copied === Copied.Fresh);
               if (event !== undefined) dispatch(located!, event);
-              trigger(target, Symbol.iterator);
-              if (oldLength !== newLength) {
-                trigger(target, "length");
-              }
+              // every index moved
+              triggerArray(target, 0, newLength, oldLength !== newLength);
             }
             return result;
           };
@@ -464,10 +443,10 @@ export function wrapArray<T extends any[]>(arr: T, node: LocationNode): T {
               relinkArray(node, target, actualStart, deletedItems, items, copied === Copied.Fresh);
               if (event !== undefined) dispatch(located!, event);
               evictRemoved(deletedItems);
-              trigger(target, Symbol.iterator);
-              if (oldLength !== newLength) {
-                trigger(target, "length");
-              }
+              // the items after a change of count moved
+              const end =
+                actualDeleteCount === items.length ? actualStart + actualDeleteCount : Math.max(oldLength, newLength);
+              triggerArray(target, actualStart, end, oldLength !== newLength);
             }
             return deletedItems;
           };
@@ -532,20 +511,6 @@ export function wrapArray<T extends any[]>(arr: T, node: LocationNode): T {
           };
           return methodCache[prop];
         }
-        // handle methods that rely on iteration state
-        case "keys":
-        case "forEach":
-        case "map":
-        case "filter":
-        case "reduce":
-        case "reduceRight":
-        case "findIndex":
-        case "every":
-        case "some":
-        case "join":
-          track(target, Symbol.iterator);
-          // fall through to default behavior (usually binding)
-          break;
         case "length":
           track(target, "length");
           return Reflect.get(target, prop, receiver);
@@ -571,8 +536,11 @@ export function wrapArray<T extends any[]>(arr: T, node: LocationNode): T {
         return wrapChild(value, node, placeKey(prop));
       }
 
-      // ensure functions accessed directly are bound to the original target
+      // ensure functions accessed directly are bound to the original target.
+      // The methods left (`map`, `filter`, `slice`, `join`, `keys`, `with`
+      // and the rest) read the whole array.
       if (typeof value === "function") {
+        trackIteration(target);
         return value.bind(target);
       }
       return value;
@@ -600,9 +568,10 @@ export function wrapArray<T extends any[]>(arr: T, node: LocationNode): T {
           ? target.slice(Number(value))
           : undefined;
 
+      const index = arrayIndex(prop);
       const isNumericIndex =
         typeof prop === "number" ||
-        arrayIndex(prop) >= 0 ||
+        index >= 0 ||
         (typeof prop === "string" && !isNaN(parseInt(prop)));
       // emit event and trigger effects only if the set was successful and wasn't intercepted by a setter
       // (unless it's a direct numeric index set, which doesn't have a descriptor.set; `length` never has one)
@@ -626,6 +595,7 @@ export function wrapArray<T extends any[]>(arr: T, node: LocationNode): T {
         Reflect.set(after, prop, value);
         copyPayloadReaching(event!, located!, target, after);
       }
+      const oldLength = target.length;
       const result = Reflect.set(target, prop, value, receiver);
 
       if (result && emits) {
@@ -660,7 +630,16 @@ export function wrapArray<T extends any[]>(arr: T, node: LocationNode): T {
           evictDeep(oldValue);
         }
         if (truncated !== undefined) evictRemoved(truncated);
-        trigger(target, prop);
+        const newLength = target.length;
+        if (index >= 0) {
+          // a write past the end makes the array longer
+          triggerArray(target, index, index + 1, newLength !== oldLength);
+        } else if (prop === "length") {
+          // a shorter length removes the indexes past it
+          if (newLength !== oldLength) triggerArray(target, newLength, oldLength, true);
+        } else {
+          trigger(target, prop);
+        }
       }
       return result;
     },
@@ -679,10 +658,22 @@ export function wrapArray<T extends any[]>(arr: T, node: LocationNode): T {
       if (hadProperty && result) {
         if (isObject(oldValue)) detachPlace(oldValue, node, placeKey(prop));
         if (event !== undefined) dispatch(located!, event);
-        trigger(target, prop);
+        const index = arrayIndex(prop);
+        if (index >= 0) triggerArray(target, index, index + 1, false);
+        else trigger(target, prop);
         if (isObject(oldValue)) evictDeep(oldValue);
       }
       return result;
+    },
+    // `i in list` reads one index
+    has(target: T, prop: string | symbol): boolean {
+      track(target, prop);
+      return Reflect.has(target, prop);
+    },
+    // `Object.keys`, `for...in` and `Object.entries` read every index
+    ownKeys(target: T): (string | symbol)[] {
+      trackIteration(target);
+      return Reflect.ownKeys(target);
     },
   });
 
