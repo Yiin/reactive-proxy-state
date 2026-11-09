@@ -64,7 +64,7 @@ describe("a listener that throws", () => {
     expect(treeText(sync.remote)).toBe(treeText(sync.state));
   });
 
-  test("in a nested write: the nested events are delivered, and the caller can go on", () => {
+  test("in a write a listener makes while places wait: the outer write throws after every event", () => {
     const shared = { n: 0 };
     let calls = 0;
     let caught = "";
@@ -79,9 +79,13 @@ describe("a listener that throws", () => {
       }
       if (call === 2) throw new Error("second failed");
     });
-    sync.state.a.n = 1;
-    // b.n threw while the nested write delivered it; c was delivered after it
-    expect(caught).toBe("second failed");
+    // the delivery that runs sends b.n and c after the listener returns, so
+    // the error of b.n reaches the outer write. 3.0.4 sent them inside the
+    // nested write and threw there
+    expect(() => {
+      sync.state.a.n = 1;
+    }).toThrow("second failed");
+    expect(caught).toBe("");
     expect(sync.log).toEqual(["set:a.n", "set:b.n", "set:c"]);
     expect(treeText(sync.remote)).toBe(treeText(sync.state));
     sync.state.c = 2;

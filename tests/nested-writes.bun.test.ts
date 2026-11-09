@@ -74,7 +74,10 @@ describe("a write made by a listener", () => {
     });
   }
 
-  test("is delivered before it returns, after the waiting places", () => {
+  test("is delivered after the listener returns, after the waiting places", () => {
+    // 3.0.4 delivered the waiting places and the write before the write
+    // returned, inside the listener. A listener that had not yet forwarded
+    // its event then sent later writes to its replica first
     const shared = { n: 0 };
     const seen: string[][] = [];
     let nested = false;
@@ -85,7 +88,8 @@ describe("a write made by a listener", () => {
       seen.push([...log]);
     });
     sync.state.a.n = 1;
-    expect(seen).toEqual([["set:a.n", "set:b.n", "set:c"]]);
+    expect(seen).toEqual([["set:a.n"]]);
+    expect(sync.log).toEqual(["set:a.n", "set:b.n", "set:c"]);
     expect(sync.remote).toEqual(toRaw(sync.state));
   });
 
@@ -112,11 +116,11 @@ describe("a write made by a listener", () => {
     expect(remote).toEqual({ x: 1, y: 5 });
   });
 
-  test("in the listener's own mute scope also carries the waiting places (documented)", () => {
-    // A listener that drops the events delivered while it writes (a mute
-    // scope) also drops the waiting places its write delivers first: they
-    // come before its own events. 1.0.44 sent no event for the other place
-    // at all, so its replica missed `b.n` too.
+  test("in the listener's own mute scope while places wait is delivered after the scope (documented)", () => {
+    // The write goes after the waiting places, and the delivery that is
+    // running sends both after the listener returns, outside its mute
+    // scope. 3.0.4 sent them inside the scope, which dropped `b.n` too;
+    // 1.0.44 sent no event for the other place at all.
     const shared = { n: 0 };
     let muted = false;
     let once = false;
@@ -137,8 +141,8 @@ describe("a write made by a listener", () => {
     state.a.n = 1;
     expect(seen).toEqual([
       ["a.n", false],
-      ["b.n", true],
-      ["c", true],
+      ["b.n", false],
+      ["c", false],
     ]);
   });
 
