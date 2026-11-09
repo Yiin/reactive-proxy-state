@@ -75,6 +75,10 @@ for (let seed = 1; seed <= seeds; seed++) {
     });
     if (failures.length >= 3) break;
   }
+  // WeakRef targets the library reads stay alive until the current job ends,
+  // so a run that never yields keeps every case's state; listener loops that
+  // reach the round total made that more than Node's heap
+  await new Promise((resolve) => setTimeout(resolve, 0));
 }
 console.log(JSON.stringify({ runtime: typeof Bun === "undefined" ? `node ${process.version}` : `bun ${Bun.version}`, seeds, runs, counts, failures }, null, 1));
 if (failures.length > 0) process.exit(1);

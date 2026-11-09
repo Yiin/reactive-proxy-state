@@ -37,6 +37,8 @@ for (let seed = 1; seed <= seeds; seed++) {
     const result = runOldValue(lib, spec);
     return result.observed === result.expected;
   }), { seed, numRuns: runs });
+  // let the job end: WeakRef targets the library reads stay alive until then
+  await new Promise(resolve => setTimeout(resolve, 0));
 }
 console.log(JSON.stringify({
   seeds, runs, oracleCases: seeds * runs, oldValueCases: seeds * runs, effectRuns, writes,

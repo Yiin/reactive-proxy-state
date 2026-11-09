@@ -176,16 +176,22 @@ export function classify(spec) {
   };
 }
 
+/** The top-level key a rule's write reads first (`state.o.q = ...` reads `o`). */
+const ruleReads = { "o.q": "o", list: "list", set: "set", bump: "version" };
+
 /**
- * Cases whose effects never read what the listener writes, so 3.0.6's
- * listener-read dependencies cannot change them. 3.0.6 has no bound: run
- * it with `stopLoops`, and compare only when it ended without a loop.
+ * Cases 3.0.6's listener-read dependencies cannot change. In 3.0.6 a
+ * listener that runs inside an effect's write adds what it reads to that
+ * effect's dependencies, so a later write there reruns the effect (and its
+ * onTrigger hook). So a writing effect excludes rules that read state keys,
+ * and effects never read what the listener writes. 3.0.6 has no bound:
+ * run it with `stopLoops`, and compare only when it ended without a loop.
  */
 export function comparableWhenFinite(spec) {
   const written = new Set(spec.rules.map(rule => rule.write === "bump" ? "version" : rule.write.split(".")[0]));
+  const listenerReads = spec.rules.some(rule => ruleReads[rule.write] !== undefined);
   return spec.effects.every(effect => effect.kind === "read" ||
-    (!spec.rules.some(rule => rule.write === "bump") &&
-     [...effectHeads(effect)].every(head => !written.has(head))));
+    (!listenerReads && [...effectHeads(effect)].every(head => !written.has(head))));
 }
 
 /** Listener calls nested this deep, or this many in one case, are a loop on a build without a bound. */
