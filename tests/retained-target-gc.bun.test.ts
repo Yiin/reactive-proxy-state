@@ -1,12 +1,11 @@
 import { afterAll, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 // JSC can conservatively retain stale stack words after explicit collection.
 // Build the current source, then check its reference graph with Node's collector.
-const directory = mkdtempSync(join(tmpdir(), "rps-retention-"));
+const directory = mkdtempSync(fileURLToPath(new URL("./.retention-", import.meta.url)));
 afterAll(() => rmSync(directory, { recursive: true, force: true }));
 const source = process.env.RPS_TEST_BUNDLE ?? join(directory, "index.mjs");
 if (process.env.RPS_TEST_BUNDLE === undefined) {
