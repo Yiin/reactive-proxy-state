@@ -20,7 +20,7 @@ function sample(kind) {
   holder.value = null;
   return { weak, stop };
 }
-const samples = Array.from({ length: 30 }, (_, index) => sample(index % 3));
+const samples = Array.from({ length: 30 }, (_, index) => sample(process.argv[3] === "objects" ? 0 : index % 3));
 for (let round = 0; round < 20; round++) {
   await new Promise(resolve => setTimeout(resolve, 5));
   globalThis.gc();
