@@ -375,13 +375,12 @@ describe("WatchEffect Tests", () => {
     // Now, change count externally.
     state.count = 5;
     // This should trigger both A and B.
-    // Assume A runs first: reads 5, increments count to 6. (A run 2)
-    // Then B runs: reads 6. (B run 2)
-    // However, because A modifies the count, it also triggers B again (B run 3)
-    // In a perfect implementation, this would be batched, but our current implementation
-    // runs B a third time. This is acceptable behavior, although not optimal.
+    // A runs first: reads 5, increments count to 6. (A run 2)
+    // A's write finds B still waiting in the queue, so B is not queued again.
+    // Then B runs once: reads 6. (B run 2) Until 3.0.2 B ran a third time,
+    // and read 6 again.
     expect(effectA).toHaveBeenCalledTimes(2); 
-    expect(effectB).toHaveBeenCalledTimes(3); // B runs for the external change and the internal change from A
+    expect(effectB).toHaveBeenCalledTimes(2);
     expect(state.count).toBe(6); // Changed by A during its second run
 
     stopA();
@@ -390,7 +389,7 @@ describe("WatchEffect Tests", () => {
     // --- After Stop --- 
     state.count = 10;
     expect(effectA).toHaveBeenCalledTimes(2);
-    expect(effectB).toHaveBeenCalledTimes(3);
+    expect(effectB).toHaveBeenCalledTimes(2);
     expect(state.count).toBe(10);
   });
 

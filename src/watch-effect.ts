@@ -1,4 +1,3 @@
-import { StateEvent } from './types';
 import { arrayIndex } from './utils';
 
 type EffectCallback<T = any> = (onCleanup: (cleanupFn: () => void) => void) => T;
@@ -18,39 +17,97 @@ export interface TrackedEffect<T = any> {
   options?: WatchEffectOptions;
   active?: boolean; // flag indicating if the effect is currently active (not stopped)
   _rawCallback: EffectCallback<T>; // the original user-provided callback function
-  triggerDepth?: number; // tracks at what depth this effect was triggered (used for batching)
   cleanupFns?: (() => void)[]; // cleanup functions registered via onCleanup
+  /**
+   * Set on the effect of a computed: marks its value stale and triggers its
+   * readers, inside the batch of the write.
+   * @internal
+   */
+  invalidate?: () => void;
+  /** Waiting in the flush queue. @internal */
+  queued?: boolean;
+  /** The flush that last ran it. @internal */
+  flushId?: number;
+  /** How many times it ran in that flush. @internal */
+  flushRuns?: number;
 }
 
 // tracks the currently executing effect to establish dependencies
 export let activeEffect: TrackedEffect<any> | null = null;
-
-// batch processing for effects
-let queuedEffects = new Map<TrackedEffect<any>, number>(); // Effect -> Trigger Depth
-let isFlushing = false;
-let currentTriggerDepth = 0; // Tracks how many nested trigger cycles we're in
 
 // allows setting the active effect, used internally by the effect runner
 export function setActiveEffect(effect: TrackedEffect<any> | null) {
   activeEffect = effect;
 }
 
-// storage for dependencies: target object -> property key -> set of effects that depend on this key
-const targetMap = new WeakMap<object, Map<string | symbol, Set<TrackedEffect<any>>>>();
+/**
+ * The effects that read one key of one target, and the map that holds it
+ * under that key, so the last effect to leave can remove it.
+ */
+class Dep extends Set<TrackedEffect<any>> {
+  constructor(readonly owner: Map<unknown, Dep>, readonly key: unknown) {
+    super();
+  }
+}
+
+// storage for dependencies: target object -> property key -> the effects that read it
+const targetMap = new WeakMap<object, Map<unknown, Dep>>();
+// the same for the entries of Maps and Sets: collection -> Map key or Set value -> the
+// effects that read it with get or has. Apart from `targetMap`, so an entry never
+// shares a dependency with a property ("get", "size"), and keyed by the entry itself,
+// as the collection keys it (1 and "1" are two entries, NaN is one)
+const entryMap = new WeakMap<object, Map<unknown, Dep>>();
 
 /**
- * removes an effect from all dependency sets it belongs to.
+ * Dependencies a cleanup at the start of a run left without effects. The
+ * run tracks most of them again; when it ends it removes the ones still
+ * empty (see `releaseEmptied`), so a rerun does not remove and remake them.
+ */
+const emptiedDeps: Dep[] = [];
+
+/**
+ * Remove `dep` from its map when no effect reads it. A map left empty stays
+ * in `targetMap` or `entryMap` until the next write to its target (see
+ * `depsOf`) or until the target is collected: a dependency keeps no
+ * reference to its target, so an effect never keeps one alive.
+ */
+function releaseDep(dep: Dep): void {
+  if (dep.size === 0 && dep.owner.get(dep.key) === dep) dep.owner.delete(dep.key);
+}
+
+function releaseEmptied(from: number): void {
+  for (let i = from; i < emptiedDeps.length; i++) releaseDep(emptiedDeps[i]);
+  emptiedDeps.length = from;
+}
+
+/** The dependencies of `target`, or undefined when no effect reads it. */
+function depsOf(maps: WeakMap<object, Map<unknown, Dep>>, target: object): Map<unknown, Dep> | undefined {
+  const deps = maps.get(target);
+  if (deps === undefined || deps.size > 0) return deps;
+  maps.delete(target);
+  return undefined;
+}
+
+/** Take `effect` out of every dependency it is in; `emptied` collects those it leaves empty. */
+function detachEffect(effect: TrackedEffect<any>, emptied: Dep[] | undefined): void {
+  const dependencies = effect.dependencies as Set<Dep> | undefined;
+  if (dependencies === undefined || dependencies.size === 0) return;
+  dependencies.forEach(dep => {
+    dep.delete(effect);
+    if (dep.size > 0) return;
+    if (emptied !== undefined) emptied.push(dep);
+    else releaseDep(dep);
+  });
+  dependencies.clear();
+}
+
+/**
+ * removes an effect from all dependency sets it belongs to, and each set it
+ * leaves empty from its map.
  * this is crucial to prevent memory leaks and unnecessary updates when an effect is stopped or re-run.
  */
 export function cleanupEffect(effect: TrackedEffect<any>) {
-  if (effect.dependencies) {
-    effect.dependencies.forEach(dep => {
-      // remove this effect from the dependency set associated with a specific target/key
-      dep.delete(effect);
-    });
-    // clear the effect's own list of dependencies for the next run
-    effect.dependencies.clear();
-  }
+  detachEffect(effect, undefined);
 }
 
 /**
@@ -70,6 +127,39 @@ export function runCleanupFunctions(effect: TrackedEffect<any>) {
   }
 }
 
+/** The dependency for `key` of `target` in `maps`, made when missing. */
+function depFor(maps: WeakMap<object, Map<unknown, Dep>>, target: object, key: unknown): Dep {
+  let deps = maps.get(target);
+  if (deps === undefined) {
+    deps = new Map();
+    maps.set(target, deps);
+  }
+  let dep = deps.get(key);
+  if (dep === undefined) {
+    dep = new Dep(deps, key);
+    deps.set(key, dep);
+  }
+  return dep;
+}
+
+/** Add the active effect to `dep`, the effects that read `key` of `target`. */
+function addDep(dep: Dep, target: object, key: unknown): void {
+  const effect = activeEffect!;
+  if (dep.has(effect)) return;
+  dep.add(effect);
+  // also add this dependency set to the effect's own tracking list for cleanup purposes
+  if (!effect.dependencies) {
+    effect.dependencies = new Set();
+  }
+  effect.dependencies.add(dep);
+
+  // trigger the onTrack debug hook if provided
+  if (effect.options?.onTrack) {
+    // pass the original user callback to the hook, not the internal wrapper
+    effect.options.onTrack({ effect: effect._rawCallback, target, key, type: 'track' });
+  }
+}
+
 /**
  * establishes a dependency between the currently active effect and a specific object property.
  * called by proxy getters or ref getters.
@@ -77,121 +167,130 @@ export function runCleanupFunctions(effect: TrackedEffect<any>) {
 export function track(target: object, key: string | symbol): void {
   // do nothing if there is no active effect or if the effect is stopped
   if (!activeEffect || !activeEffect.active) return;
-
-  // get or create the dependency map for the target object
-  let depsMap = targetMap.get(target);
-  if (!depsMap) {
-    depsMap = new Map();
-    targetMap.set(target, depsMap);
-  }
-
-  // get or create the set of effects for the specific property key
-  let dep = depsMap.get(key);
-  if (!dep) {
-    dep = new Set();
-    depsMap.set(key, dep);
-  }
-
-  // add the current effect to the dependency set if it's not already there
-  const effectToAdd: TrackedEffect<any> = activeEffect;
-  if (!dep.has(effectToAdd)) {
-    dep.add(effectToAdd);
-    // also add this dependency set to the effect's own tracking list for cleanup purposes
-    if (!effectToAdd.dependencies) {
-      effectToAdd.dependencies = new Set();
-    }
-    effectToAdd.dependencies.add(dep);
-
-    // trigger the onTrack debug hook if provided
-    if (effectToAdd.options?.onTrack) {
-        // pass the original user callback to the hook, not the internal wrapper
-        effectToAdd.options.onTrack({ effect: effectToAdd._rawCallback, target, key, type: 'track' });
-    }
-  }
+  addDep(depFor(targetMap, target, key), target, key);
 }
 
 /**
- * Batch and execute all queued effects
+ * Tracks a read of one entry of the Map or Set `target`: `get` or `has` of
+ * `entry`, a Map key or a Set value.
+ * @internal
  */
-function flushEffects() {
-  if (isFlushing) return;
-  isFlushing = true;
-  
+export function trackEntry(target: object, entry: unknown): void {
+  if (!activeEffect || !activeEffect.active) return;
+  addDep(depFor(entryMap, target, entry), target, entry);
+}
+
+/**
+ * The key a traversal (deep `watch`) tracks on an object: a key added to
+ * or deleted from the object triggers it, also when the traversal read no
+ * key because the object had none.
+ */
+const keysKey = Symbol('keys');
+
+/**
+ * Tracks the keys of the plain object `target`: the active effect reruns
+ * when a key is added or deleted (see `triggerKeyChange`).
+ * @internal
+ */
+export function trackKeys(target: object): void {
+  track(target, keysKey);
+}
+
+// the queue of effects to run: each effect is in it at most once while it waits
+const queue: TrackedEffect<any>[] = [];
+let flushing = false;
+// open trigger calls: effects run when the outermost one ends
+let batchDepth = 0;
+let flushCount = 0;
+
+/**
+ * Runs of one effect in one flush that make it a loop: effects that write
+ * what other effects read, each time a new value. 3.0.2 ran out of stack
+ * after about 7,000 rounds under Node.
+ */
+const MAX_FLUSH_RUNS = 100_000;
+
+/**
+ * Run the queued effects, in the order they were queued. An effect queued
+ * again while it waits runs once; an effect that already ran is queued
+ * again by a later write, and runs again. An effect that throws does not
+ * stop the others: after the queue is empty the first error is thrown.
+ */
+function flushEffects(): void {
+  flushing = true;
+  const flushId = ++flushCount;
+  let failed = false;
+  let failure: unknown;
+  let index = 0;
   try {
-    // Find the minimum depth in the current queue
-    let minDepth = Infinity;
-    for (const depth of queuedEffects.values()) {
-      if (depth < minDepth) minDepth = depth;
-    }
-    
-    // Special case for the "watchEffect handles self-mutation" test
-    // Only run effects from the current depth level, leave effects from deeper levels for later
-    const effectsToRun: TrackedEffect<any>[] = [];
-    
-    // Extract effects at the current depth level
-    for (const [effect, depth] of queuedEffects.entries()) {
-      if (depth === minDepth) {
-        effectsToRun.push(effect);
-        queuedEffects.delete(effect);
-      }
-    }
-    
-    // Run effects with a custom scheduler first (e.g., computed refs) so that
-    // they can update their internal state (set dirty flags, enqueue
-    // downstream triggers, etc.) before ordinary reactive effects run. This
-    // guarantees that consumers reading computed values within the same flush
-    // cycle will observe the latest value.
-
-    // 1) Effects with a scheduler (like computed) – they *schedule* work.
-    for (const effect of effectsToRun) {
+    for (; index < queue.length; index++) {
+      const effect = queue[index];
+      effect.queued = false;
       if (!effect.active) continue;
-      if (effect.options?.scheduler) {
-        effect.options.scheduler(effect.run);
+      const runs = effect.flushId === flushId ? effect.flushRuns! + 1 : 1;
+      effect.flushId = flushId;
+      effect.flushRuns = runs;
+      if (runs > MAX_FLUSH_RUNS) {
+        if (!failed) {
+          failed = true;
+          failure = new RangeError(
+            `reactive-proxy-state: an effect ran ${MAX_FLUSH_RUNS} times in one flush. ` +
+            `Effects that write what other effects read loop when each write is new`
+          );
+        }
+        index++;
+        break;
       }
-    }
-
-    // 2) Effects without a scheduler – typical reactive/watch effects.
-    for (const effect of effectsToRun) {
-      if (!effect.active) continue;
-      if (!effect.options?.scheduler) {
-        effect.run();
+      try {
+        const scheduler = effect.options?.scheduler;
+        if (scheduler) scheduler(effect.run);
+        else effect.run();
+      } catch (error) {
+        if (!failed) {
+          failed = true;
+          failure = error;
+        }
       }
     }
   } finally {
-    isFlushing = false;
-    
-    // If more effects were queued during execution, schedule another flush
-    if (queuedEffects.size > 0) {
-      flushEffects();
-    }
+    // effects a loop left in the queue are no longer waiting
+    for (; index < queue.length; index++) queue[index].queued = false;
+    queue.length = 0;
+    flushing = false;
   }
+  if (failed) throw failure;
+}
+
+function startBatch(): void {
+  batchDepth++;
+}
+
+/** End a trigger call; the outermost one runs what the batch queued, unless a flush is running. */
+function endBatch(): void {
+  if (--batchDepth === 0 && !flushing && queue.length > 0) flushEffects();
 }
 
 /**
- * Queue the effects of `dep`, the effects that read `key` of `target`, at
- * trigger depth `triggerLevel`.
+ * Queue the effects of `dep`, the effects that read `key` of `target`. The
+ * effect of a computed is not queued: it marks its value stale and
+ * triggers its own readers now, so every computed a write makes stale is
+ * stale before any effect runs.
  */
-function queueEffects(
-  dep: Set<TrackedEffect<any>> | undefined,
-  target: object,
-  key: string | symbol,
-  triggerLevel: number
-): void {
+function queueEffects(dep: Dep | undefined, target: object, key: unknown): void {
   if (dep === undefined) return;
   dep.forEach(effect => {
     // avoid queuing the effect if it's the one currently running (prevents infinite loops)
     // also ensure the effect hasn't been stopped
-    if (effect !== activeEffect && effect.active) {
-      // Trigger the onTrigger debug hook if provided
-      if (effect.options?.onTrigger) {
-        effect.options.onTrigger({ effect: effect._rawCallback, target, key, type: 'trigger' });
-      }
-
-      // Store or update the effect with the current trigger depth
-      // Only update if the new depth is lower (higher priority)
-      if (!queuedEffects.has(effect) || triggerLevel < queuedEffects.get(effect)!) {
-        queuedEffects.set(effect, triggerLevel);
-      }
+    if (effect === activeEffect || !effect.active) return;
+    // Trigger the onTrigger debug hook if provided
+    if (effect.options?.onTrigger) {
+      effect.options.onTrigger({ effect: effect._rawCallback, target, key, type: 'trigger' });
+    }
+    if (effect.invalidate !== undefined) {
+      effect.invalidate();
+    } else if (!effect.queued) {
+      effect.queued = true;
+      queue.push(effect);
     }
   });
 }
@@ -201,24 +300,69 @@ function queueEffects(
  * called by proxy setters/deleters or ref setters.
  */
 export function trigger(target: object, key: string | symbol): void {
-  const depsMap = targetMap.get(target);
+  const depsMap = depsOf(targetMap, target);
   if (!depsMap) return; // no effects tracked for this target
-
-  // Increment the trigger depth when we start a new trigger cycle
-  // This is used to batch effects by the level at which they were triggered
-  const triggerLevel = ++currentTriggerDepth;
-
+  startBatch();
   try {
-    queueEffects(depsMap.get(key), target, key, triggerLevel);
-
-    // If we have queued effects, run them immediately
-    if (queuedEffects.size > 0) {
-      flushEffects();
-    }
+    queueEffects(depsMap.get(key), target, key);
   } finally {
-    // Decrement the trigger depth when we're done with this trigger cycle
-    currentTriggerDepth--;
+    endBatch();
   }
+}
+
+/**
+ * Triggers every effect that read a key of the object `target`, once each:
+ * a key was added or deleted, which changes what `JSON.stringify`, spread,
+ * `Object.entries`, `Object.values` and a deep `watch` read. There is no
+ * `ownKeys` or `has` trap, which made reads slower for every caller, so an
+ * effect that read only `Object.keys`, `in` or a `for...in` of keys is not
+ * triggered.
+ * @internal
+ */
+export function triggerKeyChange(target: object): void {
+  const depsMap = depsOf(targetMap, target);
+  if (!depsMap) return;
+  startBatch();
+  try {
+    depsMap.forEach((dep, key) => queueEffects(dep, target, key));
+  } finally {
+    endBatch();
+  }
+}
+
+/**
+ * Queue the effects that read an index of `target` from `from` up to `to`,
+ * except the indexes `same` says hold what they held.
+ */
+function queueIndexes(
+  depsMap: Map<unknown, Dep>,
+  target: unknown[],
+  from: number,
+  to: number,
+  same: ((index: number) => boolean) | undefined
+): void {
+  if (to - from <= depsMap.size) {
+    for (let index = from; index < to; index++) {
+      const key = String(index);
+      const dep = depsMap.get(key);
+      if (dep === undefined || (same !== undefined && same(index))) continue;
+      queueEffects(dep, target, key);
+    }
+  } else {
+    // a wide range: look only at the indexes effects read
+    depsMap.forEach((dep, key) => {
+      const index = arrayIndex(key as string | symbol);
+      if (index < from || index >= to) return;
+      if (same !== undefined && same(index)) return;
+      queueEffects(dep, target, key);
+    });
+  }
+}
+
+/** Queue the readers of `length` when it changed, and of all items (`Symbol.iterator`). */
+function queueWhole(depsMap: Map<unknown, Dep>, target: unknown[], lengthChanged: boolean): void {
+  if (lengthChanged) queueEffects(depsMap.get("length"), target, "length");
+  queueEffects(depsMap.get(Symbol.iterator), target, Symbol.iterator);
 }
 
 /**
@@ -238,53 +382,64 @@ export function triggerArray(
   lengthChanged: boolean,
   before?: readonly unknown[]
 ): void {
-  const depsMap = targetMap.get(target);
+  const depsMap = depsOf(targetMap, target);
   if (!depsMap) return; // no effects tracked for this target
-
-  const triggerLevel = ++currentTriggerDepth;
-
+  startBatch();
   try {
-    if (to - from <= depsMap.size) {
-      for (let index = from; index < to; index++) {
-        if (before !== undefined && sameAt(before, target, index)) continue;
-        const key = String(index);
-        queueEffects(depsMap.get(key), target, key, triggerLevel);
-      }
-    } else {
-      // a wide range: look only at the indexes effects read
-      depsMap.forEach((dep, key) => {
-        const index = arrayIndex(key);
-        if (index < from || index >= to) return;
-        if (before !== undefined && sameAt(before, target, index)) return;
-        queueEffects(dep, target, key, triggerLevel);
-      });
-    }
-    if (lengthChanged) queueEffects(depsMap.get("length"), target, "length", triggerLevel);
-    queueEffects(depsMap.get(Symbol.iterator), target, Symbol.iterator, triggerLevel);
-
-    if (queuedEffects.size > 0) {
-      flushEffects();
-    }
+    queueIndexes(depsMap, target, from, to, before === undefined ? undefined : index => sameAt(before, target, index));
+    queueWhole(depsMap, target, lengthChanged);
   } finally {
-    currentTriggerDepth--;
+    endBatch();
   }
 }
 
 /**
- * The key effects track for an entry of a Map or Set: a Map key or a Set
- * value. Objects and functions share one key: `String` of an object without
- * a prototype throws, and of a function is its source.
- */
-function entryKey(entry: unknown): string {
-  return (typeof entry === 'object' && entry !== null) || typeof entry === 'function' ? '[object]' : String(entry);
-}
-
-/**
- * Tracks a read of one entry of the Map or Set `target`: `get` or `has`.
+ * Triggers the effects that read what a splice changed in the array
+ * `target`: from `start`, the `removed` items (holes kept) gave way to
+ * `inserted` items, and the items after them moved, from an array
+ * `oldLength` long. `shift` and `unshift` are splices at 0. An index that
+ * holds the value it held, as `Object.is` tells, and the same hole or not,
+ * is skipped. Each effect runs once.
  * @internal
  */
-export function trackEntry(target: object, entry: unknown): void {
-  if (activeEffect !== null) track(target, entryKey(entry));
+export function triggerSplice(
+  target: unknown[],
+  start: number,
+  removed: readonly unknown[],
+  inserted: number,
+  oldLength: number
+): void {
+  const depsMap = depsOf(targetMap, target);
+  if (!depsMap) return;
+  const newLength = target.length;
+  const removedEnd = start + removed.length;
+  // where the item at an index after the change was before it
+  const moved = removed.length - inserted;
+  // a change that keeps the count moves nothing after it
+  const end = moved === 0 ? removedEnd : Math.max(oldLength, newLength);
+  startBatch();
+  try {
+    queueIndexes(depsMap, target, start, end, index => {
+      let had: boolean;
+      let held: unknown;
+      if (index < removedEnd) {
+        had = index - start in removed;
+        held = removed[index - start];
+      } else if (index < oldLength) {
+        // the item now at `index - moved` was at `index`
+        const now = index - moved;
+        had = now in target;
+        held = target[now];
+      } else {
+        had = false;
+        held = undefined;
+      }
+      return Object.is(held, target[index]) && had === index in target;
+    });
+    queueWhole(depsMap, target, oldLength !== newLength);
+  } finally {
+    endBatch();
+  }
 }
 
 /**
@@ -295,22 +450,18 @@ export function trackEntry(target: object, entry: unknown): void {
  * @internal
  */
 export function triggerCollection(target: object, entry: unknown, sizeChanged: boolean): void {
-  const depsMap = targetMap.get(target);
-  if (!depsMap) return; // no effects tracked for this target
-
-  const triggerLevel = ++currentTriggerDepth;
-
+  const depsMap = depsOf(targetMap, target);
+  const entryDeps = depsOf(entryMap, target);
+  if (!depsMap && !entryDeps) return; // no effects tracked for this target
+  startBatch();
   try {
-    const key = entryKey(entry);
-    queueEffects(depsMap.get(key), target, key, triggerLevel);
-    if (sizeChanged) queueEffects(depsMap.get("size"), target, "size", triggerLevel);
-    queueEffects(depsMap.get(Symbol.iterator), target, Symbol.iterator, triggerLevel);
-
-    if (queuedEffects.size > 0) {
-      flushEffects();
+    if (entryDeps) queueEffects(entryDeps.get(entry), target, entry);
+    if (depsMap) {
+      if (sizeChanged) queueEffects(depsMap.get("size"), target, "size");
+      queueEffects(depsMap.get(Symbol.iterator), target, Symbol.iterator);
     }
   } finally {
-    currentTriggerDepth--;
+    endBatch();
   }
 }
 
@@ -321,24 +472,20 @@ export function triggerCollection(target: object, entry: unknown, sizeChanged: b
  * @internal
  */
 export function triggerCleared(target: object, removed: readonly unknown[]): void {
-  const depsMap = targetMap.get(target);
-  if (!depsMap) return; // no effects tracked for this target
-
-  const triggerLevel = ++currentTriggerDepth;
-
+  const depsMap = depsOf(targetMap, target);
+  const entryDeps = depsOf(entryMap, target);
+  if (!depsMap && !entryDeps) return; // no effects tracked for this target
+  startBatch();
   try {
-    for (let i = 0; i < removed.length; i++) {
-      const key = entryKey(removed[i]);
-      queueEffects(depsMap.get(key), target, key, triggerLevel);
+    if (entryDeps) {
+      for (let i = 0; i < removed.length; i++) queueEffects(entryDeps.get(removed[i]), target, removed[i]);
     }
-    queueEffects(depsMap.get("size"), target, "size", triggerLevel);
-    queueEffects(depsMap.get(Symbol.iterator), target, Symbol.iterator, triggerLevel);
-
-    if (queuedEffects.size > 0) {
-      flushEffects();
+    if (depsMap) {
+      queueEffects(depsMap.get("size"), target, "size");
+      queueEffects(depsMap.get(Symbol.iterator), target, Symbol.iterator);
     }
   } finally {
-    currentTriggerDepth--;
+    endBatch();
   }
 }
 
@@ -351,8 +498,11 @@ function sameAt(before: readonly unknown[], after: readonly unknown[], index: nu
 export interface WatchEffectOptions {
   lazy?: boolean; // if true, the effect does not run immediately upon creation
   scheduler?: Scheduler; // custom function to control how/when the effect runs after a trigger
-  onTrack?: (event: { effect: EffectCallback<any>; target: object; key: string | symbol; type: 'track' }) => void; // debug hook called when a dependency is tracked
-  onTrigger?: (event: { effect: EffectCallback<any>; target: object; key: string | symbol; type: 'trigger' }) => void; // debug hook called when the effect is triggered
+  // debug hook called when a dependency is tracked. `key` is a property name, or the
+  // Map key or Set value that `get` or `has` read
+  onTrack?: (event: { effect: EffectCallback<any>; target: object; key: unknown; type: 'track' }) => void;
+  // debug hook called when the effect is triggered; `key` as in onTrack
+  onTrigger?: (event: { effect: EffectCallback<any>; target: object; key: unknown; type: 'trigger' }) => void;
 }
 
 /**
@@ -372,13 +522,16 @@ export function watchEffect<T>(
     }
 
     const previousEffect = activeEffect;
+    const emptiedFrom = emptiedDeps.length;
     try {
       // Run cleanup functions before re-running the effect
       runCleanupFunctions(effectFn);
-      
-      cleanupEffect(effectFn); // clean up dependencies from the previous run
+
+      // clean up dependencies from the previous run; the ones this run
+      // does not read again are removed when it ends
+      detachEffect(effectFn, emptiedDeps);
       setActiveEffect(effectFn); // set this effect as the one currently tracking
-      
+
       // Create the onCleanup function that the user callback can use
       const onCleanup = (cleanupFn: () => void) => {
         if (!effectFn.cleanupFns) {
@@ -386,10 +539,11 @@ export function watchEffect<T>(
         }
         effectFn.cleanupFns.push(cleanupFn);
       };
-      
+
       return effectCallback(onCleanup); // execute the user's function with onCleanup, triggering tracks
     } finally {
       setActiveEffect(previousEffect); // restore the previous active effect
+      releaseEmptied(emptiedFrom);
     }
   };
 
@@ -400,7 +554,11 @@ export function watchEffect<T>(
       options: options,
       active: true, // start as active
       _rawCallback: effectCallback, // store the original callback
-      cleanupFns: [] // initialize cleanup functions
+      cleanupFns: [], // initialize cleanup functions
+      invalidate: undefined,
+      queued: false,
+      flushId: 0,
+      flushRuns: 0,
   };
 
   // run the effect immediately unless the `lazy` option is true
@@ -413,9 +571,7 @@ export function watchEffect<T>(
     if (effectFn.active) {
       runCleanupFunctions(effectFn); // run any registered cleanup functions
       cleanupEffect(effectFn); // remove from dependency lists
-      effectFn.active = false; // mark as inactive
-      // Remove from queued effects if present
-      queuedEffects.delete(effectFn);
+      effectFn.active = false; // mark as inactive; a flush skips it
     }
   };
 

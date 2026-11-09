@@ -1,4 +1,4 @@
-import { watchEffect, track, trigger, TrackedEffect, activeEffect, cleanupEffect, setActiveEffect, WatchEffectStopHandle } from './watch-effect';
+import { watchEffect, track, trigger, WatchEffectStopHandle } from './watch-effect';
 import { Ref, isRef, isRefSymbol, unref } from './ref';
 
 // symbol for identifying computed refs
@@ -53,19 +53,20 @@ export function computed<T>(getterOrOptions: ComputedGetter<T> | WritableCompute
   let _dirty = true; // flag to track if the cached value is stale
   let computedRef: ComputedRef<T> | WritableComputedRef<T>; // placeholder to allow self-reference in scheduler
 
-  // create a lazy effect; scheduler intercepts triggers to mark dirty instead of recomputing immediately
-  const stopHandle: WatchEffectStopHandle = watchEffect(getter, {
-    lazy: true,
-    scheduler: () => {
-      if (!_dirty) {
-        _dirty = true;
-        // trigger effects that depend on this computed ref
-        trigger(computedRef, 'value');
-      }
-    },
-  });
+  // a lazy effect: a write to what the getter read marks the value stale
+  // instead of recomputing it, and triggers the readers of the value in the
+  // same batch, so every computed the write made stale is stale before any
+  // effect runs and reads it
+  const stopHandle: WatchEffectStopHandle = watchEffect(getter, { lazy: true });
 
   const effectRunner = stopHandle.effect;
+  effectRunner.invalidate = () => {
+    if (!_dirty) {
+      _dirty = true;
+      // trigger effects that depend on this computed ref
+      trigger(computedRef, 'value');
+    }
+  };
 
   computedRef = {
     [isRefSymbol]: true,
@@ -75,11 +76,15 @@ export function computed<T>(getterOrOptions: ComputedGetter<T> | WritableCompute
       track(computedRef, 'value');
       // if dirty, recompute value by running the getter
       if (_dirty) {
-        // Force immediate recomputation to ensure we get the latest value
-        // This is especially important during effect flushing when multiple
-        // effects might be running in sequence
-        _value = effectRunner.run();
-        _dirty = false; // mark as clean after successful run
+        // clean before the getter runs: a write the getter sets off to what
+        // it already read (through effects of its own) marks it stale again
+        _dirty = false;
+        try {
+          _value = effectRunner.run();
+        } catch (error) {
+          _dirty = true;
+          throw error;
+        }
       }
       return _value;
     },
