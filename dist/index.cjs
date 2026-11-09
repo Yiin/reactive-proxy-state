@@ -3131,6 +3131,7 @@ function wrapArray(arr, node) {
   if (globalSeen.has(arr))
     return globalSeen.get(arr);
   const methodCache = newMethodCache();
+  let otherReaders;
   const handler = {
     get(target, prop, receiver) {
       if (prop === "__v_raw" /* RAW */)
@@ -3155,6 +3156,11 @@ function wrapArray(arr, node) {
       const cached = methodCache[prop];
       if (cached !== undefined)
         return cached;
+      if (otherReaders !== undefined) {
+        const kept = otherReaders.get(prop);
+        if (kept !== undefined && kept[0] === Reflect.get(target, prop, receiver))
+          return kept[1];
+      }
       switch (prop) {
         case "sort":
         case "reverse":
@@ -3471,9 +3477,11 @@ function wrapArray(arr, node) {
       if (typeof value === "function") {
         if (prop === "constructor" || prop === "valueOf")
           return value;
+        if (hasOwn.call(Array.prototype, prop) && Array.prototype[prop] === value) {
+          return methodCache[prop] = readerOf(target, value);
+        }
         const method = readerOf(target, value);
-        if (hasOwn.call(Array.prototype, prop) && Array.prototype[prop] === value)
-          methodCache[prop] = method;
+        (otherReaders ??= new Map).set(prop, [value, method]);
         return method;
       }
       return value;
@@ -3672,6 +3680,7 @@ function wrapMap(map, node) {
   if (globalSeen.has(map))
     return globalSeen.get(map);
   const methodCache = newMethodCache();
+  let ownMembers;
   const watch = watchIndex(map);
   const proxy = new Proxy(map, {
     get(target, prop, receiver) {
@@ -3686,7 +3695,9 @@ function wrapMap(map, node) {
         track(target, "size");
         return target.size;
       }
-      if (hasOwn.call(target, prop))
+      if (ownMembers === undefined)
+        ownMembers = Reflect.ownKeys(target).length > 0;
+      if (ownMembers && hasOwn.call(target, prop))
         return collectionMember(target, prop, Reflect.get(target, prop, receiver));
       if (prop === "set") {
         methodCache[prop] = function(key, value) {
@@ -3880,8 +3891,11 @@ function wrapMap(map, node) {
     },
     defineProperty(target, prop, descriptor) {
       const result = Reflect.defineProperty(target, prop, descriptor);
-      if (result && methodCache[prop] !== undefined)
-        methodCache[prop] = undefined;
+      if (result) {
+        ownMembers = true;
+        if (methodCache[prop] !== undefined)
+          methodCache[prop] = undefined;
+      }
       return result;
     }
   });
@@ -3945,6 +3959,7 @@ function wrapSet(set, node) {
   if (globalSeen.has(set))
     return globalSeen.get(set);
   const methodCache = newMethodCache();
+  let ownMembers;
   const watch = watchIndex(set);
   const proxy = new Proxy(set, {
     get(target, prop, receiver) {
@@ -3959,7 +3974,9 @@ function wrapSet(set, node) {
         track(target, "size");
         return target.size;
       }
-      if (hasOwn.call(target, prop))
+      if (ownMembers === undefined)
+        ownMembers = Reflect.ownKeys(target).length > 0;
+      if (ownMembers && hasOwn.call(target, prop))
         return collectionMember(target, prop, Reflect.get(target, prop, receiver));
       if (prop === "add") {
         methodCache[prop] = function(value2) {
@@ -4118,8 +4135,11 @@ function wrapSet(set, node) {
     },
     defineProperty(target, prop, descriptor) {
       const result = Reflect.defineProperty(target, prop, descriptor);
-      if (result && methodCache[prop] !== undefined)
-        methodCache[prop] = undefined;
+      if (result) {
+        ownMembers = true;
+        if (methodCache[prop] !== undefined)
+          methodCache[prop] = undefined;
+      }
       return result;
     }
   });

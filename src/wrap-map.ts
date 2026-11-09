@@ -75,6 +75,9 @@ export function wrapMap<K, V>(map: Map<K, V>, node: LocationNode): Map<K, V> {
   if (globalSeen.has(map)) return globalSeen.get(map);
 
   const methodCache = newMethodCache();
+  // does the map have own properties? Read at the first read past the
+  // cache; a define through the proxy adds one
+  let ownMembers: boolean | undefined;
   // the proxy keeps the collection's index by token, once it has one
   const watch = watchIndex(map);
 
@@ -93,7 +96,8 @@ export function wrapMap<K, V>(map: Map<K, V>, node: LocationNode): Map<K, V> {
         return target.size;
       }
       // an own property in place of a method is read as it is
-      if (hasOwn.call(target, prop)) return collectionMember(target, prop, Reflect.get(target, prop, receiver));
+      if (ownMembers === undefined) ownMembers = Reflect.ownKeys(target).length > 0;
+      if (ownMembers && hasOwn.call(target, prop)) return collectionMember(target, prop, Reflect.get(target, prop, receiver));
 
       if (prop === "set") {
         methodCache[prop] = function (key: K, value: V): Map<K, V> {
@@ -308,7 +312,10 @@ export function wrapMap<K, V>(map: Map<K, V>, node: LocationNode): Map<K, V> {
       // no effect reads them and no event sends them.
       const result = Reflect.defineProperty(target, prop, descriptor);
       // the new own property is read from now on
-      if (result && methodCache[prop] !== undefined) methodCache[prop] = undefined;
+      if (result) {
+        ownMembers = true;
+        if (methodCache[prop] !== undefined) methodCache[prop] = undefined;
+      }
       return result;
     },
   });

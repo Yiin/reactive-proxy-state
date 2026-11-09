@@ -69,6 +69,9 @@ export function wrapSet<T>(set: Set<T>, node: LocationNode): Set<T> {
   if (globalSeen.has(set)) return globalSeen.get(set);
 
   const methodCache = newMethodCache();
+  // does the set have own properties? Read at the first read past the
+  // cache; a define through the proxy adds one
+  let ownMembers: boolean | undefined;
   // the proxy keeps the collection's index by token, once it has one
   const watch = watchIndex(set);
 
@@ -87,7 +90,8 @@ export function wrapSet<T>(set: Set<T>, node: LocationNode): Set<T> {
         return target.size;
       }
       // an own property in place of a method is read as it is
-      if (hasOwn.call(target, prop)) return collectionMember(target, prop, Reflect.get(target, prop, receiver));
+      if (ownMembers === undefined) ownMembers = Reflect.ownKeys(target).length > 0;
+      if (ownMembers && hasOwn.call(target, prop)) return collectionMember(target, prop, Reflect.get(target, prop, receiver));
 
       if (prop === "add") {
         methodCache[prop] = function (value: T): Set<T> {
@@ -257,7 +261,10 @@ export function wrapSet<T>(set: Set<T>, node: LocationNode): Set<T> {
       // no effect reads them and no event sends them.
       const result = Reflect.defineProperty(target, prop, descriptor);
       // the new own property is read from now on
-      if (result && methodCache[prop] !== undefined) methodCache[prop] = undefined;
+      if (result) {
+        ownMembers = true;
+        if (methodCache[prop] !== undefined) methodCache[prop] = undefined;
+      }
       return result;
     },
   });

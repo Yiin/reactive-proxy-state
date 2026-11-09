@@ -267,6 +267,8 @@ export function wrapArray<T extends any[]>(arr: T, node: LocationNode): T {
 
   // cache for wrapped methods to avoid re-creating them on each call
   const methodCache = newMethodCache();
+  // readers of functions that are not Array.prototype's, with their function
+  let otherReaders: Map<string | symbol, [Function, Function]> | undefined;
 
   const handler = {
     get(target: T, prop: string | symbol, receiver: any): any {
@@ -297,6 +299,11 @@ export function wrapArray<T extends any[]>(arr: T, node: LocationNode): T {
 
       const cached = methodCache[prop];
       if (cached !== undefined) return cached;
+      // a function read before that is not Array.prototype's (see below)
+      if (otherReaders !== undefined) {
+        const kept = otherReaders.get(prop);
+        if (kept !== undefined && kept[0] === Reflect.get(target, prop, receiver)) return kept[1];
+      }
 
       // handle specific array mutation methods that require custom logic and event emission
       switch (prop) {
@@ -618,12 +625,15 @@ export function wrapArray<T extends any[]>(arr: T, node: LocationNode): T {
       // both keep the proxy.
       if (typeof value === "function") {
         if (prop === "constructor" || prop === "valueOf") return value;
+        // Array.prototype's own methods, one per proxy: a change to
+        // Array.prototype after a proxy read the method is not seen
+        if (hasOwn.call(Array.prototype, prop) && (Array.prototype as any)[prop] === value) {
+          return (methodCache[prop] = readerOf(target, value));
+        }
+        // any other function (Object.prototype's, a subclass's, the array's
+        // own) is read each time, and its reader is kept while it is the same
         const method = readerOf(target, value);
-        // Array.prototype's own methods, one per proxy. A function from
-        // Object.prototype or a subclass is read again each time, so a
-        // change there is seen; a change to Array.prototype after a proxy
-        // read the method is not.
-        if (hasOwn.call(Array.prototype, prop) && (Array.prototype as any)[prop] === value) methodCache[prop] = method;
+        (otherReaders ??= new Map()).set(prop, [value, method]);
         return method;
       }
       return value;
