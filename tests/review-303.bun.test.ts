@@ -1,0 +1,187 @@
+import { describe, expect, test } from "bun:test";
+import type { StateEvent } from "../src/types";
+import type * as Library from "../src/index";
+
+const { reactive, computed, watchEffect, toRaw, updateState } = await import(
+  process.env.RPS_TEST_BUNDLE ?? "../src/index"
+) as typeof Library;
+
+const writes: Record<string, { read: (s: ReturnType<typeof make>) => unknown; write: (s: ReturnType<typeof make>) => void }> = {
+  "object set": { read: s => s.obj.a, write: s => { s.obj.a = 4; } },
+  "object add": { read: s => JSON.stringify(s.obj), write: s => { s.obj.b = 4; } },
+  "object delete": { read: s => JSON.stringify(s.obj), write: s => { delete s.obj.a; } },
+  "array index": { read: s => s.list[0], write: s => { s.list[0] = 4; } },
+  "array grow": { read: s => s.list.length, write: s => { s.list.length = 5; } },
+  "array shrink": { read: s => s.list.length, write: s => { s.list.length = 1; } },
+  "array delete": { read: s => s.list[0], write: s => { delete s.list[0]; } },
+  "array push": { read: s => s.list.join(), write: s => { s.list.push(4); } },
+  "array pop": { read: s => s.list.join(), write: s => { s.list.pop(); } },
+  "array shift": { read: s => s.list[1], write: s => { s.list.shift(); } },
+  "array unshift": { read: s => s.list[1], write: s => { s.list.unshift(4); } },
+  "array splice": { read: s => s.list[1], write: s => { s.list.splice(0, 1); } },
+  "array sort": { read: s => s.list[0], write: s => { s.list.sort((a, b) => b - a); } },
+  "array reverse": { read: s => s.list[0], write: s => { s.list.reverse(); } },
+  "array fill": { read: s => s.list[0], write: s => { s.list.fill(4); } },
+  "array copyWithin": { read: s => s.list[0], write: s => { s.list.copyWithin(0, 1); } },
+  "map set": { read: s => s.map.get("a"), write: s => { s.map.set("a", 4); } },
+  "map add": { read: s => s.map.size, write: s => { s.map.set("c", 4); } },
+  "map delete": { read: s => s.map.get("a"), write: s => { s.map.delete("a"); } },
+  "map clear": { read: s => s.map.size, write: s => { s.map.clear(); } },
+  "set add": { read: s => s.set.size, write: s => { s.set.add(4); } },
+  "set delete": { read: s => s.set.has(1), write: s => { s.set.delete(1); } },
+  "set clear": { read: s => s.set.size, write: s => { s.set.clear(); } },
+};
+function make() {
+  return { obj: { a: 1 } as Record<string, number>, list: [1, 2, 3], map: new Map([["a", 1], ["b", 2]]), set: new Set([1, 2]), tick: 0, total: "" };
+}
+
+describe("3.0.3 listener ordering review", () => {
+  for (const [name, { read, write }] of Object.entries(writes)) {
+    test(`${name}: listeners and nested effects read fresh computed chains`, () => {
+      let armed = false;
+      let nested = false;
+      const observed: unknown[][] = [];
+      const events: StateEvent[] = [];
+      const raw = make();
+      const remote = structuredClone(raw);
+      const state = reactive(raw, event => {
+        if (!armed) return;
+        events.push(structuredClone(event));
+        updateState(remote, event);
+        if (!nested) {
+          nested = true;
+          observed.push([read(state), first.value, second.value]);
+          state.tick++;
+          expect(state.total).toBe(JSON.stringify([read(state), first.value, second.value]));
+        }
+      });
+      const first = computed(() => read(state));
+      const second = computed(() => first.value);
+      const stop = watchEffect(() => {
+        state.tick;
+        state.total = JSON.stringify([read(state), first.value, second.value]);
+      });
+      remote.total = state.total;
+      armed = true;
+      write(state);
+      const value = read(state);
+      expect(observed).toEqual([[value, value, value]]);
+      expect(events.filter(event => event.path[0] === "total").map(event => event.newValue)).toEqual([JSON.stringify([value, value, value])]);
+      expect(remote.total).toBe(state.total);
+      stop(); first.stop(); second.stop();
+    });
+  }
+  for (const method of ["shift", "splice", "unshift"] as const) {
+    test(`${method}: a listener cannot hide a changed index`, () => {
+      let armed = false;
+      const raw = [0, 1, 2];
+      const state = reactive({ list: raw }, event => {
+        if (armed && event.action === `array-${method}`) state.list[method === "unshift" ? 2 : 0] = 2;
+      });
+      const values: number[] = [];
+      const stop = watchEffect(() => { values.push(state.list[1]); });
+      armed = true;
+      if (method === "splice") state.list.splice(0, 1);
+      else if (method === "unshift") state.list.unshift(3);
+      else state.list.shift();
+      expect(values).toEqual([1, method === "unshift" ? 0 : 2]);
+      stop();
+    });
+  }
+  test("source effects run in source order and a nested write finishes its cycle", () => {
+    const order: string[] = [];
+    let armed = false;
+    const state = reactive({ a: 0, b: 0 }, event => {
+      if (!armed) return;
+      order.push(`event:${event.path[0]}`);
+      if (event.path[0] === "a") {
+        state.b++;
+        order.push("nested-return");
+      }
+    });
+    const a = watchEffect(() => { state.a; if (armed) order.push("effect:a"); });
+    const b = watchEffect(() => { state.b; if (armed) order.push("effect:b"); });
+    armed = true;
+    state.a++;
+    expect(order).toEqual(["event:a", "event:b", "effect:a", "effect:b", "nested-return"]);
+    a(); b();
+  });
+  test("method replacement and deletion take effect inside listeners", () => {
+    let armed = false;
+    const seen: unknown[] = [];
+    const state = reactive({ list: [1, 2] }, event => {
+      if (armed && event.path[1] === "map") seen.push(state.list.map(x => x + 1));
+    });
+    state.list.map;
+    armed = true;
+    Object.assign(state.list, { map: () => 42 });
+    Reflect.deleteProperty(state.list, "map");
+    expect(seen).toEqual([42, [2, 3]]);
+  });
+});
+
+for (const collection of ["array", "map", "set"] as const) {
+  for (const method of ["keys", "values", "entries", Symbol.iterator] as const) {
+    test(`saved ${collection} ${String(method)} tracks every next and stays consumed`, () => {
+      const state = reactive({ list: [1, 2, 3], map: new Map([[1, 1], [2, 2], [3, 3]]), set: new Set([1, 2, 3]) });
+      const iterator = (collection === "array" ? state.list : collection === "map" ? state.map : state.set)[method]();
+      const steps: IteratorResult<unknown>[] = [];
+      const stop = watchEffect(() => { steps.push(iterator.next()); });
+      const change = (n: number) => {
+        if (collection === "array") state.list[n - 1] = n * 10;
+        else if (collection === "map") state.map.set(n, n * 10);
+        else state.set.add(n * 10);
+      };
+      change(2); change(3);
+      const values = collection === "set" || method === "keys" ? [1, 2, 3] : [1, 20, 30];
+      if (collection === "array" && method === "keys") values.splice(0, 3, 0, 1, 2);
+      const pairs = method === "entries" || (method === Symbol.iterator && collection === "map");
+      expect(steps).toEqual(values.map((value, i) => ({ value: pairs ? [collection === "array" ? i : collection === "map" ? i + 1 : value, value] : value, done: false })));
+      while (!iterator.next().done) { /* consume the live iterator */ }
+      change(4);
+      expect(steps.at(-1)).toEqual({ value: undefined, done: true });
+      const count = steps.length;
+      change(5);
+      expect(steps.length).toBe(count);
+      stop();
+    });
+  }
+}
+
+test("a missing undefined property is stored, sent, and tracked", () => {
+  const events: StateEvent[] = [];
+  const state = reactive({ obj: {} as Record<string, unknown> }, event => { events.push(event); });
+  events.length = 0;
+  const observed: unknown[] = [];
+  const stop = watchEffect(() => { state.obj.newKey; observed.push(Object.keys(state.obj)); });
+  state.obj.newKey = undefined;
+  state.obj.newKey = undefined;
+  expect(Object.hasOwn(toRaw(state.obj), "newKey")).toBe(true);
+  expect(events).toEqual([{ action: "set", path: ["obj", "newKey"], oldValue: undefined, newValue: undefined }]);
+  expect(observed).toEqual([[], ["newKey"]]);
+  stop();
+});
+
+for (const method of ["getOrInsert", "getOrInsertComputed"] as const) {
+  test(`${method} sends inserts, tracks reads, wraps results, and leaves existing values alone`, () => {
+    const events: StateEvent[] = [];
+    const state = reactive({ map: new Map<string, { n: number } | undefined>() }, event => { events.push(event); });
+    events.length = 0;
+    const calls: string[] = [];
+    const insert = (key: string, value: { n: number } | undefined) => {
+      const fn = Reflect.get(state.map, method);
+      return Reflect.apply(fn, state.map, [key, method === "getOrInsertComputed" ? (key: string) => { calls.push(key); return value; } : value]);
+    };
+    const seen: unknown[] = [];
+    const stop = watchEffect(() => { seen.push(state.map.get("a")); });
+    expect(insert("a", undefined)).toBeUndefined();
+    expect(insert("a", { n: 9 })).toBeUndefined();
+    const object = insert("b", { n: 1 });
+    object.n = 2;
+    expect(events.map(event => event.action)).toEqual(["map-set", "map-set", "set"]);
+    expect(seen).toEqual([undefined, undefined]);
+    expect(state.map.get("b")?.n).toBe(2);
+    if (method === "getOrInsertComputed") expect(calls).toEqual(["a", "b"]);
+    stop();
+  });
+}

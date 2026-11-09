@@ -26,12 +26,41 @@ import {
   shallowCopy,
 } from "./location";
 import type { StateEvent } from "./types";
-import { track, trackEntry, triggerCleared, triggerCollection } from "./watch-effect";
+import { beginWrite, endWrite, track, trackEntry, triggerCleared, triggerCollection } from "./watch-effect";
 import { ReactiveFlags } from "./constants";
 
 function isObject(value: unknown): value is object {
   return value !== null && typeof value === "object";
 }
+
+class MapProxyIterator<K, V> {
+  private target: Map<K, V> | undefined;
+  private readonly iterator: MapIterator<[K, V]>;
+
+  constructor(target: Map<K, V>, private readonly node: LocationNode, private readonly kind: string | symbol) {
+    this.target = target;
+    this.iterator = target.entries();
+  }
+
+  next(): IteratorResult<unknown> {
+    if (this.target === undefined) return { value: undefined, done: true };
+    track(this.target, Symbol.iterator);
+    const step = this.iterator.next();
+    if (step.done) {
+      this.target = undefined;
+      return step;
+    }
+    const [key, value] = step.value;
+    if (this.kind === "keys") return { value: key, done: false };
+    const wrapped = isObject(value) ? wrapChild(value, this.node, key) : value;
+    return { value: this.kind === "values" ? wrapped : [isObject(key) ? wrapUnplaced(key) : key, wrapped], done: false };
+  }
+}
+
+Object.setPrototypeOf(
+  MapProxyIterator.prototype,
+  Object.getPrototypeOf(Object.getPrototypeOf(new Map().entries()))
+);
 
 export function wrapMap<K, V>(map: Map<K, V>, node: LocationNode): Map<K, V> {
   const cachedProxy = wrapperCache.get(map);
@@ -97,17 +126,31 @@ export function wrapMap<K, V>(map: Map<K, V>, node: LocationNode): Map<K, V> {
           if (isObject(oldValue)) detachPlace(oldValue, node, key);
           if (isObject(value)) attachValue(value, node, key, copied === Copied.Fresh, located && oldValue, held);
 
+          beginWrite();
           try {
+            if (!existed || oldValue === oldValue || value === value) triggerCollection(target, key, oldSize !== newSize);
             if (event !== undefined) dispatch(located!, event);
           } finally {
-            // the entry and every reader of all entries; a new key changes
-            // the size. Also when a listener threw. NaN in place of NaN is
-            // sent, as until now, but changes nothing an effect reads
-            if (!existed || oldValue === oldValue || value === value) triggerCollection(target, key, oldSize !== newSize);
+            try {
 
-            if (isObject(oldValue)) evictDeep(oldValue);
+              if (isObject(oldValue)) evictDeep(oldValue);
+            } finally {
+              endWrite();
+            }
           }
           return receiver;
+        };
+        return methodCache[prop];
+      }
+      if (prop === "getOrInsert" || prop === "getOrInsertComputed") {
+        methodCache[prop] = function (key: K, value: V | ((key: K) => V)): V | undefined {
+          if (prop === "getOrInsertComputed" && typeof value !== "function") {
+            throw new TypeError("Map.getOrInsertComputed callback must be a function");
+          }
+          if (proxy.has(key)) return proxy.get(key);
+          const inserted = prop === "getOrInsertComputed" ? (value as (key: K) => V)(key) : value as V;
+          proxy.set(key, inserted);
+          return proxy.get(key);
         };
         return methodCache[prop];
       }
@@ -139,11 +182,16 @@ export function wrapMap<K, V>(map: Map<K, V>, node: LocationNode): Map<K, V> {
             if (watch.indexed) indexRemoved(target, key);
             if (isObject(oldValue)) detachPlace(oldValue, node, key);
 
+            beginWrite();
             try {
+              triggerCollection(target, key, oldSize !== newSize);
               if (event !== undefined) dispatch(located!, event);
             } finally {
-              triggerCollection(target, key, oldSize !== newSize);
-              if (isObject(oldValue)) evictDeep(oldValue);
+              try {
+                if (isObject(oldValue)) evictDeep(oldValue);
+              } finally {
+                endWrite();
+              }
             }
           }
 
@@ -165,7 +213,9 @@ export function wrapMap<K, V>(map: Map<K, V>, node: LocationNode): Map<K, V> {
           }
 
           const located = locate(node);
+          beginWrite();
           try {
+            triggerCleared(target, removed.map(([key]) => key));
             if (located !== undefined) {
               dispatch(located, {
                 action: "map-clear",
@@ -174,9 +224,12 @@ export function wrapMap<K, V>(map: Map<K, V>, node: LocationNode): Map<K, V> {
               });
             }
           } finally {
-            triggerCleared(target, removed.map(([key]) => key));
-            for (const [, value] of removed) {
-              if (isObject(value)) evictDeep(value);
+            try {
+              for (const [, value] of removed) {
+                if (isObject(value)) evictDeep(value);
+              }
+            } finally {
+              endWrite();
             }
           }
         };
@@ -220,24 +273,8 @@ export function wrapMap<K, V>(map: Map<K, V>, node: LocationNode): Map<K, V> {
           return methodCache[prop];
         }
 
-        // the body runs at the first `next()`: an iterator made before an
-        // effect and stepped in it tracks there
-        methodCache[prop] = function* () {
-          track(target, Symbol.iterator);
-          for (const [key, value] of target.entries()) {
-            if (prop === "keys") {
-              yield key;
-              continue;
-            }
-            const wrappedValue = isObject(value) ? wrapChild(value, node, key) : value;
-            if (prop === "values") {
-              yield wrappedValue;
-              continue;
-            }
-            // An object key has no place in the tree: its proxy emits only
-            // if the same object also sits somewhere as a value.
-            yield [isObject(key) ? wrapUnplaced(key) : key, wrappedValue];
-          }
+        methodCache[prop] = function () {
+          return new MapProxyIterator(target, node, prop);
         };
         return methodCache[prop];
       }

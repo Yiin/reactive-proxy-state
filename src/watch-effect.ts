@@ -45,18 +45,22 @@ export function setActiveEffect(effect: TrackedEffect<any> | null) {
  * under that key, so the last effect to leave can remove it.
  */
 class Dep extends Set<TrackedEffect<any>> {
-  constructor(readonly owner: Map<unknown, Dep>, readonly key: unknown) {
+  constructor(readonly owner: WeakRef<Map<unknown, Dep>>, readonly key: unknown) {
     super();
   }
 }
 
 // storage for dependencies: target object -> property key -> the effects that read it
-const targetMap = new WeakMap<object, Map<unknown, Dep>>();
+class Deps extends Map<unknown, Dep> {
+  readonly ref = new WeakRef(this);
+}
+
+const targetMap = new WeakMap<object, Deps>();
 // the same for the entries of Maps and Sets: collection -> Map key or Set value -> the
 // effects that read it with get or has. Apart from `targetMap`, so an entry never
 // shares a dependency with a property ("get", "size"), and keyed by the entry itself,
 // as the collection keys it (1 and "1" are two entries, NaN is one)
-const entryMap = new WeakMap<object, Map<unknown, Dep>>();
+const entryMap = new WeakMap<object, Deps>();
 
 /**
  * Dependencies a cleanup at the start of a run left without effects, the
@@ -75,7 +79,9 @@ let emptiedCount = 0;
  * reference to its target, so an effect never keeps one alive.
  */
 function releaseDep(dep: Dep): void {
-  if (dep.size === 0 && dep.owner.get(dep.key) === dep) dep.owner.delete(dep.key);
+  if (dep.size !== 0) return;
+  const owner = dep.owner.deref();
+  if (owner?.get(dep.key) === dep) owner.delete(dep.key);
 }
 
 function releaseEmptied(from: number): void {
@@ -89,7 +95,7 @@ function releaseEmptied(from: number): void {
 }
 
 /** The dependencies of `target`, or undefined when no effect reads it. */
-function depsOf(maps: WeakMap<object, Map<unknown, Dep>>, target: object): Map<unknown, Dep> | undefined {
+function depsOf(maps: WeakMap<object, Deps>, target: object): Map<unknown, Dep> | undefined {
   const deps = maps.get(target);
   if (deps === undefined || deps.size > 0) return deps;
   maps.delete(target);
@@ -148,15 +154,15 @@ export function runCleanupFunctions(effect: TrackedEffect<any>) {
 }
 
 /** The dependency for `key` of `target` in `maps`, made when missing. */
-function depFor(maps: WeakMap<object, Map<unknown, Dep>>, target: object, key: unknown): Dep {
+function depFor(maps: WeakMap<object, Deps>, target: object, key: unknown): Dep {
   let deps = maps.get(target);
   if (deps === undefined) {
-    deps = new Map();
+    deps = new Deps();
     maps.set(target, deps);
   }
   let dep = deps.get(key);
   if (dep === undefined) {
-    dep = new Dep(deps, key);
+    dep = new Dep(deps.ref, key);
     deps.set(key, dep);
   }
   return dep;
@@ -288,6 +294,20 @@ function startBatch(): void {
 /** End a trigger call; the outermost one runs what the batch queued, unless a flush is running. */
 function endBatch(): void {
   if (--batchDepth === 0 && !flushing && queue.length > 0) flushEffects();
+}
+
+/** Hold effects while a write invalidates dependencies and delivers its events. @internal */
+export function beginWrite(): void {
+  startBatch();
+}
+
+/**
+ * Finish a write's delivery. Nested listener writes drain the same queue,
+ * in source order, before returning to their listener. @internal
+ */
+export function endWrite(): void {
+  batchDepth--;
+  if (!flushing && queue.length > 0) flushEffects();
 }
 
 /**
