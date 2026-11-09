@@ -181,6 +181,15 @@ function objectRoot() {
 }
 
 const mapWrites = {
+  "getOrInsert new": map => map.getOrInsert("z", 9),
+  "getOrInsert undefined": map => map.getOrInsert("z", undefined),
+  "getOrInsert existing": map => map.getOrInsert("a", 9),
+  "getOrInsert object": map => { map.getOrInsert("z", { id: 1 }).id = 2; },
+  "getOrInsertComputed new": map => map.getOrInsertComputed("z", () => 9),
+  "getOrInsertComputed undefined": map => map.getOrInsertComputed("z", () => undefined),
+  "getOrInsertComputed existing": map => map.getOrInsertComputed("a", () => { throw Error("must not run"); }),
+  "getOrInsertComputed object": map => { map.getOrInsertComputed("z", () => ({ id: 1 })).id = 2; },
+
   "set of a held key": (map) => map.set("a", 5),
   "set of the same value": (map) => map.set("a", 1),
   "set of a new key": (map) => map.set("z", 9),

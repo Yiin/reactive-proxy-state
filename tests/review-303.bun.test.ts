@@ -185,3 +185,23 @@ for (const method of ["getOrInsert", "getOrInsertComputed"] as const) {
     stop();
   });
 }
+
+test("getOrInsertComputed keeps native callback and return rules during nested writes", () => {
+  let armed = false;
+  const state = reactive({ map: new Map<number, number>() }, event => {
+    if (armed && event.action === "map-set") state.map.delete(0);
+  });
+  const insert = Reflect.get(state.map, "getOrInsertComputed");
+  const keys: number[] = [];
+  armed = true;
+  expect(Reflect.apply(insert, state.map, [-0, (key: number) => { keys.push(key); return 7; }])).toBe(7);
+  expect(Object.is(keys[0], 0)).toBe(true);
+  expect(state.map.has(0)).toBe(false);
+  armed = false;
+  state.map.set(1, 1);
+  expect(() => Reflect.apply(insert, state.map, [1, 4])).toThrow(TypeError);
+  expect(() => Reflect.apply(insert, state.map, [2, () => { throw Error("callback failed"); }])).toThrow("callback failed");
+  expect(state.map.has(2)).toBe(false);
+  expect(Reflect.apply(insert, state.map, [2, () => { state.map.set(2, 5); return 9; }])).toBe(9);
+  expect(state.map.get(2)).toBe(9);
+});

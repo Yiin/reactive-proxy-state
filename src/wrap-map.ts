@@ -147,10 +147,11 @@ export function wrapMap<K, V>(map: Map<K, V>, node: LocationNode): Map<K, V> {
           if (prop === "getOrInsertComputed" && typeof value !== "function") {
             throw new TypeError("Map.getOrInsertComputed callback must be a function");
           }
+          if (Object.is(key, -0)) key = 0 as K;
           if (proxy.has(key)) return proxy.get(key);
           const inserted = prop === "getOrInsertComputed" ? (value as (key: K) => V)(key) : value as V;
           proxy.set(key, inserted);
-          return proxy.get(key);
+          return isObject(inserted) ? wrapUnplaced(inserted) : inserted;
         };
         return methodCache[prop];
       }
