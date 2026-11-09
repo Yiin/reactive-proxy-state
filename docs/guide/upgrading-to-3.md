@@ -55,3 +55,23 @@ What to check when you upgrade:
 - **Effects over arrays, Maps and Sets rerun more often**, each time what they read changed.
 - **`onTrigger` fires once per key that changed.** An effect that read both `list[0]` and `list.map(...)` gets two `onTrigger` calls for `list[0] = x`, and runs once.
 - **Still not tracked:** `in`, `Object.keys`, `Object.entries` and `for...in` on arrays and plain objects, and reads inside array callbacks of the raw items they receive. See the README section "Collections".
+
+## 3.0.3: computed values are fresh, and effects run once per write
+
+- **A write marks every computed value it changes as stale before any effect runs.** In 3.0.2, an effect that read `a[0]` and a computed of a computed of `a` saw `[2, 4]`, then `[2, 8]`, after `a[0] = 2`, and an effect that wrote their sum to the state sent the stale sum to replicas first.
+- **An effect that waits to run is not queued again.** Two writes in one flush run it once, after both. In 3.0.2, an effect triggered by a write and then by an effect that wrote ran twice.
+- **An effect that throws no longer stops the effects after it.** They all run, then the write throws the first error. A listener that throws while it receives an event no longer stops the effects of that write either.
+- **A method tracks when it runs.** `const slice = list.slice` or `const values = map.values` taken before an effect tracks inside it. Mutators no longer track the length the first time they are read.
+- **Map and Set entries are tracked by the entry itself.** `m.set("get", 1)` no longer reruns an effect that read only `m.get("a")`, and `1` and `"1"` are two entries.
+- **`shift`, `unshift` and `splice` rerun an index read only when that index holds another value.** `[1, 1, 2].shift()` no longer reruns an effect that read `a[0]`. A splice that puts back what it took reruns nothing.
+- **A key added to or deleted from a plain object reruns every effect that read a key of it.** `JSON.stringify(state.obj)`, spread, `Object.entries` and a deep `watch` follow added keys, also of an empty object.
+- **Set methods are tracked:** `union`, `intersection`, `difference`, `symmetricDifference`, `isSubsetOf`, `isSupersetOf` and `isDisjointFrom`.
+- **Dependency sets go when their last effect stops.** An effect that read 10,000 changing Map keys and stopped kept 10,000 empty sets in 3.0.2.
+
+Replicas receive the same events as in 3.0.2 for every write.
+
+What to check when you upgrade:
+
+- **Effects that read one key of an object also rerun when a key is added to or deleted from it.**
+- **A loop of effects that each write a new value throws a `RangeError` after 100,000 runs of one effect in one write.** 3.0.2 ran out of stack after about 7,000 rounds under Node.
+- **`onTrack` and `onTrigger` give the entry itself as `key`** for `get` and `has` of a Map or Set (3.0.2 gave a string). Their `key` type is `unknown`.

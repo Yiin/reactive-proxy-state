@@ -273,13 +273,17 @@ state.data.delete("foo"); // Output: Data has "foo": false
 state.tags.add("urgent"); // Output: Tags: important, urgent
 ```
 
-An effect reruns once after each write that changes what it read. An effect that reads all items of an array, with a method (`map`, `filter`, `forEach`, `reduce`, `join`, `indexOf`, `includes`, `find`, `slice`, `concat`, `flatMap`, `toSorted` and the rest) or a loop (`for...of`, spread, `Array.from`), reruns after an index write, an index delete, a length change and every method that changes the array. An effect that reads one index or `length` reruns only when that index or the length changes. On a Map or Set, `get` and `has` rerun when their entry changes, and loops rerun on every change. Object keys share one tracking key, so `get` of one object key also reruns when another object key changes. In 3.0.1 and earlier, an index write, an index delete or a length change did not rerun readers of all items.
+An effect reruns once after each write that changes what it read. An effect that reads all items of an array, with a method (`map`, `filter`, `forEach`, `reduce`, `join`, `indexOf`, `includes`, `find`, `slice`, `concat`, `flatMap`, `toSorted` and the rest) or a loop (`for...of`, spread, `Array.from`), reruns after an index write, an index delete, a length change and every method that changes the array. An effect that reads one index or `length` reruns only when that index or the length changes, also after `shift`, `unshift` and `splice`. On a Map or Set, `get` and `has` rerun when their entry changes, and loops rerun on every change. Each entry is tracked as the collection keys it: `1` and `"1"` are two entries, and an entry named `"get"` or `"size"` is not the method or the property. A method tracks when it runs, so `const values = map.values` taken before an effect still tracks inside it. Mutators (`push`, `splice`, `set`, `add` and the rest) track nothing. In 3.0.1 and earlier, an index write, an index delete or a length change did not rerun readers of all items.
+
+A key added to or deleted from a plain object reruns every effect that read a key of that object, so `JSON.stringify`, spread, `Object.entries`, `Object.values` and a deep `watch` follow it. An effect that read only `a` of that object reruns too.
+
+A write marks every `computed` it changes as stale, down a chain of computed values, before any effect runs, so an effect never reads a stale computed value. Effects run in the order they were triggered, each once per write: an effect that waits to run is not queued again. An effect that throws does not stop the others; the write throws the first error after they ran. Effects that keep writing new values to each other throw a `RangeError` after one of them ran 100,000 times in one write.
 
 Some reads are not tracked:
 
 - `in`, `Object.keys`, `Object.entries` and `for...in` on an array. Traps for them made `Object.keys(list)` 70% slower for every caller. Read `length` or loop over the array instead.
 - Reads inside array callbacks of the raw items they receive. `state.rows.map((row) => row.join())` reruns when `state.rows` changes, not when a row changes. Loop with `for (const row of state.rows)` to track the rows too.
-- `in`, `Object.keys` and `for...in` on a plain object. A new key reruns only effects that read that key by name.
+- `in`, `Object.keys`, `Object.hasOwn` and `for...in` of keys on a plain object, when the effect reads no key of that object. An `ownKeys` trap made `JSON.stringify` of the state 35% slower for every caller. Read a key of the object too, or `JSON.stringify` it.
 
 ## Synchronization Limits
 

@@ -17,9 +17,13 @@ function watchEffect<T>(
   - `onCleanup?`: Function to register cleanup callbacks that will be called before the effect re-runs or when the effect is stopped
 - `options`: Optional settings object with the following properties:
   - `lazy?`: If true, the effect does not run immediately upon creation
-  - `scheduler?`: Custom function to control how/when the effect runs after a trigger
-  - `onTrack?`: Debug callback for when a reactive property is tracked
+  - `scheduler?`: Custom function to control how/when the effect runs after a trigger. It gets the job once per trigger; a computed value the job reads is fresh when the job runs.
+  - `onTrack?`: Debug callback for when a reactive property is tracked. Its `key` is the property name, or the Map key or Set value that `get` or `has` read.
   - `onTrigger?`: Debug callback for when the effect is triggered
+
+## When effects run
+
+A write runs the effects that read what it changed after it marked every computed value it changed as stale, so an effect never reads a stale computed value. Effects run in the order they were triggered, each once per write: an effect that waits to run is not queued again, and a write that an effect makes queues effects that already ran. An effect never triggers itself. An effect that throws does not stop the others; the write throws the first error after they ran. Effects that keep writing new values to each other throw a `RangeError` after one of them ran 100,000 times in one write.
 
 ## Return Value
 
