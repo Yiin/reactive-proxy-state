@@ -1377,19 +1377,20 @@ function startBatch() {
   batchDepth++;
 }
 function endBatch() {
-  if (--batchDepth === 0 && !flushing && (queue.length > 0 || triggerNotifications.length > 0))
-    flushEffects();
+  if (--batchDepth !== 0 || flushing)
+    return;
+  try {
+    if (queue.length > 0 || triggerNotifications.length > 0)
+      flushEffects();
+  } finally {
+    endOperation();
+  }
 }
 function beginWrite() {
   startBatch();
 }
 function endWrite() {
-  try {
-    endBatch();
-  } finally {
-    if (delivery !== undefined)
-      endDelivery(true);
-  }
+  endBatch();
 }
 function queueEffects(dep, target, key) {
   if (dep === undefined)
@@ -1602,70 +1603,78 @@ function watchEffect(effectCallback, options = {}) {
 }
 
 // src/listener.ts
-var delivery;
+var MAX_LISTENER_WRITE_DEPTH = 100;
+var MAX_LISTENER_WRITE_ROUNDS = 1e5;
+var listenerGeneration = -1;
+var listenerWrote = false;
 var emittingEffect = null;
-var listenerState = 0 /* Inactive */;
-var MAX_LISTENER_WRITE_ROUNDS = 100;
-function beginDelivery() {
-  if (delivery !== undefined)
-    return false;
-  delivery = { rounds: 0, error: undefined };
-  return true;
-}
-function endDelivery(ownsDelivery) {
-  if (!ownsDelivery || (batchDepth > 0 || flushing) || listenerState !== 0 /* Inactive */)
-    return;
-  const error = delivery?.error;
-  delivery = undefined;
-  if (error !== undefined)
-    throw error;
-}
+var asyncDeliveries = 0;
+var rounds = 0;
+var refusal;
 function checkListenerWrite() {
-  if (listenerState !== 1 /* BeforeWrite */)
+  if (listenerGeneration < 0 || listenerWrote)
     return;
-  const current = delivery ??= { rounds: 0, error: undefined };
-  if (current.rounds < MAX_LISTENER_WRITE_ROUNDS) {
-    current.rounds++;
-    listenerState = 2 /* AfterWrite */;
+  if (refusal === undefined && listenerGeneration < MAX_LISTENER_WRITE_DEPTH && (listenerGeneration === 0 || ++rounds <= MAX_LISTENER_WRITE_ROUNDS)) {
+    listenerWrote = true;
     return;
   }
-  current.error ??= new RangeError(`reactive-proxy-state: listeners exceeded ${MAX_LISTENER_WRITE_ROUNDS} nested write rounds. ` + `Filter event paths to stop listener writes from repeating`);
-  throw current.error;
+  refusal ??= new RangeError(listenerGeneration >= MAX_LISTENER_WRITE_DEPTH ? `reactive-proxy-state: refused a listener write nested ${listenerGeneration + 1} deep ` + `(at most ${MAX_LISTENER_WRITE_DEPTH}). Filter event paths to stop listener writes from repeating` : `reactive-proxy-state: refused a listener write after ${MAX_LISTENER_WRITE_ROUNDS} nested rounds ` + `in one operation. Filter event paths to stop listener writes from repeating`);
+  throw refusal;
 }
-function emitListener(emit, event, queuedDelivery = delivery) {
-  const previousListener = listenerState;
+function endOperation() {
+  if (listenerGeneration >= 0 || asyncDeliveries > 0)
+    return;
+  rounds = 0;
+  const error = refusal;
+  if (error === undefined)
+    return;
+  refusal = undefined;
+  throw error;
+}
+function beginAsyncDelivery() {
+  asyncDeliveries++;
+}
+function isRefusal(error) {
+  return error === refusal && error !== undefined;
+}
+function endAsyncDelivery() {
+  asyncDeliveries--;
+  rounds = 0;
+  const error = refusal;
+  if (error === undefined)
+    return;
+  refusal = undefined;
+  console.error(error);
+}
+function emitListener(emit, event, generation) {
+  const previousGeneration = listenerGeneration;
+  const previousWrote = listenerWrote;
   const previousEffect = activeEffect;
-  if (previousEffect === null && queuedDelivery === delivery) {
-    listenerState = 1 /* BeforeWrite */;
+  listenerGeneration = generation;
+  listenerWrote = false;
+  if (previousEffect === null) {
     try {
       emit(event);
     } finally {
-      listenerState = previousListener;
-      if (delivery !== undefined && batchDepth === 0 && !flushing)
-        endDelivery(true);
+      listenerGeneration = previousGeneration;
+      listenerWrote = previousWrote;
+      if (previousGeneration < 0 && batchDepth === 0 && !flushing)
+        endOperation();
     }
     return;
   }
-  const previousDelivery = delivery;
   const previousEmittingEffect = emittingEffect;
-  delivery = queuedDelivery;
-  listenerState = 1 /* BeforeWrite */;
-  if (previousEffect !== null) {
-    emittingEffect = previousEffect;
-    setActiveEffect(null);
-  }
+  emittingEffect = previousEffect;
+  setActiveEffect(null);
   try {
     emit(event);
   } finally {
-    if (previousEffect !== null) {
-      setActiveEffect(previousEffect);
-      emittingEffect = previousEmittingEffect;
-    }
-    const current = delivery;
-    listenerState = previousListener;
-    delivery = previousDelivery ?? (batchDepth > 0 || flushing ? current : undefined);
-    if (previousDelivery !== current && batchDepth === 0 && !flushing && current?.error !== undefined)
-      throw current.error;
+    setActiveEffect(previousEffect);
+    emittingEffect = previousEmittingEffect;
+    listenerGeneration = previousGeneration;
+    listenerWrote = previousWrote;
+    if (previousGeneration < 0 && batchDepth === 0 && !flushing)
+      endOperation();
   }
 }
 
@@ -1950,7 +1959,7 @@ function dispatch(target, event) {
   const { root, paths } = target;
   if (paths.length === 1) {
     if (root.undelivered === undefined)
-      emitListener(root.emit, event);
+      emitListener(root.emit, event, listenerGeneration + 1);
     else
       deliver(root, [event]);
     return;
@@ -1986,25 +1995,37 @@ function copiesPerPath(event, paths, async) {
 }
 function deliver(root, events) {
   const emit = root.emit;
+  const generation = listenerGeneration + 1;
   const waiting = root.undelivered;
   if (waiting !== undefined) {
+    const marks = waiting.marks;
+    if (marks === undefined ? generation !== waiting.generation : generation !== marks[marks.length - 1]) {
+      (waiting.marks ??= []).push(waiting.events.length, generation);
+    }
     for (let i = 0;i < events.length; i++) {
       waiting.events.push(events[i]);
     }
     return;
   }
   if (events.length === 1) {
-    emitListener(emit, events[0]);
+    emitListener(emit, events[0], generation);
     return;
   }
-  const queue2 = root.undelivered = { events, next: 0 };
+  const queue2 = root.undelivered = { events, next: 0, generation, marks: undefined };
+  let current = generation;
+  let mark = 0;
   let failed = false;
   let failure;
   try {
     while (queue2.next < queue2.events.length) {
+      const index = queue2.next++;
+      const marks = queue2.marks;
+      if (marks !== undefined && marks[mark] === index) {
+        current = marks[mark + 1];
+        mark += 2;
+      }
       try {
-        const index = queue2.next++;
-        emitListener(emit, queue2.events[index]);
+        emitListener(emit, queue2.events[index], current);
       } catch (error) {
         if (!failed) {
           failed = true;
@@ -3929,39 +3950,40 @@ function isReactive(value) {
 }
 function createAsyncEmit(emit) {
   const queue2 = [];
-  const deliveries = [];
+  const generations = [];
   let flushScheduled = false;
   return (event) => {
-    beginDelivery();
     queue2.push(event);
-    deliveries.push(delivery);
+    generations.push(listenerGeneration);
     if (!flushScheduled) {
       flushScheduled = true;
       queueMicrotask(() => {
         let failed = false;
         let failure;
         let next = 0;
+        beginAsyncDelivery();
         try {
           while (next < queue2.length) {
             try {
               const index = next++;
-              emitListener(emit, queue2[index], deliveries[index]);
+              emitListener(emit, queue2[index], generations[index]);
             } catch (error) {
-              if (!failed) {
+              if (!failed && !isRefusal(error)) {
                 failed = true;
                 failure = error;
               }
             }
             if (next === FLUSH_CHUNK) {
               queue2.splice(0, next);
-              deliveries.splice(0, next);
+              generations.splice(0, next);
               next = 0;
             }
           }
         } finally {
           queue2.length = 0;
-          deliveries.length = 0;
+          generations.length = 0;
           flushScheduled = false;
+          endAsyncDelivery();
         }
         if (failed)
           throw failure;
@@ -3987,7 +4009,7 @@ function reactive(obj, emit, path = [], options) {
     try {
       const newValue = cloneStored(obj, undefined, 2 /* All */);
       fresh = copiedFresh;
-      emitListener(emit, { action: "replace", path: [], newValue });
+      emitListener(emit, { action: "replace", path: [], newValue }, listenerGeneration + 1);
     } catch (error) {
       if (error instanceof SnapshotLimitError)
         throw error;

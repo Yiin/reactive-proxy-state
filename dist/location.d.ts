@@ -39,10 +39,18 @@ export interface LocationRoot {
      */
     undelivered: Undelivered | undefined;
 }
-/** A root's queue: `events[next]` is the oldest event not delivered yet. */
+/**
+ * A root's queue: `events[next]` is the oldest event not delivered yet. The
+ * events of the write that started it have `generation` (see
+ * `emitListener`). Events listener writes added have the generations in
+ * `marks`, pairs of a first index and its generation, made only when a
+ * listener writes.
+ */
 interface Undelivered {
     events: StateEvent[];
     next: number;
+    generation: number;
+    marks: number[] | undefined;
 }
 export declare class Place {
     private readonly parentRef;
