@@ -59,11 +59,14 @@ const targetMap = new WeakMap<object, Map<unknown, Dep>>();
 const entryMap = new WeakMap<object, Map<unknown, Dep>>();
 
 /**
- * Dependencies a cleanup at the start of a run left without effects. The
- * run tracks most of them again; when it ends it removes the ones still
- * empty (see `releaseEmptied`), so a rerun does not remove and remake them.
+ * Dependencies a cleanup at the start of a run left without effects, the
+ * first `emptiedCount` slots. The run tracks most of them again; when it
+ * ends it removes the ones still empty (see `releaseEmptied`), so a rerun
+ * does not remove and remake them. The array keeps its length: setting it
+ * shorter after every run made a one-key rerun 40% slower.
  */
-const emptiedDeps: Dep[] = [];
+const emptiedDeps: (Dep | undefined)[] = [];
+let emptiedCount = 0;
 
 /**
  * Remove `dep` from its map when no effect reads it. A map left empty stays
@@ -76,8 +79,11 @@ function releaseDep(dep: Dep): void {
 }
 
 function releaseEmptied(from: number): void {
-  for (let i = from; i < emptiedDeps.length; i++) releaseDep(emptiedDeps[i]);
-  emptiedDeps.length = from;
+  for (let i = from; i < emptiedCount; i++) {
+    releaseDep(emptiedDeps[i]!);
+    emptiedDeps[i] = undefined;
+  }
+  emptiedCount = from;
 }
 
 /** The dependencies of `target`, or undefined when no effect reads it. */
@@ -97,14 +103,17 @@ export function dependencyCounts(target: object): { properties?: number; entries
   return { properties: targetMap.get(target)?.size, entries: entryMap.get(target)?.size };
 }
 
-/** Take `effect` out of every dependency it is in; `emptied` collects those it leaves empty. */
-function detachEffect(effect: TrackedEffect<any>, emptied: Dep[] | undefined): void {
+/**
+ * Take `effect` out of every dependency it is in. With `defer`, the ones it
+ * leaves empty go to `emptiedDeps`, else they are removed at once.
+ */
+function detachEffect(effect: TrackedEffect<any>, defer: boolean): void {
   const dependencies = effect.dependencies as Set<Dep> | undefined;
   if (dependencies === undefined || dependencies.size === 0) return;
   dependencies.forEach(dep => {
     dep.delete(effect);
     if (dep.size > 0) return;
-    if (emptied !== undefined) emptied.push(dep);
+    if (defer) emptiedDeps[emptiedCount++] = dep;
     else releaseDep(dep);
   });
   dependencies.clear();
@@ -116,7 +125,7 @@ function detachEffect(effect: TrackedEffect<any>, emptied: Dep[] | undefined): v
  * this is crucial to prevent memory leaks and unnecessary updates when an effect is stopped or re-run.
  */
 export function cleanupEffect(effect: TrackedEffect<any>) {
-  detachEffect(effect, undefined);
+  detachEffect(effect, false);
 }
 
 /**
@@ -542,14 +551,14 @@ export function watchEffect<T>(
     }
 
     const previousEffect = activeEffect;
-    const emptiedFrom = emptiedDeps.length;
+    const emptiedFrom = emptiedCount;
     try {
       // Run cleanup functions before re-running the effect
       runCleanupFunctions(effectFn);
 
       // clean up dependencies from the previous run; the ones this run
       // does not read again are removed when it ends
-      detachEffect(effectFn, emptiedDeps);
+      detachEffect(effectFn, true);
       setActiveEffect(effectFn); // set this effect as the one currently tracking
 
       // Create the onCleanup function that the user callback can use
