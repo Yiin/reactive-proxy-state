@@ -27,6 +27,11 @@ export function verifyReview303(lib) {
         else if (kind === "map") value.set(number, number * 10);
         else value.add(number * 10);
       }
+      if (kind === "map" && method === "keys") {
+        assert.deepEqual(steps, [{ value: 1, done: false }]);
+        value.set(4, 40);
+        value.set(5, 50);
+      }
       assert.equal(steps.length, 3, `${kind} ${String(method)}`);
       assert.equal(steps[2].done, false);
       stop();

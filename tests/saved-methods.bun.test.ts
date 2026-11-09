@@ -229,9 +229,14 @@ function savedMatrix(
           });
           const raw = toRaw(state.collection);
           const entry = Object.hasOwn(entryReads[kind], methodName) ? entryReads[kind][methodName] : undefined;
-          const before = entry === undefined ? undefined : [raw.has(entry), raw.get?.(entry)];
+          const mapKeys = kind === "Map" && methodName === "keys";
+          const readDependency = () => mapKeys ? [...raw.keys()]
+            : entry === undefined ? undefined
+            : methodName === "has" ? raw.has(entry)
+            : [raw.has(entry), raw.get?.(entry)];
+          const before = JSON.stringify(readDependency());
           write(state.collection);
-          const changed = entry === undefined || JSON.stringify(before) !== JSON.stringify([raw.has(entry), raw.get?.(entry)]);
+          const changed = (entry === undefined && !mapKeys) || before !== JSON.stringify(readDependency());
           expect(runs).toBe(changed ? 2 : 1);
           // an iterator made before the effect is used up after the first run
           if (methodName !== "an iterator made before the effect") {

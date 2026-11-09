@@ -140,15 +140,21 @@ for (const collection of ["array", "map", "set"] as const) {
         else state.set.add(n * 10);
       };
       change(2); change(3);
+      const mapKeys = collection === "map" && method === "keys";
+      if (mapKeys) {
+        expect(steps).toEqual([{ value: 1, done: false }]);
+        state.map.set(4, 40);
+        state.map.set(5, 50);
+      }
       const values = collection === "set" || method === "keys" ? [1, 2, 3] : [1, 20, 30];
       if (collection === "array" && method === "keys") values.splice(0, 3, 0, 1, 2);
       const pairs = method === "entries" || (method === Symbol.iterator && collection === "map");
       expect(steps).toEqual(values.map((value, i) => ({ value: pairs ? [collection === "array" ? i : collection === "map" ? i + 1 : value, value] : value, done: false })));
       while (!iterator.next().done) { /* consume the live iterator */ }
-      change(4);
+      change(mapKeys ? 6 : 4);
       expect(steps.at(-1)).toEqual({ value: undefined, done: true });
       const count = steps.length;
-      change(5);
+      change(mapKeys ? 7 : 5);
       expect(steps.length).toBe(count);
       stop();
     });

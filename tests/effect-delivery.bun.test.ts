@@ -144,9 +144,10 @@ describe("a listener that writes while it receives an event", () => {
       if (async) await Promise.resolve();
       // The listener's writes are nested in the write it receives: the effect
       // runs once, when that write ends. An async root delivers after the
-      // write, so each write the listener makes runs the effect
+      // write, so each write the listener makes runs the effect. Updating
+      // a held Map value does not rerun this keys-only reader.
       expect(seen).toEqual(
-        async ? ["a|1|3", "a|1|3", "a,b|1|3", "a,b|1,5|3", "a,b|1,5|4"] : ["a|1|3", "a,b|1,5|4"]
+        async ? ["a|1|3", "a,b|1|3", "a,b|1,5|3", "a,b|1,5|4"] : ["a|1|3", "a,b|1,5|4"]
       );
       expect(sync.events).toEqual(["map-set:map", "map-set:map", "set-add:set", "array-push:list"]);
       expect(treeText(sync.remote)).toBe(treeText(toRaw(sync.state)));
