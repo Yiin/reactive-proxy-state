@@ -1,4 +1,4 @@
-import { endDelivery } from "./listener";
+import { delivery, emittingEffect, endDelivery } from "./listener";
 import { arrayIndex } from './utils';
 
 type EffectCallback<T = any> = (onCleanup: (cleanupFn: () => void) => void) => T;
@@ -242,10 +242,9 @@ export function trackKeys(target: object): void {
 const queue: TrackedEffect<any>[] = [];
 // Debug hooks are user code too. Run them after invalidation and event delivery.
 const triggerNotifications: (() => void)[] = [];
-let flushing = false;
+export let flushing = false;
 // open writes and trigger calls: effects run when the outermost one ends
-let batchDepth = 0;
-export let writeDepth = 0;
+export let batchDepth = 0;
 let flushCount = 0;
 
 /**
@@ -341,7 +340,6 @@ function endBatch(): void {
  * event before the event that set it off. @internal
  */
 export function beginWrite(): void {
-  writeDepth++;
   startBatch();
 }
 
@@ -350,7 +348,7 @@ export function endWrite(): void {
   try {
     endBatch();
   } finally {
-    if (--writeDepth === 0) endDelivery(true);
+    if (delivery !== undefined) endDelivery(true);
   }
 }
 
@@ -365,7 +363,7 @@ function queueEffects(dep: Dep | undefined, target: object, key: unknown): void 
   dep.forEach(effect => {
     // avoid queuing the effect if it's the one currently running (prevents infinite loops)
     // also ensure the effect hasn't been stopped
-    if (effect === activeEffect || !effect.active) return;
+    if (effect === (activeEffect ?? emittingEffect) || !effect.active) return;
     // Trigger the onTrigger debug hook if provided
     const onTrigger = effect.options?.onTrigger;
     if (onTrigger) {

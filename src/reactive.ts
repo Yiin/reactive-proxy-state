@@ -1,4 +1,4 @@
-import { delivery, emitListener, type Delivery } from "./listener";
+import { beginDelivery, delivery, emitListener, type Delivery } from "./listener";
 import { EmitFunction, Path, ReactiveOptions, StateEvent } from "./types";
 import {
   Named,
@@ -64,6 +64,7 @@ function createAsyncEmit(emit: EmitFunction): EmitFunction {
   let flushScheduled = false
 
   return (event: StateEvent) => {
+    beginDelivery()
     queue.push(event)
     deliveries.push(delivery)
     if (!flushScheduled) {

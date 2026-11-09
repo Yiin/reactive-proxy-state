@@ -200,3 +200,17 @@ test("initial listener reads stay outside the effect that creates the root", () 
   expect(runs).toBe(1);
   stop();
 });
+
+test("pausing listener tracking preserves the writing effect's self-trigger suppression", () => {
+  let armed = false;
+  const state = reactive({ n: 0, output: 0 }, event => {
+    if (armed && event.path[0] === "output") state.n++;
+  });
+  let runs = 0;
+  const stop = watchEffect(() => { runs++; state.output = state.n; });
+  armed = true;
+  state.n = 1;
+  expect(runs).toBe(2);
+  expect(state.n).toBe(2);
+  stop();
+});

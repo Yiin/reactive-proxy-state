@@ -1303,7 +1303,6 @@ var queue = [];
 var triggerNotifications = [];
 var flushing = false;
 var batchDepth = 0;
-var writeDepth = 0;
 var flushCount = 0;
 var MAX_FLUSH_RUNS = 1e5;
 function flushEffects() {
@@ -1382,14 +1381,13 @@ function endBatch() {
     flushEffects();
 }
 function beginWrite() {
-  writeDepth++;
   startBatch();
 }
 function endWrite() {
   try {
     endBatch();
   } finally {
-    if (--writeDepth === 0)
+    if (delivery !== undefined)
       endDelivery(true);
   }
 }
@@ -1397,7 +1395,7 @@ function queueEffects(dep, target, key) {
   if (dep === undefined)
     return;
   dep.forEach((effect) => {
-    if (effect === activeEffect || !effect.active)
+    if (effect === (activeEffect ?? emittingEffect) || !effect.active)
       return;
     const onTrigger = effect.options?.onTrigger;
     if (onTrigger) {
@@ -1605,6 +1603,7 @@ function watchEffect(effectCallback, options = {}) {
 
 // src/listener.ts
 var delivery;
+var emittingEffect = null;
 var inListener = false;
 var MAX_LISTENER_WRITE_ROUNDS = 100;
 function beginDelivery() {
@@ -1614,7 +1613,7 @@ function beginDelivery() {
   return true;
 }
 function endDelivery(ownsDelivery) {
-  if (!ownsDelivery || writeDepth > 0 || inListener)
+  if (!ownsDelivery || (batchDepth > 0 || flushing) || inListener)
     return;
   const error = delivery?.error;
   delivery = undefined;
@@ -1624,7 +1623,7 @@ function endDelivery(ownsDelivery) {
 function checkListenerWrite() {
   if (!inListener)
     return;
-  const current = delivery;
+  const current = delivery ??= { writes: 0, error: undefined };
   if (current.writes < MAX_LISTENER_WRITE_ROUNDS) {
     current.writes++;
     return;
@@ -1636,19 +1635,24 @@ function emitListener(emit, event, queuedDelivery = delivery) {
   const previousDelivery = delivery;
   const previousListener = inListener;
   const previousEffect = activeEffect;
-  const current = queuedDelivery ?? { writes: 0, error: undefined };
-  delivery = current;
+  const previousEmittingEffect = emittingEffect;
+  delivery = queuedDelivery;
   inListener = true;
-  if (previousEffect !== null)
+  if (previousEffect !== null) {
+    emittingEffect = previousEffect;
     setActiveEffect(null);
+  }
   try {
     emit(event);
   } finally {
-    if (previousEffect !== null)
+    if (previousEffect !== null) {
       setActiveEffect(previousEffect);
+      emittingEffect = previousEmittingEffect;
+    }
+    const current = delivery;
     inListener = previousListener;
-    delivery = previousDelivery ?? (writeDepth > 0 ? current : undefined);
-    if (previousDelivery !== current && writeDepth === 0 && current.error !== undefined)
+    delivery = previousDelivery ?? (batchDepth > 0 || flushing ? current : undefined);
+    if (previousDelivery !== current && batchDepth === 0 && !flushing && current?.error !== undefined)
       throw current.error;
   }
 }
@@ -3912,6 +3916,7 @@ function createAsyncEmit(emit) {
   const deliveries = [];
   let flushScheduled = false;
   return (event) => {
+    beginDelivery();
     queue2.push(event);
     deliveries.push(delivery);
     if (!flushScheduled) {
@@ -5322,7 +5327,6 @@ function deepToRaw(input, seen = new WeakMap) {
   return source;
 }
 export {
-  writeDepth,
   watchEffect,
   watch,
   updateState,
@@ -5353,6 +5357,7 @@ export {
   isReactive,
   isComputed,
   getProxyStats,
+  flushing,
   endWrite,
   dependencyCounts,
   deepToRaw,
@@ -5364,6 +5369,7 @@ export {
   computed,
   cleanupEffect,
   beginWrite,
+  batchDepth,
   activeEffect,
   UnsupportedStateError,
   SnapshotLimitError,

@@ -1,5 +1,5 @@
 import type { EmitFunction, StateEvent } from "./types";
-import { activeEffect, setActiveEffect, writeDepth } from "./watch-effect";
+import { activeEffect, batchDepth, flushing, setActiveEffect } from "./watch-effect";
 
 /** Shared by every event descended from one caller write, including async events. */
 export interface Delivery {
@@ -8,6 +8,8 @@ export interface Delivery {
 }
 
 export let delivery: Delivery | undefined;
+/** Tracking is paused, but writes still belong to the effect that called the listener. */
+export let emittingEffect: typeof activeEffect = null;
 let inListener = false;
 const MAX_LISTENER_WRITE_ROUNDS = 100;
 
@@ -19,7 +21,7 @@ export function beginDelivery(): boolean {
 }
 
 export function endDelivery(ownsDelivery: boolean): void {
-  if (!ownsDelivery || writeDepth > 0 || inListener) return;
+  if (!ownsDelivery || (batchDepth > 0 || flushing) || inListener) return;
   const error = delivery?.error;
   delivery = undefined;
   if (error !== undefined) throw error;
@@ -28,7 +30,7 @@ export function endDelivery(ownsDelivery: boolean): void {
 /** Each listener-caused mutation uses one round, before it can change state. */
 export function checkListenerWrite(): void {
   if (!inListener) return;
-  const current = delivery!;
+  const current = delivery ??= { writes: 0, error: undefined };
   if (current.writes < MAX_LISTENER_WRITE_ROUNDS) {
     current.writes++;
     return;
@@ -45,16 +47,23 @@ export function emitListener(emit: EmitFunction, event: StateEvent, queuedDelive
   const previousDelivery = delivery;
   const previousListener = inListener;
   const previousEffect = activeEffect;
-  const current = queuedDelivery ?? { writes: 0, error: undefined };
-  delivery = current;
+  const previousEmittingEffect = emittingEffect;
+  delivery = queuedDelivery;
   inListener = true;
-  if (previousEffect !== null) setActiveEffect(null);
+  if (previousEffect !== null) {
+    emittingEffect = previousEffect;
+    setActiveEffect(null);
+  }
   try {
     emit(event);
   } finally {
-    if (previousEffect !== null) setActiveEffect(previousEffect);
+    if (previousEffect !== null) {
+      setActiveEffect(previousEffect);
+      emittingEffect = previousEmittingEffect;
+    }
+    const current = delivery;
     inListener = previousListener;
-    delivery = previousDelivery ?? (writeDepth > 0 ? current : undefined);
-    if (previousDelivery !== current && writeDepth === 0 && current.error !== undefined) throw current.error;
+    delivery = previousDelivery ?? ((batchDepth > 0 || flushing) ? current : undefined);
+    if (previousDelivery !== current && batchDepth === 0 && !flushing && current?.error !== undefined) throw current.error;
   }
 }
