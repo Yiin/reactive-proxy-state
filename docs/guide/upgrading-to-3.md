@@ -75,3 +75,25 @@ What to check when you upgrade:
 - **Effects that read one key of an object also rerun when a key is added to or deleted from it.**
 - **A loop of effects that each write a new value throws a `RangeError` after 100,000 runs of one effect in one write.** 3.0.2 ran out of stack after about 7,000 rounds under Node.
 - **`onTrack` and `onTrigger` give the entry itself as `key`** for `get` and `has` of a Map or Set (3.0.2 gave a string). Their `key` type is `unknown`.
+
+## 3.0.4: listeners see fresh state and insertions send events
+
+Each write now invalidates computed values and cached array methods before it calls listeners.
+A listener can write again. That nested write delivers its events, then runs waiting effects in source order.
+An effect already waiting runs once. A later write can queue it again after it runs.
+Array moves determine changed indexes before listeners can change the array again.
+
+Saved array, Map, and Set iterators track each step inside an effect.
+This includes array `keys()` and the first step that reaches the end.
+An exhausted iterator stays exhausted. Its next run removes its dependencies.
+
+Dependency cleanup uses weak owner links.
+Keeping one effect handle no longer keeps discarded state alive through other effects on that state.
+
+Two writes now send events that older versions dropped:
+
+- Assigning `undefined` to a missing object key creates that key and sends a `set` event.
+- Map `getOrInsert` and `getOrInsertComputed` send `map-set` when they insert a key.
+  Existing keys keep their values. Returned objects are reactive.
+
+These events are intended changes for replicas. Other recorded write events match 3.0.3.

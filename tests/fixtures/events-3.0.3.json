@@ -735,6 +735,30 @@
   "action=\"set\" newValue=3 oldValue=2 path=[\"alias\",\"second\",\"c\"]#0",
   "action=\"set\" newValue=3 oldValue=2 path=[\"obj\",\"list\",\"0\",\"c\"]#0"
  ],
+ "sync map: getOrInsert new": [
+  "action=\"replace\" newValue={\"map\":Map{\"a\"=>1,\"obj\"=>{\"id\":1}#2,{\"key\":0}#3=>\"h\",0=>\"zero\"}#1}#0 path=[]#4"
+ ],
+ "sync map: getOrInsert undefined": [
+  "action=\"replace\" newValue={\"map\":Map{\"a\"=>1,\"obj\"=>{\"id\":1}#2,{\"key\":0}#3=>\"h\",0=>\"zero\"}#1}#0 path=[]#4"
+ ],
+ "sync map: getOrInsert existing": [
+  "action=\"replace\" newValue={\"map\":Map{\"a\"=>1,\"obj\"=>{\"id\":1}#2,{\"key\":0}#3=>\"h\",0=>\"zero\"}#1}#0 path=[]#4"
+ ],
+ "sync map: getOrInsert object": [
+  "action=\"replace\" newValue={\"map\":Map{\"a\"=>1,\"obj\"=>{\"id\":1}#2,{\"key\":0}#3=>\"h\",0=>\"zero\"}#1}#0 path=[]#4"
+ ],
+ "sync map: getOrInsertComputed new": [
+  "action=\"replace\" newValue={\"map\":Map{\"a\"=>1,\"obj\"=>{\"id\":1}#2,{\"key\":0}#3=>\"h\",0=>\"zero\"}#1}#0 path=[]#4"
+ ],
+ "sync map: getOrInsertComputed undefined": [
+  "action=\"replace\" newValue={\"map\":Map{\"a\"=>1,\"obj\"=>{\"id\":1}#2,{\"key\":0}#3=>\"h\",0=>\"zero\"}#1}#0 path=[]#4"
+ ],
+ "sync map: getOrInsertComputed existing": [
+  "action=\"replace\" newValue={\"map\":Map{\"a\"=>1,\"obj\"=>{\"id\":1}#2,{\"key\":0}#3=>\"h\",0=>\"zero\"}#1}#0 path=[]#4"
+ ],
+ "sync map: getOrInsertComputed object": [
+  "action=\"replace\" newValue={\"map\":Map{\"a\"=>1,\"obj\"=>{\"id\":1}#2,{\"key\":0}#3=>\"h\",0=>\"zero\"}#1}#0 path=[]#4"
+ ],
  "sync map: set of a held key": [
   "action=\"replace\" newValue={\"map\":Map{\"a\"=>1,\"obj\"=>{\"id\":1}#2,{\"key\":0}#3=>\"h\",0=>\"zero\"}#1}#0 path=[]#4",
   "action=\"map-set\" key=\"a\" newValue=5 oldValue=1 path=[\"map\"]#0"
@@ -1586,6 +1610,30 @@
   "action=\"set\" newValue=3 oldValue=2 path=[\"alias\",\"first\",\"c\"]#0",
   "action=\"set\" newValue=3 oldValue=2 path=[\"alias\",\"second\",\"c\"]#0",
   "action=\"set\" newValue=3 oldValue=2 path=[\"obj\",\"list\",\"0\",\"c\"]#0"
+ ],
+ "async map: getOrInsert new": [
+  "action=\"replace\" newValue={\"map\":Map{\"a\"=>1,\"obj\"=>{\"id\":1}#2,{\"key\":0}#3=>\"h\",0=>\"zero\"}#1}#0 path=[]#4"
+ ],
+ "async map: getOrInsert undefined": [
+  "action=\"replace\" newValue={\"map\":Map{\"a\"=>1,\"obj\"=>{\"id\":1}#2,{\"key\":0}#3=>\"h\",0=>\"zero\"}#1}#0 path=[]#4"
+ ],
+ "async map: getOrInsert existing": [
+  "action=\"replace\" newValue={\"map\":Map{\"a\"=>1,\"obj\"=>{\"id\":1}#2,{\"key\":0}#3=>\"h\",0=>\"zero\"}#1}#0 path=[]#4"
+ ],
+ "async map: getOrInsert object": [
+  "action=\"replace\" newValue={\"map\":Map{\"a\"=>1,\"obj\"=>{\"id\":1}#2,{\"key\":0}#3=>\"h\",0=>\"zero\"}#1}#0 path=[]#4"
+ ],
+ "async map: getOrInsertComputed new": [
+  "action=\"replace\" newValue={\"map\":Map{\"a\"=>1,\"obj\"=>{\"id\":1}#2,{\"key\":0}#3=>\"h\",0=>\"zero\"}#1}#0 path=[]#4"
+ ],
+ "async map: getOrInsertComputed undefined": [
+  "action=\"replace\" newValue={\"map\":Map{\"a\"=>1,\"obj\"=>{\"id\":1}#2,{\"key\":0}#3=>\"h\",0=>\"zero\"}#1}#0 path=[]#4"
+ ],
+ "async map: getOrInsertComputed existing": [
+  "action=\"replace\" newValue={\"map\":Map{\"a\"=>1,\"obj\"=>{\"id\":1}#2,{\"key\":0}#3=>\"h\",0=>\"zero\"}#1}#0 path=[]#4"
+ ],
+ "async map: getOrInsertComputed object": [
+  "action=\"replace\" newValue={\"map\":Map{\"a\"=>1,\"obj\"=>{\"id\":1}#2,{\"key\":0}#3=>\"h\",0=>\"zero\"}#1}#0 path=[]#4"
  ],
  "async map: set of a held key": [
   "action=\"replace\" newValue={\"map\":Map{\"a\"=>1,\"obj\"=>{\"id\":1}#2,{\"key\":0}#3=>\"h\",0=>\"zero\"}#1}#0 path=[]#4",

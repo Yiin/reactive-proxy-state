@@ -1,8 +1,8 @@
 /**
  * Records the events of tests/event-stream.ops.mjs from a bundle.
  * Run with: node tests/event-stream.record.mjs <bundle> <output.json>
- * tests/fixtures/events-3.0.2.json came from the dist/index.js of the npm
- * tarball of 3.0.2 (`npm pack @yiin/reactive-proxy-state@3.0.2`, integrity
+ * tests/fixtures/events-3.0.3.json came from the dist/index.js of the npm
+ * tarball of 3.0.3 (`npm pack @yiin/reactive-proxy-state@3.0.3`, integrity
  * checked against `npm view ... dist.integrity`).
  */
 import { writeFileSync } from "node:fs";
