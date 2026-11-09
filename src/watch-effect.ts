@@ -88,6 +88,15 @@ function depsOf(maps: WeakMap<object, Map<unknown, Dep>>, target: object): Map<u
   return undefined;
 }
 
+/**
+ * The dependency sets of `target`, by kind, for tests: undefined where it
+ * has no map.
+ * @internal
+ */
+export function dependencyCounts(target: object): { properties?: number; entries?: number } {
+  return { properties: targetMap.get(target)?.size, entries: entryMap.get(target)?.size };
+}
+
 /** Take `effect` out of every dependency it is in; `emptied` collects those it leaves empty. */
 function detachEffect(effect: TrackedEffect<any>, emptied: Dep[] | undefined): void {
   const dependencies = effect.dependencies as Set<Dep> | undefined;
@@ -417,29 +426,40 @@ export function triggerSplice(
   const moved = removed.length - inserted;
   // a change that keeps the count moves nothing after it
   const end = moved === 0 ? removedEnd : Math.max(oldLength, newLength);
+  const same = (index: number): boolean => {
+    let had: boolean;
+    let held: unknown;
+    if (index < removedEnd) {
+      had = index - start in removed;
+      held = removed[index - start];
+    } else if (index < oldLength) {
+      // the item now at `index - moved` was at `index`
+      const now = index - moved;
+      had = now in target;
+      held = target[now];
+    } else {
+      had = false;
+      held = undefined;
+    }
+    return Object.is(held, target[index]) && had === index in target;
+  };
+  // items replaced by the same items change nothing
+  if (moved === 0 && unchanged(start, end, same)) return;
   startBatch();
   try {
-    queueIndexes(depsMap, target, start, end, index => {
-      let had: boolean;
-      let held: unknown;
-      if (index < removedEnd) {
-        had = index - start in removed;
-        held = removed[index - start];
-      } else if (index < oldLength) {
-        // the item now at `index - moved` was at `index`
-        const now = index - moved;
-        had = now in target;
-        held = target[now];
-      } else {
-        had = false;
-        held = undefined;
-      }
-      return Object.is(held, target[index]) && had === index in target;
-    });
+    queueIndexes(depsMap, target, start, end, same);
     queueWhole(depsMap, target, oldLength !== newLength);
   } finally {
     endBatch();
   }
+}
+
+/** Does `same` hold for every index from `from` up to `to`? */
+function unchanged(from: number, to: number, same: (index: number) => boolean): boolean {
+  for (let index = from; index < to; index++) {
+    if (!same(index)) return false;
+  }
+  return true;
 }
 
 /**

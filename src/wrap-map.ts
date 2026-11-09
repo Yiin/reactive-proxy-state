@@ -101,8 +101,9 @@ export function wrapMap<K, V>(map: Map<K, V>, node: LocationNode): Map<K, V> {
             if (event !== undefined) dispatch(located!, event);
           } finally {
             // the entry and every reader of all entries; a new key changes
-            // the size. Also when a listener threw
-            triggerCollection(target, key, oldSize !== newSize);
+            // the size. Also when a listener threw. NaN in place of NaN is
+            // sent, as until now, but changes nothing an effect reads
+            if (!existed || oldValue === oldValue || value === value) triggerCollection(target, key, oldSize !== newSize);
 
             if (isObject(oldValue)) evictDeep(oldValue);
           }

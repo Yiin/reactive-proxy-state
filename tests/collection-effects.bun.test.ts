@@ -83,6 +83,33 @@ function show(read: () => unknown): string {
   return JSON.stringify(read()) ?? "undefined";
 }
 
+/** The entries of a raw Map or Set: [key, value, ...] or [value, ...], in order. */
+const entriesOf = (collection: any): unknown[] =>
+  collection instanceof Map ? [...collection].flat() : [...collection];
+
+/** Is the entry `key` the same in `before` and `after`: held or not, and the same value (as `Object.is` tells)? */
+const sameEntry = (before: any, after: any, key: unknown) =>
+  before.has(key) === after.has(key) && (!(before instanceof Map) || Object.is(before.get(key), after.get(key)));
+
+/**
+ * Did what a reader read change from `before` to `after` (raw copies)?
+ * The readers not named here read every entry, in order.
+ */
+const changedFor: Record<string, (before: any, after: any) => boolean> = {
+  get: (before, after) => !sameEntry(before, after, "a") || !sameEntry(before, after, "z"),
+  "has (Map)": (before, after) => !sameEntry(before, after, "a") || !sameEntry(before, after, "z"),
+  "has (Set)": (before, after) => !sameEntry(before, after, 1) || !sameEntry(before, after, 9),
+  size: (before, after) => before.size !== after.size,
+};
+
+function changedAll(before: any, after: any): boolean {
+  const left = entriesOf(before);
+  const right = entriesOf(after);
+  return left.length !== right.length || left.some((value, index) => !Object.is(value, right[index]));
+}
+
+const copyOf = (collection: any) => (collection instanceof Map ? new Map(collection) : new Set(collection));
+
 function matrix(kind: string, make: () => object, readers: Record<string, Read>, writes: Record<string, Write>) {
   describe(`an effect over a ${kind} reruns once after each write that changes what it read`, () => {
     for (const [writeName, write] of Object.entries(writes)) {
@@ -99,13 +126,17 @@ function matrix(kind: string, make: () => object, readers: Record<string, Read>,
                 runs++;
                 seen = show(() => read(collection()));
               });
-              const initial = seen;
+              const before = copyOf(toRaw(collection()));
               write(collection());
               stop();
+              const after = copyOf(toRaw(collection()));
               const fresh = show(() => read(collection()));
               expect({ placement: placementName, seen }).toEqual({ placement: placementName, seen: fresh });
+              // once when what it read changed, else not at all
               const reruns = runs - 1;
-              const expected = fresh === initial ? Math.min(reruns, 1) : 1;
+              const name = readerName === "has" ? `has (${kind})` : readerName;
+              const changed = Object.hasOwn(changedFor, name) ? changedFor[name] : changedAll;
+              const expected = changed(before, after) ? 1 : 0;
               expect({ placement: placementName, reruns }).toEqual({ placement: placementName, reruns: expected });
             }
           });
@@ -121,10 +152,10 @@ function matrix(kind: string, make: () => object, readers: Record<string, Read>,
           runs++;
           for (const read of Object.values(readers)) read(collection());
         });
-        const before = show(() => Object.values(readers).map((read) => read(collection())));
+        const before = copyOf(toRaw(collection()));
         write(collection());
-        const after = show(() => Object.values(readers).map((read) => read(collection())));
-        expect(runs).toBe(before === after ? Math.min(runs, 2) : 2);
+        const after = copyOf(toRaw(collection()));
+        expect(runs).toBe(changedAll(before, after) ? 2 : 1);
       });
     }
   });

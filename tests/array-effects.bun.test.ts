@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { computed, reactive, watch, watchEffect } from "../src/index";
+import { computed, reactive, toRaw, watch, watchEffect } from "../src/index";
 
 /**
  * An effect that reads an array reruns after every write that changes what
@@ -74,6 +74,24 @@ const readers: Record<string, (list: Item[], probe: Probe) => unknown> = {
   "JSON.stringify": (list) => JSON.stringify(list),
 };
 
+/** Is index `index` the same in `before` and `after`: the same value, as `Object.is` tells, and the same hole or not? */
+const sameAt = (before: readonly unknown[], after: readonly unknown[], index: number) =>
+  Object.is(before[index], after[index]) && index in before === index in after;
+
+/**
+ * Did what a reader read change from `before` to `after` (raw copies)? The
+ * readers not named here read all items and the length, so every write
+ * below changes what they read.
+ */
+const changedFor: Record<string, (before: readonly unknown[], after: readonly unknown[]) => boolean> = {
+  length: (before, after) => before.length !== after.length,
+  "index reads": (before, after) => [0, 2, 3].some((index) => !sameAt(before, after, index)),
+};
+
+const changedAll = (before: readonly unknown[], after: readonly unknown[]) =>
+  before.length !== after.length || before.some((_, index) => !sameAt(before, after, index)) ||
+  after.some((_, index) => !sameAt(before, after, index));
+
 /** Every kind of write to an array: of an index, of the length, and by a method. */
 const writes: Record<string, (list: Item[], nine: Item) => unknown> = {
   "index set": (list, nine) => (list[0] = nine),
@@ -140,14 +158,16 @@ describe("an effect over an array reruns once after each write that changes what
               runs++;
               seen = show(() => read(list(), probe));
             });
-            const initial = seen;
+            const before = toRaw(list()).slice();
             write(list(), probe.nine);
             stop();
+            const after = toRaw(list()).slice();
             const fresh = show(() => read(list(), probe));
             expect({ placement: placementName, seen }).toEqual({ placement: placementName, seen: fresh });
-            // a reader of a value that did not change may rerun, never twice
+            // once when what it read changed, else not at all
             const reruns = runs - 1;
-            const expected = fresh === initial ? Math.min(reruns, 1) : 1;
+            const changed = Object.hasOwn(changedFor, readerName) ? changedFor[readerName] : changedAll;
+            const expected = changed(before, after) ? 1 : 0;
             expect({ placement: placementName, reruns }).toEqual({ placement: placementName, reruns: expected });
           }
         });

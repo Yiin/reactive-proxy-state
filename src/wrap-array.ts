@@ -230,7 +230,9 @@ class ArrayProxyIterator {
       const index = this.index;
       if (index < target.length) {
         this.index = index + 1;
-        if (activeEffect !== null) track(target, String(index));
+        // a step reads the items: an iterator made before an effect and
+        // stepped in it tracks there
+        trackIteration(target);
         const value = target[index];
         const item = isObject(value) ? wrapChild(value, this.node, index) : value;
         return { value: this.entries ? [index, item] : item, done: false };
@@ -586,6 +588,8 @@ export function wrapArray<T extends any[]>(arr: T, node: LocationNode): T {
       // otherwise growing into a brand-new hole with newValue: undefined would be
       // mistaken for a no-op and silently dropped.
       if (oldValue === value && Reflect.has(target, prop)) return true;
+      // NaN in place of NaN is sent, as until now, but changes nothing an effect reads
+      const sameNaN = oldValue !== oldValue && value !== value && Reflect.has(target, prop);
       if (
         isObject(oldValue) &&
         isObject(value) &&
@@ -664,7 +668,9 @@ export function wrapArray<T extends any[]>(arr: T, node: LocationNode): T {
           }
           if (truncated !== undefined) evictRemoved(truncated);
           const newLength = target.length;
-          if (index >= 0) {
+          if (sameNaN) {
+            // nothing to trigger
+          } else if (index >= 0) {
             // a write past the end makes the array longer
             triggerArray(target, index, index + 1, newLength !== oldLength);
           } else if (prop === "length") {

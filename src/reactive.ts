@@ -288,7 +288,8 @@ function wrapObject<T extends object>(obj: T, node: LocationNode, options?: Reac
           // notify effects watching this property, also when a listener
           // threw; a new key reruns every effect that read the object
           if (!had && hasOwn.call(target, prop)) triggerKeyChange(target);
-          else trigger(target, prop);
+          // NaN in place of NaN is sent, as until now, but changes nothing an effect reads
+          else if (oldValue === oldValue || value === value) trigger(target, prop);
 
           // Evict the old object tree from proxy caches so GC can collect
           // stale proxies and their methodCache closures. A part of it that
