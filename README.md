@@ -277,7 +277,7 @@ An effect reruns once after each write that changes what it read. An effect that
 
 A key added to or deleted from a plain object reruns every effect that read a key of that object, so `JSON.stringify`, spread, `Object.entries`, `Object.values` and a deep `watch` follow it. An effect that read only `a` of that object reruns too.
 
-A write marks every `computed` it changes as stale, down a chain of computed values, before listeners or effects run, so both read fresh computed values. Effects run in the order they were triggered, each once per write: an effect that waits to run is not queued again. An effect that throws does not stop the others; the write throws the first error after they ran. Effects that keep writing new values to each other throw a `RangeError` after one of them ran 100,000 times in one write.
+A write marks every `computed` it changes as stale, down a chain of computed values, before listeners or effects run, so both read fresh computed values. Effects run in the order they were triggered, each once per write: an effect that waits to run is not queued again. A write that a listener makes while it receives an event belongs to that write, so effects run when the outermost write ends, after the listener returns. An effect that throws does not stop the others; the write throws the first error after they ran. Effects that keep writing new values to each other throw a `RangeError` after one of them ran 100,000 times in one write.
 
 Some reads are not tracked:
 

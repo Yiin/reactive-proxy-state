@@ -23,7 +23,7 @@ function watchEffect<T>(
 
 ## When effects run
 
-A write runs the effects that read what it changed after it marked every computed value it changed as stale, so an effect never reads a stale computed value. Effects run in the order they were triggered, each once per write: an effect that waits to run is not queued again, and a write that an effect makes queues effects that already ran. An effect never triggers itself. An effect that throws does not stop the others; the write throws the first error after they ran. Effects that keep writing new values to each other throw a `RangeError` after one of them ran 100,000 times in one write.
+A write runs the effects that read what it changed after it marked every computed value it changed as stale, so an effect never reads a stale computed value. Effects run in the order they were triggered, each once per write: an effect that waits to run is not queued again, and a write that an effect makes queues effects that already ran. An effect never triggers itself. A write that a listener makes while it receives an event belongs to that write: its effects run when the outermost write ends, after the listener returns, so a replica gets the event before the events of the effects it set off. An effect that throws does not stop the others; the write throws the first error after they ran. Effects that keep writing new values to each other throw a `RangeError` after one of them ran 100,000 times in one write.
 
 ## Return Value
 

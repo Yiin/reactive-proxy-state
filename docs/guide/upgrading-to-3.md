@@ -99,3 +99,21 @@ Two writes now send events that older versions dropped:
   Existing keys keep their values. Returned objects are reactive.
 
 These events are intended changes for replicas. Other recorded write events match 3.0.3.
+
+## 3.0.5: replicas stay equal when a listener writes
+
+A listener that writes state while it receives an event, for example a version stamp before it forwards the event, now keeps its replica equal to the source:
+
+- **Effects run when the outermost write ends.** A write that a listener makes belongs to the write whose event it receives. In 3.0.4 that nested write ran every waiting effect before it returned, including the effects of the outer write, so their events reached the replica before the event that set them off, and an effect error threw out of the listener before it forwarded. Computed values are still marked stale before listeners run.
+- **A listener's write waits for the events still being delivered.** While a write delivers several events (the other places of an alias, the new indexes of a longer `length`), a write a listener makes goes after them, and the delivery sends it after the listener returns. 3.0.4 and earlier sent the waiting events from inside the listener's write, so a listener that had not forwarded its event yet sent later writes to its replica first.
+- **Writing an inherited object value adds the key.** `state.o.obj = { k: 1 }`, where `o` inherits an equal `obj`, sends a `set` event and makes `obj` an own key, as an inherited primitive did in 3.0.4.
+- **Map proxies have `getOrInsert` and `getOrInsertComputed` only where the Map has them.**
+
+Events of single writes are the same as in 3.0.4. A listener that writes gets the events 3.0.3 sent, except in the two cases above where 3.0.3 sent the effect's or the later write's event first.
+
+What to check when you upgrade:
+
+- **A listener no longer sees an effect's result right after its own write.** It sees it after the write it received returns. 3.0.3 ran the effects of the listener's write inside the listener.
+- **A listener that catches errors of its own writes.** A listener's write no longer throws an effect's error: the outer write throws it after its effects ran. While several events are delivered, the listener's write throws no listener's error either; the outer write throws the first one after every event was delivered.
+- **A mute scope around a listener's write** drops that write's events only when nothing waits. Move the write out of the listener (`queueMicrotask`) to mute it every time.
+
