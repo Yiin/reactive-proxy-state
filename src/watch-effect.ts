@@ -271,6 +271,73 @@ export function triggerArray(
   }
 }
 
+/**
+ * The key effects track for an entry of a Map or Set: a Map key or a Set
+ * value. Objects and functions share one key: `String` of an object without
+ * a prototype throws, and of a function is its source.
+ */
+function entryKey(entry: unknown): string {
+  return (typeof entry === 'object' && entry !== null) || typeof entry === 'function' ? '[object]' : String(entry);
+}
+
+/** Tracks a read of one entry of the Map or Set `target`: `get` or `has`. */
+export function trackEntry(target: object, entry: unknown): void {
+  if (activeEffect !== null) track(target, entryKey(entry));
+}
+
+/**
+ * Triggers the effects that read what a write changed in the Map or Set
+ * `target`: the entry `entry` (a Map key or a Set value), the collection as
+ * a whole (`Symbol.iterator`), and `size` when `sizeChanged`. Each effect
+ * runs once.
+ */
+export function triggerCollection(target: object, entry: unknown, sizeChanged: boolean): void {
+  const depsMap = targetMap.get(target);
+  if (!depsMap) return; // no effects tracked for this target
+
+  const triggerLevel = ++currentTriggerDepth;
+
+  try {
+    const key = entryKey(entry);
+    queueEffects(depsMap.get(key), target, key, triggerLevel);
+    if (sizeChanged) queueEffects(depsMap.get("size"), target, "size", triggerLevel);
+    queueEffects(depsMap.get(Symbol.iterator), target, Symbol.iterator, triggerLevel);
+
+    if (queuedEffects.size > 0) {
+      flushEffects();
+    }
+  } finally {
+    currentTriggerDepth--;
+  }
+}
+
+/**
+ * Triggers the effects that read what `clear()` removed from the Map or Set
+ * `target`: each entry of `removed` (its key: a Map key, or a Set value),
+ * the collection as a whole and its size. Each effect runs once.
+ */
+export function triggerCleared(target: object, removed: readonly unknown[]): void {
+  const depsMap = targetMap.get(target);
+  if (!depsMap) return; // no effects tracked for this target
+
+  const triggerLevel = ++currentTriggerDepth;
+
+  try {
+    for (let i = 0; i < removed.length; i++) {
+      const key = entryKey(removed[i]);
+      queueEffects(depsMap.get(key), target, key, triggerLevel);
+    }
+    queueEffects(depsMap.get("size"), target, "size", triggerLevel);
+    queueEffects(depsMap.get(Symbol.iterator), target, Symbol.iterator, triggerLevel);
+
+    if (queuedEffects.size > 0) {
+      flushEffects();
+    }
+  } finally {
+    currentTriggerDepth--;
+  }
+}
+
 /** Does `index` hold the same value in `before` and `after`, as `Object.is` tells, and the same hole or not? */
 function sameAt(before: readonly unknown[], after: readonly unknown[], index: number): boolean {
   return Object.is(before[index], after[index]) && index in before === index in after;

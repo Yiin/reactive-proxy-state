@@ -13,7 +13,7 @@ import {
   shallowCopy,
 } from "./location";
 import type { StateEvent } from "./types";
-import { track, trigger } from "./watch-effect";
+import { track, trackEntry, triggerCleared, triggerCollection } from "./watch-effect";
 import { ReactiveFlags } from "./constants";
 
 function isObject(value: unknown): value is object {
@@ -25,7 +25,8 @@ export function wrapSet<T>(set: Set<T>, node: LocationNode): Set<T> {
   if (cachedProxy) return cachedProxy as Set<T>;
   if (globalSeen.has(set)) return globalSeen.get(set);
 
-  const methodCache: { [key: string | symbol]: Function } = {};
+  // no prototype: `constructor` and `valueOf` were found on Object.prototype in it until 3.0.1
+  const methodCache: { [key: string | symbol]: Function } = Object.create(null);
   // the proxy keeps the collection's index by token, once it has one
   const watch = watchIndex(set);
 
@@ -75,10 +76,7 @@ export function wrapSet<T>(set: Set<T>, node: LocationNode): Set<T> {
 
             if (isObject(value)) attachValue(value, node, undefined, copied === Copied.Fresh);
             if (event !== undefined) dispatch(located!, event);
-            trigger(target, Symbol.iterator);
-            if (oldSize !== newSize) {
-              trigger(target, "size");
-            }
+            triggerCollection(target, value, oldSize !== newSize);
           }
           return receiver;
         };
@@ -110,10 +108,7 @@ export function wrapSet<T>(set: Set<T>, node: LocationNode): Set<T> {
               if (watch.indexed) indexRemoved(target, value);
               if (isObject(value)) detachPlace(value, node, undefined);
               if (event !== undefined) dispatch(located!, event);
-              trigger(target, Symbol.iterator);
-              if (oldSize !== newSize) {
-                trigger(target, "size");
-              }
+              triggerCollection(target, value, oldSize !== newSize);
               if (isObject(value)) evictDeep(value);
             }
             return result;
@@ -143,10 +138,7 @@ export function wrapSet<T>(set: Set<T>, node: LocationNode): Set<T> {
               value: null,
             });
           }
-          trigger(target, Symbol.iterator);
-          if (oldSize !== newSize) {
-            trigger(target, "size");
-          }
+          triggerCleared(target, removed);
           for (const member of removed) {
             if (isObject(member)) evictDeep(member);
           }
@@ -154,15 +146,8 @@ export function wrapSet<T>(set: Set<T>, node: LocationNode): Set<T> {
         return methodCache[prop];
       }
       if (prop === "has") {
-        track(target, Symbol.iterator);
         methodCache[prop] = function (value: T): boolean {
-          if (
-            typeof value === "string" ||
-            typeof value === "number" ||
-            typeof value === "symbol"
-          ) {
-            track(target, String(value));
-          }
+          trackEntry(target, value);
           return target.has(value);
         }.bind(target);
         return methodCache[prop];
@@ -227,6 +212,8 @@ export function wrapSet<T>(set: Set<T>, node: LocationNode): Set<T> {
 
       const value = Reflect.get(target, prop, receiver);
       if (typeof value === "function") {
+        // `valueOf` gives its receiver: the proxy
+        if (prop === "valueOf") return value;
         return value.bind(target);
       }
       return value;

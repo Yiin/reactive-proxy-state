@@ -25,7 +25,7 @@ import {
   shallowCopy,
 } from "./location";
 import type { StateEvent } from "./types";
-import { track, trigger } from "./watch-effect";
+import { track, trackEntry, triggerCleared, triggerCollection } from "./watch-effect";
 import { ReactiveFlags } from "./constants";
 
 function isObject(value: unknown): value is object {
@@ -37,7 +37,8 @@ export function wrapMap<K, V>(map: Map<K, V>, node: LocationNode): Map<K, V> {
   if (cachedProxy) return cachedProxy as Map<K, V>;
   if (globalSeen.has(map)) return globalSeen.get(map);
 
-  const methodCache: { [key: string | symbol]: Function } = {};
+  // no prototype: `constructor` and `valueOf` were found on Object.prototype in it until 3.0.1
+  const methodCache: { [key: string | symbol]: Function } = Object.create(null);
   // the proxy keeps the collection's index by token, once it has one
   const watch = watchIndex(map);
 
@@ -69,7 +70,8 @@ export function wrapMap<K, V>(map: Map<K, V>, node: LocationNode): Map<K, V> {
           const oldValue = target.get(key);
           const oldSize = target.size;
 
-          if (oldValue === value) return receiver;
+          // a new key holding undefined is a change
+          if (oldValue === value && existed) return receiver;
           if (
             oldValue &&
             typeof oldValue === "object" &&
@@ -106,14 +108,8 @@ export function wrapMap<K, V>(map: Map<K, V>, node: LocationNode): Map<K, V> {
 
           if (event !== undefined) dispatch(located!, event);
 
-          if (!existed) {
-            trigger(target, Symbol.iterator);
-            if (oldSize !== newSize) {
-              trigger(target, "size");
-            }
-          } else {
-            trigger(target, String(key));
-          }
+          // the entry and every reader of all entries; a new key changes the size
+          triggerCollection(target, key, oldSize !== newSize);
 
           if (isObject(oldValue)) evictDeep(oldValue);
           return receiver;
@@ -150,11 +146,7 @@ export function wrapMap<K, V>(map: Map<K, V>, node: LocationNode): Map<K, V> {
 
             if (event !== undefined) dispatch(located!, event);
 
-            trigger(target, Symbol.iterator);
-            if (oldSize !== newSize) {
-              trigger(target, "size");
-            }
-            trigger(target, String(key));
+            triggerCollection(target, key, oldSize !== newSize);
             if (isObject(oldValue)) evictDeep(oldValue);
           }
 
@@ -185,10 +177,7 @@ export function wrapMap<K, V>(map: Map<K, V>, node: LocationNode): Map<K, V> {
             });
           }
 
-          trigger(target, Symbol.iterator);
-          if (oldSize !== newSize) {
-            trigger(target, "size");
-          }
+          triggerCleared(target, removed.map(([key]) => key));
           for (const [, value] of removed) {
             if (isObject(value)) evictDeep(value);
           }
@@ -197,7 +186,7 @@ export function wrapMap<K, V>(map: Map<K, V>, node: LocationNode): Map<K, V> {
       }
       if (prop === "get") {
         methodCache[prop] = function (key: K): any {
-          track(target, String(key));
+          trackEntry(target, key);
           const value = target.get(key);
 
           if (!value || typeof value !== "object") return value;
@@ -206,9 +195,8 @@ export function wrapMap<K, V>(map: Map<K, V>, node: LocationNode): Map<K, V> {
         return methodCache[prop];
       }
       if (prop === "has") {
-        track(target, Symbol.iterator);
         methodCache[prop] = function (key: K): boolean {
-          track(target, String(key));
+          trackEntry(target, key);
           return target.has(key);
         }.bind(target);
         return methodCache[prop];
@@ -267,6 +255,8 @@ export function wrapMap<K, V>(map: Map<K, V>, node: LocationNode): Map<K, V> {
 
       const value = Reflect.get(target, prop, receiver);
       if (typeof value === "function") {
+        // `valueOf` gives its receiver: the proxy
+        if (prop === "valueOf") return value;
         return value.bind(target);
       }
       return value;
