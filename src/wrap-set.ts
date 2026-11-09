@@ -123,7 +123,6 @@ export function wrapSet<T>(set: Set<T>, node: LocationNode): Set<T> {
 
           const removed = [...target];
           target.clear();
-          const newSize = target.size;
           if (watch.indexed) forgetReplicaIndex(target);
 
           for (const member of removed) {

@@ -161,7 +161,6 @@ export function wrapMap<K, V>(map: Map<K, V>, node: LocationNode): Map<K, V> {
 
           const removed = [...target];
           target.clear();
-          const newSize = target.size;
           if (watch.indexed) forgetReplicaIndex(target);
 
           for (const [key, value] of removed) {
