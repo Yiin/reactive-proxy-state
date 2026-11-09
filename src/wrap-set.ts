@@ -112,10 +112,7 @@ export function wrapSet<T>(set: Set<T>, node: LocationNode): Set<T> {
               triggerCollection(target, value, oldSize !== newSize);
               if (event !== undefined) dispatch(located!, event);
             } finally {
-              try {
-              } finally {
-                endWrite();
-              }
+              endWrite();
             }
           }
           return receiver;

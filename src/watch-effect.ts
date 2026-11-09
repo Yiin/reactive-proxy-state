@@ -54,9 +54,8 @@ class Dep extends Set<TrackedEffect<any>> {
 }
 
 // storage for dependencies: target object -> property key -> the effects that read it
-class Deps extends Map<unknown, Dep> {
-  ref?: WeakRef<Deps>;
-}
+type Deps = Map<unknown, Dep>;
+const ownerRefs = new WeakMap<Deps, WeakRef<Deps>>();
 
 const targetMap = new WeakMap<object, Deps>();
 // the same for the entries of Maps and Sets: collection -> Map key or Set value -> the
@@ -161,18 +160,24 @@ export function runCleanupFunctions(effect: TrackedEffect<any>) {
 function depFor(maps: WeakMap<object, Deps>, target: object, key: unknown): Dep {
   let deps = maps.get(target);
   if (deps === undefined) {
-    deps = new Deps();
+    deps = new Map();
     maps.set(target, deps);
   }
   let dep = deps.get(key);
   if (dep === undefined) {
     // A single dependency has no sibling to retain. Add a weak owner
     // before a second dependency links another effect into this map.
-    if (deps.size === 1 && deps.ref === undefined) {
-      deps.ref = new WeakRef(deps);
-      deps.forEach(existing => { existing.owner = deps.ref!; });
+    let owner: Deps | WeakRef<Deps> = deps;
+    if (deps.size > 0) {
+      let ref = ownerRefs.get(deps);
+      if (ref === undefined) {
+        ref = new WeakRef(deps);
+        ownerRefs.set(deps, ref);
+      }
+      if (deps.size === 1) deps.forEach(existing => { existing.owner = ref; });
+      owner = ref;
     }
-    dep = new Dep(deps.ref ?? deps, key);
+    dep = new Dep(owner, key);
     deps.set(key, dep);
   }
   return dep;
@@ -234,6 +239,8 @@ export function trackKeys(target: object): void {
 
 // the queue of effects to run: each effect is in it at most once while it waits
 const queue: TrackedEffect<any>[] = [];
+// Debug hooks are user code too. Run them after invalidation and event delivery.
+const triggerNotifications: (() => void)[] = [];
 let flushing = false;
 // open trigger calls: effects run when the outermost one ends
 let batchDepth = 0;
@@ -258,8 +265,22 @@ function flushEffects(): void {
   let failed = false;
   let failure: unknown;
   let index = 0;
+  let notifications = 0;
   try {
-    for (; index < queue.length; index++) {
+    for (; index < queue.length || triggerNotifications.length > 0; index++) {
+      for (let next = 0; next < triggerNotifications.length; next++) {
+        try {
+          if (++notifications > MAX_FLUSH_RUNS) {
+            throw new RangeError("reactive-proxy-state: trigger hooks keep writing new values in one flush");
+          }
+          triggerNotifications[next]();
+        } catch (error) {
+          if (!failed) { failed = true; failure = error; }
+        }
+        if (notifications > MAX_FLUSH_RUNS) break;
+      }
+      triggerNotifications.length = 0;
+      if (index >= queue.length) break;
       const effect = queue[index];
       effect.queued = false;
       if (!effect.active) continue;
@@ -292,6 +313,7 @@ function flushEffects(): void {
     // effects a loop left in the queue are no longer waiting
     for (; index < queue.length; index++) queue[index].queued = false;
     queue.length = 0;
+    triggerNotifications.length = 0;
     flushing = false;
   }
   if (failed) throw failure;
@@ -303,7 +325,7 @@ function startBatch(): void {
 
 /** End a trigger call; the outermost one runs what the batch queued, unless a flush is running. */
 function endBatch(): void {
-  if (--batchDepth === 0 && !flushing && queue.length > 0) flushEffects();
+  if (--batchDepth === 0 && !flushing && (queue.length > 0 || triggerNotifications.length > 0)) flushEffects();
 }
 
 /** Hold effects while a write invalidates dependencies and delivers its events. @internal */
@@ -317,7 +339,7 @@ export function beginWrite(): void {
  */
 export function endWrite(): void {
   batchDepth--;
-  if (!flushing && queue.length > 0) flushEffects();
+  if (!flushing && (queue.length > 0 || triggerNotifications.length > 0)) flushEffects();
 }
 
 /**
@@ -333,8 +355,11 @@ function queueEffects(dep: Dep | undefined, target: object, key: unknown): void 
     // also ensure the effect hasn't been stopped
     if (effect === activeEffect || !effect.active) return;
     // Trigger the onTrigger debug hook if provided
-    if (effect.options?.onTrigger) {
-      effect.options.onTrigger({ effect: effect._rawCallback, target, key, type: 'trigger' });
+    const onTrigger = effect.options?.onTrigger;
+    if (onTrigger) {
+      triggerNotifications.push(() => {
+        if (effect.active) onTrigger({ effect: effect._rawCallback, target, key, type: 'trigger' });
+      });
     }
     if (effect.invalidate !== undefined) {
       effect.invalidate();

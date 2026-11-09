@@ -264,3 +264,21 @@ for (const kind of ["map", "set"] as const) {
     stop();
   });
 }
+
+test("trigger hooks see fresh computed values and cannot drop source events when they throw", () => {
+  const events: StateEvent[] = [];
+  const state = reactive({ n: 1 }, event => { events.push(event); });
+  const seen: number[] = [];
+  const hookValues: number[] = [];
+  const derived = computed(() => state.n * 2);
+  const stop = watchEffect(() => { seen.push(state.n); }, {
+    onTrigger: () => { hookValues.push(derived.value); throw Error("hook failed"); },
+  });
+  expect(derived.value).toBe(2);
+  events.length = 0;
+  expect(() => { state.n = 2; }).toThrow("hook failed");
+  expect(events).toEqual([{ action: "set", path: ["n"], oldValue: 1, newValue: 2 }]);
+  expect(hookValues).toEqual([4]);
+  expect(seen).toEqual([1, 2]);
+  stop(); derived.stop();
+});

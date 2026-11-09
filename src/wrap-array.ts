@@ -344,10 +344,7 @@ export function wrapArray<T extends any[]>(arr: T, node: LocationNode): T {
                 triggerArray(target, oldLength, newLength, oldLength !== newLength);
                 if (event !== undefined) dispatch(located!, event);
               } finally {
-                try {
-                } finally {
-                  endWrite();
-                }
+                endWrite();
               }
             }
             return result;
@@ -451,10 +448,7 @@ export function wrapArray<T extends any[]>(arr: T, node: LocationNode): T {
                 triggerSplice(target, 0, noItems, items.length, oldLength);
                 if (event !== undefined) dispatch(located!, event);
               } finally {
-                try {
-                } finally {
-                  endWrite();
-                }
+                endWrite();
               }
             }
             return result;
