@@ -26,10 +26,11 @@ describe("bounded listener writes", () => {
       let effectRuns = 0;
       const stop = watchEffect(() => { state.version; effectRuns++; });
       armed = true;
-      if (alias) expect(() => { state.a.n = 1; }).toThrow("100 nested write rounds");
+      // each alias place starts a chain: 2 events per generation, 100 generations
+      if (alias) expect(() => { state.a.n = 1; }).toThrow("nested 101 deep");
       else state.a.n = 1;
-      expect(state.version).toBe(alias ? 100 : 1);
-      expect(delivered).toBe(alias ? 102 : 2);
+      expect(state.version).toBe(alias ? 200 : 1);
+      expect(delivered).toBe(alias ? 202 : 2);
       expect(replica).toEqual(toRaw(state));
       expect(effectRuns).toBe(2);
       armed = false;
@@ -40,7 +41,7 @@ describe("bounded listener writes", () => {
   }
 
   for (const rounds of [99, 100, 101]) {
-    test(`a direct chain permits exactly 100 listener-write rounds: ${rounds}`, () => {
+    test(`a direct chain permits listener writes exactly 100 deep: ${rounds}`, () => {
       let armed = false;
       const state = reactive({ n: 0 }, event => {
         if (armed && state.n < rounds + 1) state.n++;
@@ -60,8 +61,8 @@ describe("bounded listener writes", () => {
       try { state.n++; } catch { caught++; }
     });
     armed = true;
-    expect(() => { state.n = 1; }).toThrow("100 nested write rounds");
-    expect(caught).toBeGreaterThan(0);
+    expect(() => { state.n = 1; }).toThrow("nested 101 deep");
+    expect(caught).toBe(1);
     expect(state.n).toBe(101);
   });
 
@@ -178,14 +179,16 @@ describe("listener reads do not belong to the writing effect", () => {
   });
 });
 
-test("async branching writes share the bound and recover after the error", async () => {
+test("async branching writes stop at the round total, are logged, and recover", async () => {
   const child = Bun.spawn([process.execPath, new URL("./fixtures/async-listener-bound.ts", import.meta.url).pathname], { stdout: "pipe", stderr: "pipe" });
   const output = await new Response(child.stdout).text();
   expect(await child.exited).toBe(0);
   const result = JSON.parse(output);
-  expect(result.errors).toHaveLength(1);
-  expect(result.errors[0]).toContain("100 nested write rounds");
-  expect(result.state).toEqual({ n: 101, other: 200 });
+  expect(result.uncaught).toEqual([]);
+  expect(result.logged).toHaveLength(1);
+  expect(result.logged[0]).toContain("after 100000 nested rounds");
+  // one round for the caller's event, then 100,000 counted rounds
+  expect(result.state).toEqual({ n: 100_002, other: 200 });
   expect(result.remote).toEqual(result.state);
 });
 
@@ -215,16 +218,16 @@ test("pausing listener tracking preserves the writing effect's self-trigger supp
   stop();
 });
 
-test("separate roots share the listener-write budget", () => {
+test("separate roots carry the generation of listener writes", () => {
   let armed = false;
   const first = reactive({ n: 0 }, () => { if (armed) second.n++; });
   const second = reactive({ n: 0 }, () => { if (armed) first.n++; });
   armed = true;
-  expect(() => { first.n = 1; }).toThrow("100 nested write rounds");
+  expect(() => { first.n = 1; }).toThrow("nested 101 deep");
   expect(first.n + second.n).toBe(101);
 });
 
-test("listener writes caused by effects share the caller's budget", () => {
+test("a listener loop through effects stops by a bound", () => {
   let armed = false;
   const state = reactive({ a: 0, b: 0, input: 0 }, event => {
     if (armed && event.path[0] === "b") state.input++;
@@ -232,10 +235,13 @@ test("listener writes caused by effects share the caller's budget", () => {
   const stopFirst = watchEffect(() => { state.a = state.input; });
   const stopSecond = watchEffect(() => { state.b = state.a; });
   armed = true;
-  expect(() => { state.input = 1; }).toThrow("100 nested write rounds");
-  expect(state.input).toBe(101);
-  expect(state.a).toBe(101);
-  expect(state.b).toBe(101);
+  // effect writes are made outside listeners, so the effect loop limit stops this one
+  expect(() => { state.input = 1; }).toThrow(RangeError);
+  expect(state.input).toBeGreaterThan(100);
+  expect(state.input).toBeLessThanOrEqual(100_001);
+  armed = false;
+  state.input = 0;
+  expect(state.b).toBe(0);
   stopFirst();
   stopSecond();
 });

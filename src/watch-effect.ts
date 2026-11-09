@@ -1,4 +1,4 @@
-import { delivery, emittingEffect, endDelivery } from "./listener";
+import { emittingEffect, endOperation } from "./listener";
 import { arrayIndex } from './utils';
 
 type EffectCallback<T = any> = (onCleanup: (cleanupFn: () => void) => void) => T;
@@ -326,9 +326,18 @@ function startBatch(): void {
   batchDepth++;
 }
 
-/** End a trigger call; the outermost one runs what the batch queued, unless a flush is running. */
+/**
+ * End a trigger call; the outermost one runs what the batch queued, unless
+ * a flush is running, and then ends the operation of listener writes (see
+ * `endOperation`). A ref or computed write ends it here too.
+ */
 function endBatch(): void {
-  if (--batchDepth === 0 && !flushing && (queue.length > 0 || triggerNotifications.length > 0)) flushEffects();
+  if (--batchDepth !== 0 || flushing) return;
+  try {
+    if (queue.length > 0 || triggerNotifications.length > 0) flushEffects();
+  } finally {
+    endOperation();
+  }
 }
 
 /**
@@ -345,11 +354,7 @@ export function beginWrite(): void {
 
 /** Finish a write; the outermost one runs the effects and hooks it queued. @internal */
 export function endWrite(): void {
-  try {
-    endBatch();
-  } finally {
-    if (delivery !== undefined) endDelivery(true);
-  }
+  endBatch();
 }
 
 /**

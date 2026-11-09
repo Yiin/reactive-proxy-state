@@ -1,4 +1,4 @@
-import { checkListenerWrite, emitListener } from "./listener";
+import { checkListenerWrite, emitListener, listenerGeneration } from "./listener";
 import { ReactiveFlags } from "./constants";
 import type { EmitFunction, Path, StateEvent } from "./types";
 import {
@@ -64,10 +64,18 @@ export interface LocationRoot {
   undelivered: Undelivered | undefined;
 }
 
-/** A root's queue: `events[next]` is the oldest event not delivered yet. */
+/**
+ * A root's queue: `events[next]` is the oldest event not delivered yet. The
+ * events of the write that started it have `generation` (see
+ * `emitListener`). Events listener writes added have the generations in
+ * `marks`, pairs of a first index and its generation, made only when a
+ * listener writes.
+ */
 interface Undelivered {
   events: StateEvent[];
   next: number;
+  generation: number;
+  marks: number[] | undefined;
 }
 
 export class Place {
@@ -505,7 +513,7 @@ function attachedBefore(node: LocationNode, former: LocationNode | undefined): b
 export function dispatch(target: Target, event: StateEvent): void {
   const { root, paths } = target;
   if (paths.length === 1) {
-    if (root.undelivered === undefined) emitListener(root.emit!, event);
+    if (root.undelivered === undefined) emitListener(root.emit!, event, listenerGeneration + 1);
     else deliver(root, [event]);
     return;
   }
@@ -560,26 +568,38 @@ function copiesPerPath(event: StateEvent, paths: Path[], async: boolean): StateE
  */
 export function deliver(root: LocationRoot, events: StateEvent[]): void {
   const emit = root.emit!;
+  // the generation of this write's events: one past the listener that made it
+  const generation = listenerGeneration + 1;
   const waiting = root.undelivered;
   if (waiting !== undefined) {
+    const marks = waiting.marks;
+    if (marks === undefined ? generation !== waiting.generation : generation !== marks[marks.length - 1]) {
+      (waiting.marks ??= []).push(waiting.events.length, generation);
+    }
     for (let i = 0; i < events.length; i++) {
       waiting.events.push(events[i]);
     }
     return;
   }
   if (events.length === 1) {
-    emitListener(emit, events[0]);
+    emitListener(emit, events[0], generation);
     return;
   }
-  const queue: Undelivered = (root.undelivered = { events, next: 0 });
-  // The enclosing write retains the budget, allocated by the first listener write.
+  const queue: Undelivered = (root.undelivered = { events, next: 0, generation, marks: undefined });
+  let current = generation;
+  let mark = 0;
   let failed = false;
   let failure: unknown;
   try {
     while (queue.next < queue.events.length) {
+      const index = queue.next++;
+      const marks = queue.marks;
+      if (marks !== undefined && marks[mark] === index) {
+        current = marks[mark + 1];
+        mark += 2;
+      }
       try {
-        const index = queue.next++;
-        emitListener(emit, queue.events[index]);
+        emitListener(emit, queue.events[index], current);
       } catch (error) {
         if (!failed) {
           failed = true;

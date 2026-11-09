@@ -1,4 +1,4 @@
-import { beginDelivery, delivery, emitListener, type Delivery } from "./listener";
+import { beginAsyncDelivery, emitListener, endAsyncDelivery, isRefusal, listenerGeneration } from "./listener";
 import { EmitFunction, Path, ReactiveOptions, StateEvent } from "./types";
 import {
   Named,
@@ -56,30 +56,34 @@ export function isReactive(value: any): boolean {
  * Multiple events queued in the same synchronous tick are flushed
  * in order on a single microtask. An emit that throws does not stop the
  * others: every queued event, including nested writes, is delivered.
- * Then the microtask throws the first error.
+ * Then the microtask throws the first error. Each event keeps the
+ * generation it was sent with (see `emitListener`). The microtask is one
+ * operation of listener writes; it logs the bound's error, which no
+ * caller would receive, instead of throwing it.
  */
 function createAsyncEmit(emit: EmitFunction): EmitFunction {
   const queue: StateEvent[] = []
-  const deliveries: (Delivery | undefined)[] = []
+  const generations: number[] = []
   let flushScheduled = false
 
   return (event: StateEvent) => {
-    beginDelivery()
     queue.push(event)
-    deliveries.push(delivery)
+    // the wrapper is called as the root's listener, with the event's generation
+    generations.push(listenerGeneration)
     if (!flushScheduled) {
       flushScheduled = true
       queueMicrotask(() => {
         let failed = false
         let failure: unknown
         let next = 0
+        beginAsyncDelivery()
         try {
         while (next < queue.length) {
           try {
             const index = next++
-            emitListener(emit, queue[index], deliveries[index])
+            emitListener(emit, queue[index], generations[index])
           } catch (error) {
-            if (!failed) {
+            if (!failed && !isRefusal(error)) {
               failed = true
               failure = error
             }
@@ -87,14 +91,15 @@ function createAsyncEmit(emit: EmitFunction): EmitFunction {
           // a flush that listeners keep growing lets go of what it delivered
           if (next === FLUSH_CHUNK) {
             queue.splice(0, next)
-            deliveries.splice(0, next)
+            generations.splice(0, next)
             next = 0
           }
         }
         } finally {
           queue.length = 0
-          deliveries.length = 0
+          generations.length = 0
           flushScheduled = false
+          endAsyncDelivery()
         }
         if (failed) throw failure
       })
@@ -148,7 +153,7 @@ export function reactive<T extends object>(
     try {
       const newValue = cloneStored(obj, undefined, Named.All);
       fresh = copiedFresh;
-      emitListener(emit, { action: "replace", path: [], newValue });
+      emitListener(emit, { action: "replace", path: [], newValue }, listenerGeneration + 1);
     } catch (error) {
       if (error instanceof SnapshotLimitError) throw error;
       console.error("Failed to emit initial reactive state:", error);
