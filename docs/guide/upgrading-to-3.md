@@ -23,3 +23,17 @@
 - **`onDiffError` names the event.** For a listener error, `path` is the event's path, as in 2.x. `key` is `''` when the failure is in the root object itself.
 - **Event objects are plain.** Objects in `set` and `delete` events have no class prototype and no symbol keys. 2.x copied both into added values. Map and Set events are as before.
 - **No bundled Vue.** 2.x bundled a second copy of `@vue/reactivity`, so its `pauseTracking()` calls did nothing.
+
+## 3.0.1: array iteration gives proxies
+
+In 3.0.0 and earlier, iterating an array proxy gave its raw items. A write through an item taken by `for...of`, spread, `Array.from`, destructuring, `values()` or `entries()` changed the object and sent no event, so replicas missed it. From 3.0.1, iteration gives what an index read gives: the item's proxy, which emits at the index the item holds when you write, also after a `splice` moved it.
+
+- **`findLast` gives a proxy**, like `find` and `at`.
+- **`indexOf`, `lastIndexOf` and `includes` find a proxy** where its raw object is. In 3.0.0, `list.indexOf(list[1])` was `-1`.
+- **Effects that use `find`, `findLast`, `at`, `indexOf`, `lastIndexOf` or `includes` rerun on a push, a splice or a reorder.** 3.0.0 tracked these only on the first read of the method from the proxy. An effect that iterates also reruns when an item's property or an index it read changes.
+- **Callbacks and copies still give raw items.** `forEach`, `map`, `filter`, `flatMap`, `reduce`, `some`, `every` and the `find` predicate receive raw items, and `slice`, `concat`, `filter` and `toSorted` return them. A write through those still sends nothing. Take the item by an index read, `find` or iteration before you write.
+
+What to check when you upgrade:
+
+- **Iterated objects are now proxies.** `structuredClone` throws on a proxy: pass it through `deepToRaw` first, as you would for an index read. A raw item from a callback or `slice` is not `===` to the proxy of the same object from iteration; compare `toRaw()` of both.
+- **Iteration costs what an index read costs.** Measured on an idle arm64 host with Node 26, 400 objects: a `for...of` that reads one property of each item takes 18.4 µs (2.6 µs in 3.0.0, which skipped the proxies); an index loop over the same proxy takes 81 µs. A first loop makes each item's proxy, as a first index read does, and keeps about 800 bytes per item while the item stays in the state. A loop that only reads a long list can iterate `toRaw(list)` to skip the proxies; writes through those items send nothing.
