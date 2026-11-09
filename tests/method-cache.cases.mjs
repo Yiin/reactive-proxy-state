@@ -298,6 +298,22 @@ export function methodCacheCases(lib) {
     });
   };
 
+  cases["a Set subclass's own union is tracked and read again each time"] = () => {
+    class Tagged extends Set {
+      union(other) {
+        return new Set([...this, ...other, "tag"]);
+      }
+    }
+    const state = reactive({ set: new Tagged([1]) }, () => {});
+    let seen;
+    const stop = watchEffect(() => (seen = [...state.set.union(new Set([2]))]));
+    assert.deepEqual(seen, [1, 2, "tag"]);
+    assert.notEqual(state.set.union, state.set.union);
+    state.set.add(3);
+    assert.deepEqual(seen, [1, 3, 2, "tag"]);
+    stop();
+  };
+
   cases["a built-in method replaced after a proxy read it: that proxy keeps the method it read"] = () => {
     const state = reactive({ old: [1, 2], fresh: [1, 2], oldSet: new Set([1]), freshSet: new Set([1]) }, () => {});
     state.old.slice;
