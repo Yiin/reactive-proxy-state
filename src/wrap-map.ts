@@ -26,7 +26,7 @@ import {
   shallowCopy,
 } from "./location";
 import type { StateEvent } from "./types";
-import { beginWrite, endWrite, track, trackEntry, triggerCleared, triggerCollection } from "./watch-effect";
+import { activeEffect, trackingVersion, beginWrite, endWrite, track, trackEntry, triggerCleared, triggerCollection } from "./watch-effect";
 import { ReactiveFlags } from "./constants";
 
 function isObject(value: unknown): value is object {
@@ -35,6 +35,7 @@ function isObject(value: unknown): value is object {
 
 class MapProxyIterator<K, V> {
   private target: Map<K, V> | undefined;
+  private trackedAt = -1;
   private readonly iterator: MapIterator<[K, V]>;
 
   constructor(target: Map<K, V>, private readonly node: LocationNode, private readonly kind: string | symbol) {
@@ -44,7 +45,10 @@ class MapProxyIterator<K, V> {
 
   next(): IteratorResult<unknown> {
     if (this.target === undefined) return { value: undefined, done: true };
-    track(this.target, Symbol.iterator);
+    if (activeEffect !== null && this.trackedAt !== trackingVersion) {
+      track(this.target, Symbol.iterator);
+      this.trackedAt = trackingVersion;
+    }
     const step = this.iterator.next();
     if (step.done) {
       this.target = undefined;

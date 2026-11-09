@@ -226,3 +226,41 @@ for (const method of ["shift", "splice", "unshift"] as const) {
     stop();
   });
 }
+
+for (const method of ["map", "push", "pop", "shift", "unshift", "splice", "sort", "reverse", "fill", "copyWithin", "find", "findLast", "at", "indexOf", "includes", "values", "entries", "keys", Symbol.iterator]) {
+  test(`a listener sees the replacement of cached ${String(method)}`, () => {
+    let armed = false;
+    const seen: unknown[] = [];
+    const state = reactive({ list: [1, 2] }, event => {
+      if (armed && event.action === "set") seen.push(Reflect.apply(Reflect.get(state.list, method), state.list, []));
+    });
+    Reflect.get(state.list, method);
+    armed = true;
+    Reflect.set(state.list, method, () => 42);
+    expect(seen).toEqual([42]);
+    Reflect.deleteProperty(state.list, method);
+    expect(Reflect.get(state.list, method)).toBeFunction();
+  });
+}
+
+for (const kind of ["map", "set"] as const) {
+  test(`saved ${kind} iterator restores tracking after explicit cleanup inside a run`, async () => {
+    const { cleanupEffect } = await import(process.env.RPS_TEST_BUNDLE ?? "../src/index") as typeof Library;
+    const value = kind === "map" ? reactive(new Map([[1, 1], [2, 2], [3, 3], [4, 4]])) : reactive(new Set([1, 2, 3, 4]));
+    const iterator = value.values();
+    let runs = 0;
+    const stop = watchEffect(() => {
+      runs++;
+      iterator.next();
+      cleanupEffect(stop.effect);
+      iterator.next();
+    }, { lazy: true });
+    stop.effect.run();
+    expect(stop.effect.dependencies?.size).toBe(1);
+    if (value instanceof Map) value.set(3, 30);
+    else value.add(5);
+    expect(runs).toBe(2);
+    expect(stop.effect.dependencies?.size).toBe(1);
+    stop();
+  });
+}

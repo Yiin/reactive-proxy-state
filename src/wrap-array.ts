@@ -278,6 +278,7 @@ export function wrapArray<T extends any[]>(arr: T, node: LocationNode): T {
         case "reverse":
         case "fill":
         case "copyWithin": {
+          if (hasOwn.call(target, prop)) break;
           const method = (Array.prototype as any)[prop] as Function;
           methodCache[prop] = function (...args: any[]): T {
             if (prop === "fill" && isObject(args[0])) args[0] = unwrapForStore(args[0]);
@@ -316,6 +317,7 @@ export function wrapArray<T extends any[]>(arr: T, node: LocationNode): T {
           return methodCache[prop];
         }
         case "push":
+          if (hasOwn.call(target, prop)) break;
           methodCache[prop] = function (...items: any[]): number {
             unwrapItems(items);
             const oldLength = target.length;
@@ -352,6 +354,7 @@ export function wrapArray<T extends any[]>(arr: T, node: LocationNode): T {
           };
           return methodCache[prop];
         case "pop":
+          if (hasOwn.call(target, prop)) break;
           methodCache[prop] = function (): any {
             if (target.length === 0) return undefined;
             const oldLength = target.length;
@@ -387,6 +390,7 @@ export function wrapArray<T extends any[]>(arr: T, node: LocationNode): T {
           };
           return methodCache[prop];
         case "shift":
+          if (hasOwn.call(target, prop)) break;
           methodCache[prop] = function (): any {
             if (target.length === 0) return undefined;
             const oldLength = target.length;
@@ -422,6 +426,7 @@ export function wrapArray<T extends any[]>(arr: T, node: LocationNode): T {
           };
           return methodCache[prop];
         case "unshift":
+          if (hasOwn.call(target, prop)) break;
           methodCache[prop] = function (...items: any[]): number {
             unwrapItems(items);
             const oldLength = target.length;
@@ -456,6 +461,7 @@ export function wrapArray<T extends any[]>(arr: T, node: LocationNode): T {
           };
           return methodCache[prop];
         case "splice":
+          if (hasOwn.call(target, prop)) break;
           methodCache[prop] = function (...args: any[]): any[] {
             // normalize once, like the spec: the change, the removed items,
             // the new places and the event all use these numbers
@@ -510,6 +516,7 @@ export function wrapArray<T extends any[]>(arr: T, node: LocationNode): T {
         // special wrapper for find to ensure returned element is reactive
         case "find":
         case "findLast": {
+          if (hasOwn.call(target, prop)) break;
           const findIndex = prop === "find" ? Array.prototype.findIndex : Array.prototype.findLastIndex;
           methodCache[prop] = function (
             predicate: (value: any, index: number, obj: any[]) => boolean,
@@ -529,6 +536,7 @@ export function wrapArray<T extends any[]>(arr: T, node: LocationNode): T {
         case "indexOf":
         case "lastIndexOf":
         case "includes": {
+          if (hasOwn.call(target, prop)) break;
           const method = (Array.prototype as any)[prop] as Function;
           methodCache[prop] = function (searched: unknown, fromIndex?: unknown): unknown {
             trackIteration(target);
@@ -543,6 +551,7 @@ export function wrapArray<T extends any[]>(arr: T, node: LocationNode): T {
         }
         // special wrapper for at to ensure returned element is reactive
         case "at": {
+          if (hasOwn.call(target, prop)) break;
           methodCache[prop] = function (index: number): any {
             trackIteration(target);
             // emulate Array.prototype.at to support negative indexes
@@ -561,6 +570,7 @@ export function wrapArray<T extends any[]>(arr: T, node: LocationNode): T {
         case "values":
         case "entries":
         case "keys": {
+          if (hasOwn.call(target, prop)) break;
           const kind = prop === "entries" ? "entries" : prop === "keys" ? "keys" : "values";
           methodCache[prop] = function (): ArrayProxyIterator {
             trackIteration(target);

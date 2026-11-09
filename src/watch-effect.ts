@@ -34,10 +34,13 @@ export interface TrackedEffect<T = any> {
 
 // tracks the currently executing effect to establish dependencies
 export let activeEffect: TrackedEffect<any> | null = null;
+/** Changes whenever tracking enters, leaves, or clears an effect. @internal */
+export let trackingVersion = 0;
 
 // allows setting the active effect, used internally by the effect runner
 export function setActiveEffect(effect: TrackedEffect<any> | null) {
   activeEffect = effect;
+  trackingVersion++;
 }
 
 /**
@@ -45,14 +48,14 @@ export function setActiveEffect(effect: TrackedEffect<any> | null) {
  * under that key, so the last effect to leave can remove it.
  */
 class Dep extends Set<TrackedEffect<any>> {
-  constructor(readonly owner: WeakRef<Map<unknown, Dep>>, readonly key: unknown) {
+  constructor(public owner: Deps | WeakRef<Deps>, readonly key: unknown) {
     super();
   }
 }
 
 // storage for dependencies: target object -> property key -> the effects that read it
 class Deps extends Map<unknown, Dep> {
-  readonly ref = new WeakRef(this);
+  ref?: WeakRef<Deps>;
 }
 
 const targetMap = new WeakMap<object, Deps>();
@@ -80,7 +83,7 @@ let emptiedCount = 0;
  */
 function releaseDep(dep: Dep): void {
   if (dep.size !== 0) return;
-  const owner = dep.owner.deref();
+  const owner = dep.owner instanceof WeakRef ? dep.owner.deref() : dep.owner;
   if (owner?.get(dep.key) === dep) owner.delete(dep.key);
 }
 
@@ -133,6 +136,7 @@ function detachEffect(effect: TrackedEffect<any>, defer: boolean): void {
  * this is crucial to prevent memory leaks and unnecessary updates when an effect is stopped or re-run.
  */
 export function cleanupEffect(effect: TrackedEffect<any>) {
+  trackingVersion++;
   detachEffect(effect, false);
 }
 
@@ -162,7 +166,13 @@ function depFor(maps: WeakMap<object, Deps>, target: object, key: unknown): Dep 
   }
   let dep = deps.get(key);
   if (dep === undefined) {
-    dep = new Dep(deps.ref, key);
+    // A single dependency has no sibling to retain. Add a weak owner
+    // before a second dependency links another effect into this map.
+    if (deps.size === 1 && deps.ref === undefined) {
+      deps.ref = new WeakRef(deps);
+      deps.forEach(existing => { existing.owner = deps.ref!; });
+    }
+    dep = new Dep(deps.ref ?? deps, key);
     deps.set(key, dep);
   }
   return dep;

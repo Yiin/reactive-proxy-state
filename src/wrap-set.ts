@@ -13,7 +13,7 @@ import {
   shallowCopy,
 } from "./location";
 import type { StateEvent } from "./types";
-import { beginWrite, endWrite, track, trackEntry, triggerCleared, triggerCollection } from "./watch-effect";
+import { activeEffect, trackingVersion, beginWrite, endWrite, track, trackEntry, triggerCleared, triggerCollection } from "./watch-effect";
 import { ReactiveFlags } from "./constants";
 
 function isObject(value: unknown): value is object {
@@ -33,6 +33,7 @@ const setReaders = new Set<string | symbol>([
 
 class SetProxyIterator<T> {
   private target: Set<T> | undefined;
+  private trackedAt = -1;
   private readonly iterator: SetIterator<T>;
 
   constructor(target: Set<T>, private readonly node: LocationNode, private readonly entries: boolean) {
@@ -42,7 +43,10 @@ class SetProxyIterator<T> {
 
   next(): IteratorResult<unknown> {
     if (this.target === undefined) return { value: undefined, done: true };
-    track(this.target, Symbol.iterator);
+    if (activeEffect !== null && this.trackedAt !== trackingVersion) {
+      track(this.target, Symbol.iterator);
+      this.trackedAt = trackingVersion;
+    }
     const step = this.iterator.next();
     if (step.done) {
       this.target = undefined;
