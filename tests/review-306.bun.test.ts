@@ -239,3 +239,29 @@ test("listener writes caused by effects share the caller's budget", () => {
   stopFirst();
   stopSecond();
 });
+
+test("cached collection reads in listeners stay untracked and later effect reads still track", () => {
+  let armed = false;
+  const state = reactive({ input: 0, output: 0, list: [1], map: new Map([["listener", 0], ["effect", 0]]), set: new Set([1]) }, event => {
+    if (!armed || event.path[0] !== "output") return;
+    state.list.reduce((total, value) => total + value, 0);
+    state.map.get("listener");
+    state.set.has(1);
+  });
+  let runs = 0;
+  const get = state.map.get;
+  const stop = watchEffect(() => {
+    runs++;
+    state.output = state.input;
+    get("effect");
+  });
+  armed = true;
+  state.input = 1;
+  state.list.push(2);
+  state.map.set("listener", 1);
+  state.set.delete(1);
+  expect(runs).toBe(2);
+  state.map.set("effect", 1);
+  expect(runs).toBe(3);
+  stop();
+});
