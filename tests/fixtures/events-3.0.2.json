@@ -1,0 +1,1758 @@
+{
+ "sync array in an object: index set": [
+  "action=\"replace\" newValue={\"list\":[{\"id\":1}#2,{\"id\":2}#3,{\"id\":3}#4]#1}#0 path=[]#5",
+  "action=\"set\" newValue={\"id\":9}#0 oldValue={\"id\":1}#1 path=[\"list\",\"0\"]#2"
+ ],
+ "sync array in an object: index set of a primitive": [
+  "action=\"replace\" newValue={\"list\":[{\"id\":1}#2,{\"id\":2}#3,{\"id\":3}#4]#1}#0 path=[]#5",
+  "action=\"set\" newValue=5 oldValue={\"id\":2}#0 path=[\"list\",\"1\"]#1"
+ ],
+ "sync array in an object: index set to the same object": [
+  "action=\"replace\" newValue={\"list\":[{\"id\":1}#2,{\"id\":2}#3,{\"id\":3}#4]#1}#0 path=[]#5"
+ ],
+ "sync array in an object: index set to an equal object": [
+  "action=\"replace\" newValue={\"list\":[{\"id\":1}#2,{\"id\":2}#3,{\"id\":3}#4]#1}#0 path=[]#5"
+ ],
+ "sync array in an object: index set past the end": [
+  "action=\"replace\" newValue={\"list\":[{\"id\":1}#2,{\"id\":2}#3,{\"id\":3}#4]#1}#0 path=[]#5",
+  "action=\"set\" newValue={\"id\":9}#0 oldValue=undefined path=[\"list\",\"3\"]#1"
+ ],
+ "sync array in an object: index set far past the end": [
+  "action=\"replace\" newValue={\"list\":[{\"id\":1}#2,{\"id\":2}#3,{\"id\":3}#4]#1}#0 path=[]#5",
+  "action=\"set\" newValue={\"id\":9}#0 oldValue=undefined path=[\"list\",\"5\"]#1"
+ ],
+ "sync array in an object: index set to undefined past the end": [
+  "action=\"replace\" newValue={\"list\":[{\"id\":1}#2,{\"id\":2}#3,{\"id\":3}#4]#1}#0 path=[]#5",
+  "action=\"set\" newValue=undefined oldValue=undefined path=[\"list\",\"3\"]#0"
+ ],
+ "sync array in an object: index delete": [
+  "action=\"replace\" newValue={\"list\":[{\"id\":1}#2,{\"id\":2}#3,{\"id\":3}#4]#1}#0 path=[]#5",
+  "action=\"delete\" oldValue={\"id\":1}#0 path=[\"list\",\"0\"]#1"
+ ],
+ "sync array in an object: last index delete": [
+  "action=\"replace\" newValue={\"list\":[{\"id\":1}#2,{\"id\":2}#3,{\"id\":3}#4]#1}#0 path=[]#5",
+  "action=\"delete\" oldValue={\"id\":3}#0 path=[\"list\",\"2\"]#1"
+ ],
+ "sync array in an object: delete of a missing index": [
+  "action=\"replace\" newValue={\"list\":[{\"id\":1}#2,{\"id\":2}#3,{\"id\":3}#4]#1}#0 path=[]#5"
+ ],
+ "sync array in an object: shorter length": [
+  "action=\"replace\" newValue={\"list\":[{\"id\":1}#2,{\"id\":2}#3,{\"id\":3}#4]#1}#0 path=[]#5",
+  "action=\"set\" newValue=1 oldValue=3 path=[\"list\",\"length\"]#0"
+ ],
+ "sync array in an object: length 0": [
+  "action=\"replace\" newValue={\"list\":[{\"id\":1}#2,{\"id\":2}#3,{\"id\":3}#4]#1}#0 path=[]#5",
+  "action=\"set\" newValue=0 oldValue=3 path=[\"list\",\"length\"]#0"
+ ],
+ "sync array in an object: longer length": [
+  "action=\"replace\" newValue={\"list\":[{\"id\":1}#2,{\"id\":2}#3,{\"id\":3}#4]#1}#0 path=[]#5",
+  "action=\"set\" newValue=undefined path=[\"list\",\"3\"]#0",
+  "action=\"set\" newValue=undefined path=[\"list\",\"4\"]#0"
+ ],
+ "sync array in an object: same length": [
+  "action=\"replace\" newValue={\"list\":[{\"id\":1}#2,{\"id\":2}#3,{\"id\":3}#4]#1}#0 path=[]#5"
+ ],
+ "sync array in an object: named property": [
+  "action=\"replace\" newValue={\"list\":[{\"id\":1}#2,{\"id\":2}#3,{\"id\":3}#4]#1}#0 path=[]#5",
+  "action=\"set\" newValue=\"x\" oldValue=undefined path=[\"list\",\"label\"]#0"
+ ],
+ "sync array in an object: push": [
+  "action=\"replace\" newValue={\"list\":[{\"id\":1}#2,{\"id\":2}#3,{\"id\":3}#4]#1}#0 path=[]#5",
+  "action=\"array-push\" items=[{\"id\":9}#1]#0 key=3 path=[\"list\"]#2"
+ ],
+ "sync array in an object: push of two": [
+  "action=\"replace\" newValue={\"list\":[{\"id\":1}#2,{\"id\":2}#3,{\"id\":3}#4]#1}#0 path=[]#5",
+  "action=\"array-push\" items=[{\"id\":8}#1,7]#0 key=3 path=[\"list\"]#2"
+ ],
+ "sync array in an object: push of nothing": [
+  "action=\"replace\" newValue={\"list\":[{\"id\":1}#2,{\"id\":2}#3,{\"id\":3}#4]#1}#0 path=[]#5"
+ ],
+ "sync array in an object: pop": [
+  "action=\"replace\" newValue={\"list\":[{\"id\":1}#2,{\"id\":2}#3,{\"id\":3}#4]#1}#0 path=[]#5",
+  "action=\"array-pop\" key=2 oldValue={\"id\":3}#0 path=[\"list\"]#1"
+ ],
+ "sync array in an object: shift": [
+  "action=\"replace\" newValue={\"list\":[{\"id\":1}#2,{\"id\":2}#3,{\"id\":3}#4]#1}#0 path=[]#5",
+  "action=\"array-shift\" key=0 oldValue={\"id\":1}#0 path=[\"list\"]#1"
+ ],
+ "sync array in an object: unshift": [
+  "action=\"replace\" newValue={\"list\":[{\"id\":1}#2,{\"id\":2}#3,{\"id\":3}#4]#1}#0 path=[]#5",
+  "action=\"array-unshift\" items=[{\"id\":9}#1]#0 key=0 path=[\"list\"]#2"
+ ],
+ "sync array in an object: unshift of nothing": [
+  "action=\"replace\" newValue={\"list\":[{\"id\":1}#2,{\"id\":2}#3,{\"id\":3}#4]#1}#0 path=[]#5"
+ ],
+ "sync array in an object: splice removes": [
+  "action=\"replace\" newValue={\"list\":[{\"id\":1}#2,{\"id\":2}#3,{\"id\":3}#4]#1}#0 path=[]#5",
+  "action=\"array-splice\" deleteCount=1 items=undefined key=0 oldValues=[{\"id\":1}#1]#0 path=[\"list\"]#2"
+ ],
+ "sync array in an object: splice inserts": [
+  "action=\"replace\" newValue={\"list\":[{\"id\":1}#2,{\"id\":2}#3,{\"id\":3}#4]#1}#0 path=[]#5",
+  "action=\"array-splice\" deleteCount=0 items=[{\"id\":9}#1]#0 key=1 oldValues=undefined path=[\"list\"]#2"
+ ],
+ "sync array in an object: splice replaces": [
+  "action=\"replace\" newValue={\"list\":[{\"id\":1}#2,{\"id\":2}#3,{\"id\":3}#4]#1}#0 path=[]#5",
+  "action=\"array-splice\" deleteCount=1 items=[{\"id\":9}#1]#0 key=1 oldValues=[{\"id\":2}#3]#2 path=[\"list\"]#4"
+ ],
+ "sync array in an object: splice with no arguments": [
+  "action=\"replace\" newValue={\"list\":[{\"id\":1}#2,{\"id\":2}#3,{\"id\":3}#4]#1}#0 path=[]#5"
+ ],
+ "sync array in an object: splice with a start only": [
+  "action=\"replace\" newValue={\"list\":[{\"id\":1}#2,{\"id\":2}#3,{\"id\":3}#4]#1}#0 path=[]#5",
+  "action=\"array-splice\" deleteCount=2 items=undefined key=1 oldValues=[{\"id\":2}#1,{\"id\":3}#2]#0 path=[\"list\"]#3"
+ ],
+ "sync array in an object: splice from the end": [
+  "action=\"replace\" newValue={\"list\":[{\"id\":1}#2,{\"id\":2}#3,{\"id\":3}#4]#1}#0 path=[]#5",
+  "action=\"array-splice\" deleteCount=1 items=[{\"id\":9}#1,{\"id\":8}#2]#0 key=2 oldValues=[{\"id\":3}#4]#3 path=[\"list\"]#5"
+ ],
+ "sync array in an object: reverse": [
+  "action=\"replace\" newValue={\"list\":[{\"id\":1}#2,{\"id\":2}#3,{\"id\":3}#4]#1}#0 path=[]#5",
+  "action=\"replace\" newValue=[{\"id\":3}#1,{\"id\":2}#2,{\"id\":1}#3]#0 oldValue=[{\"id\":1}#5,{\"id\":2}#6,{\"id\":3}#7]#4 path=[\"list\"]#8"
+ ],
+ "sync array in an object: sort": [
+  "action=\"replace\" newValue={\"list\":[{\"id\":1}#2,{\"id\":2}#3,{\"id\":3}#4]#1}#0 path=[]#5",
+  "action=\"replace\" newValue=[{\"id\":3}#1,{\"id\":2}#2,{\"id\":1}#3]#0 oldValue=[{\"id\":1}#5,{\"id\":2}#6,{\"id\":3}#7]#4 path=[\"list\"]#8"
+ ],
+ "sync array in an object: sort that changes nothing": [
+  "action=\"replace\" newValue={\"list\":[{\"id\":1}#2,{\"id\":2}#3,{\"id\":3}#4]#1}#0 path=[]#5"
+ ],
+ "sync array in an object: fill": [
+  "action=\"replace\" newValue={\"list\":[{\"id\":1}#2,{\"id\":2}#3,{\"id\":3}#4]#1}#0 path=[]#5",
+  "action=\"replace\" newValue=[{\"id\":9}#1,{\"id\":2}#2,{\"id\":3}#3]#0 oldValue=[{\"id\":1}#5,{\"id\":2}#6,{\"id\":3}#7]#4 path=[\"list\"]#8"
+ ],
+ "sync array in an object: fill of all": [
+  "action=\"replace\" newValue={\"list\":[{\"id\":1}#2,{\"id\":2}#3,{\"id\":3}#4]#1}#0 path=[]#5",
+  "action=\"replace\" newValue=[0,0,0]#0 oldValue=[{\"id\":1}#2,{\"id\":2}#3,{\"id\":3}#4]#1 path=[\"list\"]#5"
+ ],
+ "sync array in an object: copyWithin": [
+  "action=\"replace\" newValue={\"list\":[{\"id\":1}#2,{\"id\":2}#3,{\"id\":3}#4]#1}#0 path=[]#5",
+  "action=\"replace\" newValue=[{\"id\":2}#1,{\"id\":3}#2,{\"id\":3}#3]#0 oldValue=[{\"id\":1}#5,{\"id\":2}#6,{\"id\":3}#7]#4 path=[\"list\"]#8"
+ ],
+ "sync array in an object: write through an item": [
+  "action=\"replace\" newValue={\"list\":[{\"id\":1}#2,{\"id\":2}#3,{\"id\":3}#4]#1}#0 path=[]#5",
+  "action=\"set\" newValue=20 oldValue=2 path=[\"list\",\"1\",\"id\"]#0"
+ ],
+ "sync array in an object: write through an item after a shift": [
+  "action=\"replace\" newValue={\"list\":[{\"id\":1}#2,{\"id\":2}#3,{\"id\":3}#4]#1}#0 path=[]#5",
+  "action=\"array-shift\" key=0 oldValue={\"id\":1}#0 path=[\"list\"]#1",
+  "action=\"set\" newValue=30 oldValue=3 path=[\"list\",\"1\",\"id\"]#0"
+ ],
+ "sync array in an object: write through an item after a reverse": [
+  "action=\"replace\" newValue={\"list\":[{\"id\":1}#2,{\"id\":2}#3,{\"id\":3}#4]#1}#0 path=[]#5",
+  "action=\"replace\" newValue=[{\"id\":3}#1,{\"id\":2}#2,{\"id\":1}#3]#0 oldValue=[{\"id\":1}#5,{\"id\":2}#6,{\"id\":3}#7]#4 path=[\"list\"]#8",
+  "action=\"set\" newValue=10 oldValue=1 path=[\"list\",\"2\",\"id\"]#0"
+ ],
+ "sync array in an object: a run of writes": [
+  "action=\"replace\" newValue={\"list\":[{\"id\":1}#2,{\"id\":2}#3,{\"id\":3}#4]#1}#0 path=[]#5",
+  "action=\"array-push\" items=[{\"id\":4}#1]#0 key=3 path=[\"list\"]#2",
+  "action=\"set\" newValue=11 oldValue=1 path=[\"list\",\"0\",\"id\"]#0",
+  "action=\"array-splice\" deleteCount=1 items=undefined key=1 oldValues=[{\"id\":2}#1]#0 path=[\"list\"]#2",
+  "action=\"array-unshift\" items=[0]#0 key=0 path=[\"list\"]#1",
+  "action=\"set\" newValue=2 oldValue=4 path=[\"list\",\"length\"]#0"
+ ],
+ "sync array as the root: index set": [
+  "action=\"replace\" newValue=[{\"id\":1}#1,{\"id\":2}#2,{\"id\":3}#3]#0 path=[]#4",
+  "action=\"set\" newValue={\"id\":9}#0 oldValue={\"id\":1}#1 path=[\"0\"]#2"
+ ],
+ "sync array as the root: index set of a primitive": [
+  "action=\"replace\" newValue=[{\"id\":1}#1,{\"id\":2}#2,{\"id\":3}#3]#0 path=[]#4",
+  "action=\"set\" newValue=5 oldValue={\"id\":2}#0 path=[\"1\"]#1"
+ ],
+ "sync array as the root: index set to the same object": [
+  "action=\"replace\" newValue=[{\"id\":1}#1,{\"id\":2}#2,{\"id\":3}#3]#0 path=[]#4"
+ ],
+ "sync array as the root: index set to an equal object": [
+  "action=\"replace\" newValue=[{\"id\":1}#1,{\"id\":2}#2,{\"id\":3}#3]#0 path=[]#4"
+ ],
+ "sync array as the root: index set past the end": [
+  "action=\"replace\" newValue=[{\"id\":1}#1,{\"id\":2}#2,{\"id\":3}#3]#0 path=[]#4",
+  "action=\"set\" newValue={\"id\":9}#0 oldValue=undefined path=[\"3\"]#1"
+ ],
+ "sync array as the root: index set far past the end": [
+  "action=\"replace\" newValue=[{\"id\":1}#1,{\"id\":2}#2,{\"id\":3}#3]#0 path=[]#4",
+  "action=\"set\" newValue={\"id\":9}#0 oldValue=undefined path=[\"5\"]#1"
+ ],
+ "sync array as the root: index set to undefined past the end": [
+  "action=\"replace\" newValue=[{\"id\":1}#1,{\"id\":2}#2,{\"id\":3}#3]#0 path=[]#4",
+  "action=\"set\" newValue=undefined oldValue=undefined path=[\"3\"]#0"
+ ],
+ "sync array as the root: index delete": [
+  "action=\"replace\" newValue=[{\"id\":1}#1,{\"id\":2}#2,{\"id\":3}#3]#0 path=[]#4",
+  "action=\"delete\" oldValue={\"id\":1}#0 path=[\"0\"]#1"
+ ],
+ "sync array as the root: last index delete": [
+  "action=\"replace\" newValue=[{\"id\":1}#1,{\"id\":2}#2,{\"id\":3}#3]#0 path=[]#4",
+  "action=\"delete\" oldValue={\"id\":3}#0 path=[\"2\"]#1"
+ ],
+ "sync array as the root: delete of a missing index": [
+  "action=\"replace\" newValue=[{\"id\":1}#1,{\"id\":2}#2,{\"id\":3}#3]#0 path=[]#4"
+ ],
+ "sync array as the root: shorter length": [
+  "action=\"replace\" newValue=[{\"id\":1}#1,{\"id\":2}#2,{\"id\":3}#3]#0 path=[]#4",
+  "action=\"set\" newValue=1 oldValue=3 path=[\"length\"]#0"
+ ],
+ "sync array as the root: length 0": [
+  "action=\"replace\" newValue=[{\"id\":1}#1,{\"id\":2}#2,{\"id\":3}#3]#0 path=[]#4",
+  "action=\"set\" newValue=0 oldValue=3 path=[\"length\"]#0"
+ ],
+ "sync array as the root: longer length": [
+  "action=\"replace\" newValue=[{\"id\":1}#1,{\"id\":2}#2,{\"id\":3}#3]#0 path=[]#4",
+  "action=\"set\" newValue=undefined path=[\"3\"]#0",
+  "action=\"set\" newValue=undefined path=[\"4\"]#0"
+ ],
+ "sync array as the root: same length": [
+  "action=\"replace\" newValue=[{\"id\":1}#1,{\"id\":2}#2,{\"id\":3}#3]#0 path=[]#4"
+ ],
+ "sync array as the root: named property": [
+  "action=\"replace\" newValue=[{\"id\":1}#1,{\"id\":2}#2,{\"id\":3}#3]#0 path=[]#4",
+  "action=\"set\" newValue=\"x\" oldValue=undefined path=[\"label\"]#0"
+ ],
+ "sync array as the root: push": [
+  "action=\"replace\" newValue=[{\"id\":1}#1,{\"id\":2}#2,{\"id\":3}#3]#0 path=[]#4",
+  "action=\"array-push\" items=[{\"id\":9}#1]#0 key=3 path=[]#2"
+ ],
+ "sync array as the root: push of two": [
+  "action=\"replace\" newValue=[{\"id\":1}#1,{\"id\":2}#2,{\"id\":3}#3]#0 path=[]#4",
+  "action=\"array-push\" items=[{\"id\":8}#1,7]#0 key=3 path=[]#2"
+ ],
+ "sync array as the root: push of nothing": [
+  "action=\"replace\" newValue=[{\"id\":1}#1,{\"id\":2}#2,{\"id\":3}#3]#0 path=[]#4"
+ ],
+ "sync array as the root: pop": [
+  "action=\"replace\" newValue=[{\"id\":1}#1,{\"id\":2}#2,{\"id\":3}#3]#0 path=[]#4",
+  "action=\"array-pop\" key=2 oldValue={\"id\":3}#0 path=[]#1"
+ ],
+ "sync array as the root: shift": [
+  "action=\"replace\" newValue=[{\"id\":1}#1,{\"id\":2}#2,{\"id\":3}#3]#0 path=[]#4",
+  "action=\"array-shift\" key=0 oldValue={\"id\":1}#0 path=[]#1"
+ ],
+ "sync array as the root: unshift": [
+  "action=\"replace\" newValue=[{\"id\":1}#1,{\"id\":2}#2,{\"id\":3}#3]#0 path=[]#4",
+  "action=\"array-unshift\" items=[{\"id\":9}#1]#0 key=0 path=[]#2"
+ ],
+ "sync array as the root: unshift of nothing": [
+  "action=\"replace\" newValue=[{\"id\":1}#1,{\"id\":2}#2,{\"id\":3}#3]#0 path=[]#4"
+ ],
+ "sync array as the root: splice removes": [
+  "action=\"replace\" newValue=[{\"id\":1}#1,{\"id\":2}#2,{\"id\":3}#3]#0 path=[]#4",
+  "action=\"array-splice\" deleteCount=1 items=undefined key=0 oldValues=[{\"id\":1}#1]#0 path=[]#2"
+ ],
+ "sync array as the root: splice inserts": [
+  "action=\"replace\" newValue=[{\"id\":1}#1,{\"id\":2}#2,{\"id\":3}#3]#0 path=[]#4",
+  "action=\"array-splice\" deleteCount=0 items=[{\"id\":9}#1]#0 key=1 oldValues=undefined path=[]#2"
+ ],
+ "sync array as the root: splice replaces": [
+  "action=\"replace\" newValue=[{\"id\":1}#1,{\"id\":2}#2,{\"id\":3}#3]#0 path=[]#4",
+  "action=\"array-splice\" deleteCount=1 items=[{\"id\":9}#1]#0 key=1 oldValues=[{\"id\":2}#3]#2 path=[]#4"
+ ],
+ "sync array as the root: splice with no arguments": [
+  "action=\"replace\" newValue=[{\"id\":1}#1,{\"id\":2}#2,{\"id\":3}#3]#0 path=[]#4"
+ ],
+ "sync array as the root: splice with a start only": [
+  "action=\"replace\" newValue=[{\"id\":1}#1,{\"id\":2}#2,{\"id\":3}#3]#0 path=[]#4",
+  "action=\"array-splice\" deleteCount=2 items=undefined key=1 oldValues=[{\"id\":2}#1,{\"id\":3}#2]#0 path=[]#3"
+ ],
+ "sync array as the root: splice from the end": [
+  "action=\"replace\" newValue=[{\"id\":1}#1,{\"id\":2}#2,{\"id\":3}#3]#0 path=[]#4",
+  "action=\"array-splice\" deleteCount=1 items=[{\"id\":9}#1,{\"id\":8}#2]#0 key=2 oldValues=[{\"id\":3}#4]#3 path=[]#5"
+ ],
+ "sync array as the root: reverse": [
+  "action=\"replace\" newValue=[{\"id\":1}#1,{\"id\":2}#2,{\"id\":3}#3]#0 path=[]#4",
+  "action=\"replace\" newValue=[{\"id\":3}#1,{\"id\":2}#2,{\"id\":1}#3]#0 oldValue=[{\"id\":1}#5,{\"id\":2}#6,{\"id\":3}#7]#4 path=[]#8"
+ ],
+ "sync array as the root: sort": [
+  "action=\"replace\" newValue=[{\"id\":1}#1,{\"id\":2}#2,{\"id\":3}#3]#0 path=[]#4",
+  "action=\"replace\" newValue=[{\"id\":3}#1,{\"id\":2}#2,{\"id\":1}#3]#0 oldValue=[{\"id\":1}#5,{\"id\":2}#6,{\"id\":3}#7]#4 path=[]#8"
+ ],
+ "sync array as the root: sort that changes nothing": [
+  "action=\"replace\" newValue=[{\"id\":1}#1,{\"id\":2}#2,{\"id\":3}#3]#0 path=[]#4"
+ ],
+ "sync array as the root: fill": [
+  "action=\"replace\" newValue=[{\"id\":1}#1,{\"id\":2}#2,{\"id\":3}#3]#0 path=[]#4",
+  "action=\"replace\" newValue=[{\"id\":9}#1,{\"id\":2}#2,{\"id\":3}#3]#0 oldValue=[{\"id\":1}#5,{\"id\":2}#6,{\"id\":3}#7]#4 path=[]#8"
+ ],
+ "sync array as the root: fill of all": [
+  "action=\"replace\" newValue=[{\"id\":1}#1,{\"id\":2}#2,{\"id\":3}#3]#0 path=[]#4",
+  "action=\"replace\" newValue=[0,0,0]#0 oldValue=[{\"id\":1}#2,{\"id\":2}#3,{\"id\":3}#4]#1 path=[]#5"
+ ],
+ "sync array as the root: copyWithin": [
+  "action=\"replace\" newValue=[{\"id\":1}#1,{\"id\":2}#2,{\"id\":3}#3]#0 path=[]#4",
+  "action=\"replace\" newValue=[{\"id\":2}#1,{\"id\":3}#2,{\"id\":3}#3]#0 oldValue=[{\"id\":1}#5,{\"id\":2}#6,{\"id\":3}#7]#4 path=[]#8"
+ ],
+ "sync array as the root: write through an item": [
+  "action=\"replace\" newValue=[{\"id\":1}#1,{\"id\":2}#2,{\"id\":3}#3]#0 path=[]#4",
+  "action=\"set\" newValue=20 oldValue=2 path=[\"1\",\"id\"]#0"
+ ],
+ "sync array as the root: write through an item after a shift": [
+  "action=\"replace\" newValue=[{\"id\":1}#1,{\"id\":2}#2,{\"id\":3}#3]#0 path=[]#4",
+  "action=\"array-shift\" key=0 oldValue={\"id\":1}#0 path=[]#1",
+  "action=\"set\" newValue=30 oldValue=3 path=[\"1\",\"id\"]#0"
+ ],
+ "sync array as the root: write through an item after a reverse": [
+  "action=\"replace\" newValue=[{\"id\":1}#1,{\"id\":2}#2,{\"id\":3}#3]#0 path=[]#4",
+  "action=\"replace\" newValue=[{\"id\":3}#1,{\"id\":2}#2,{\"id\":1}#3]#0 oldValue=[{\"id\":1}#5,{\"id\":2}#6,{\"id\":3}#7]#4 path=[]#8",
+  "action=\"set\" newValue=10 oldValue=1 path=[\"2\",\"id\"]#0"
+ ],
+ "sync array as the root: a run of writes": [
+  "action=\"replace\" newValue=[{\"id\":1}#1,{\"id\":2}#2,{\"id\":3}#3]#0 path=[]#4",
+  "action=\"array-push\" items=[{\"id\":4}#1]#0 key=3 path=[]#2",
+  "action=\"set\" newValue=11 oldValue=1 path=[\"0\",\"id\"]#0",
+  "action=\"array-splice\" deleteCount=1 items=undefined key=1 oldValues=[{\"id\":2}#1]#0 path=[]#2",
+  "action=\"array-unshift\" items=[0]#0 key=0 path=[]#1",
+  "action=\"set\" newValue=2 oldValue=4 path=[\"length\"]#0"
+ ],
+ "sync array nested in an array: index set": [
+  "action=\"replace\" newValue={\"rows\":[[0]#2,[{\"id\":1}#4,{\"id\":2}#5,{\"id\":3}#6]#3]#1}#0 path=[]#7",
+  "action=\"set\" newValue={\"id\":9}#0 oldValue={\"id\":1}#1 path=[\"rows\",\"1\",\"0\"]#2"
+ ],
+ "sync array nested in an array: index set of a primitive": [
+  "action=\"replace\" newValue={\"rows\":[[0]#2,[{\"id\":1}#4,{\"id\":2}#5,{\"id\":3}#6]#3]#1}#0 path=[]#7",
+  "action=\"set\" newValue=5 oldValue={\"id\":2}#0 path=[\"rows\",\"1\",\"1\"]#1"
+ ],
+ "sync array nested in an array: index set to the same object": [
+  "action=\"replace\" newValue={\"rows\":[[0]#2,[{\"id\":1}#4,{\"id\":2}#5,{\"id\":3}#6]#3]#1}#0 path=[]#7"
+ ],
+ "sync array nested in an array: index set to an equal object": [
+  "action=\"replace\" newValue={\"rows\":[[0]#2,[{\"id\":1}#4,{\"id\":2}#5,{\"id\":3}#6]#3]#1}#0 path=[]#7"
+ ],
+ "sync array nested in an array: index set past the end": [
+  "action=\"replace\" newValue={\"rows\":[[0]#2,[{\"id\":1}#4,{\"id\":2}#5,{\"id\":3}#6]#3]#1}#0 path=[]#7",
+  "action=\"set\" newValue={\"id\":9}#0 oldValue=undefined path=[\"rows\",\"1\",\"3\"]#1"
+ ],
+ "sync array nested in an array: index set far past the end": [
+  "action=\"replace\" newValue={\"rows\":[[0]#2,[{\"id\":1}#4,{\"id\":2}#5,{\"id\":3}#6]#3]#1}#0 path=[]#7",
+  "action=\"set\" newValue={\"id\":9}#0 oldValue=undefined path=[\"rows\",\"1\",\"5\"]#1"
+ ],
+ "sync array nested in an array: index set to undefined past the end": [
+  "action=\"replace\" newValue={\"rows\":[[0]#2,[{\"id\":1}#4,{\"id\":2}#5,{\"id\":3}#6]#3]#1}#0 path=[]#7",
+  "action=\"set\" newValue=undefined oldValue=undefined path=[\"rows\",\"1\",\"3\"]#0"
+ ],
+ "sync array nested in an array: index delete": [
+  "action=\"replace\" newValue={\"rows\":[[0]#2,[{\"id\":1}#4,{\"id\":2}#5,{\"id\":3}#6]#3]#1}#0 path=[]#7",
+  "action=\"delete\" oldValue={\"id\":1}#0 path=[\"rows\",\"1\",\"0\"]#1"
+ ],
+ "sync array nested in an array: last index delete": [
+  "action=\"replace\" newValue={\"rows\":[[0]#2,[{\"id\":1}#4,{\"id\":2}#5,{\"id\":3}#6]#3]#1}#0 path=[]#7",
+  "action=\"delete\" oldValue={\"id\":3}#0 path=[\"rows\",\"1\",\"2\"]#1"
+ ],
+ "sync array nested in an array: delete of a missing index": [
+  "action=\"replace\" newValue={\"rows\":[[0]#2,[{\"id\":1}#4,{\"id\":2}#5,{\"id\":3}#6]#3]#1}#0 path=[]#7"
+ ],
+ "sync array nested in an array: shorter length": [
+  "action=\"replace\" newValue={\"rows\":[[0]#2,[{\"id\":1}#4,{\"id\":2}#5,{\"id\":3}#6]#3]#1}#0 path=[]#7",
+  "action=\"set\" newValue=1 oldValue=3 path=[\"rows\",\"1\",\"length\"]#0"
+ ],
+ "sync array nested in an array: length 0": [
+  "action=\"replace\" newValue={\"rows\":[[0]#2,[{\"id\":1}#4,{\"id\":2}#5,{\"id\":3}#6]#3]#1}#0 path=[]#7",
+  "action=\"set\" newValue=0 oldValue=3 path=[\"rows\",\"1\",\"length\"]#0"
+ ],
+ "sync array nested in an array: longer length": [
+  "action=\"replace\" newValue={\"rows\":[[0]#2,[{\"id\":1}#4,{\"id\":2}#5,{\"id\":3}#6]#3]#1}#0 path=[]#7",
+  "action=\"set\" newValue=undefined path=[\"rows\",\"1\",\"3\"]#0",
+  "action=\"set\" newValue=undefined path=[\"rows\",\"1\",\"4\"]#0"
+ ],
+ "sync array nested in an array: same length": [
+  "action=\"replace\" newValue={\"rows\":[[0]#2,[{\"id\":1}#4,{\"id\":2}#5,{\"id\":3}#6]#3]#1}#0 path=[]#7"
+ ],
+ "sync array nested in an array: named property": [
+  "action=\"replace\" newValue={\"rows\":[[0]#2,[{\"id\":1}#4,{\"id\":2}#5,{\"id\":3}#6]#3]#1}#0 path=[]#7",
+  "action=\"set\" newValue=\"x\" oldValue=undefined path=[\"rows\",\"1\",\"label\"]#0"
+ ],
+ "sync array nested in an array: push": [
+  "action=\"replace\" newValue={\"rows\":[[0]#2,[{\"id\":1}#4,{\"id\":2}#5,{\"id\":3}#6]#3]#1}#0 path=[]#7",
+  "action=\"array-push\" items=[{\"id\":9}#1]#0 key=3 path=[\"rows\",\"1\"]#2"
+ ],
+ "sync array nested in an array: push of two": [
+  "action=\"replace\" newValue={\"rows\":[[0]#2,[{\"id\":1}#4,{\"id\":2}#5,{\"id\":3}#6]#3]#1}#0 path=[]#7",
+  "action=\"array-push\" items=[{\"id\":8}#1,7]#0 key=3 path=[\"rows\",\"1\"]#2"
+ ],
+ "sync array nested in an array: push of nothing": [
+  "action=\"replace\" newValue={\"rows\":[[0]#2,[{\"id\":1}#4,{\"id\":2}#5,{\"id\":3}#6]#3]#1}#0 path=[]#7"
+ ],
+ "sync array nested in an array: pop": [
+  "action=\"replace\" newValue={\"rows\":[[0]#2,[{\"id\":1}#4,{\"id\":2}#5,{\"id\":3}#6]#3]#1}#0 path=[]#7",
+  "action=\"array-pop\" key=2 oldValue={\"id\":3}#0 path=[\"rows\",\"1\"]#1"
+ ],
+ "sync array nested in an array: shift": [
+  "action=\"replace\" newValue={\"rows\":[[0]#2,[{\"id\":1}#4,{\"id\":2}#5,{\"id\":3}#6]#3]#1}#0 path=[]#7",
+  "action=\"array-shift\" key=0 oldValue={\"id\":1}#0 path=[\"rows\",\"1\"]#1"
+ ],
+ "sync array nested in an array: unshift": [
+  "action=\"replace\" newValue={\"rows\":[[0]#2,[{\"id\":1}#4,{\"id\":2}#5,{\"id\":3}#6]#3]#1}#0 path=[]#7",
+  "action=\"array-unshift\" items=[{\"id\":9}#1]#0 key=0 path=[\"rows\",\"1\"]#2"
+ ],
+ "sync array nested in an array: unshift of nothing": [
+  "action=\"replace\" newValue={\"rows\":[[0]#2,[{\"id\":1}#4,{\"id\":2}#5,{\"id\":3}#6]#3]#1}#0 path=[]#7"
+ ],
+ "sync array nested in an array: splice removes": [
+  "action=\"replace\" newValue={\"rows\":[[0]#2,[{\"id\":1}#4,{\"id\":2}#5,{\"id\":3}#6]#3]#1}#0 path=[]#7",
+  "action=\"array-splice\" deleteCount=1 items=undefined key=0 oldValues=[{\"id\":1}#1]#0 path=[\"rows\",\"1\"]#2"
+ ],
+ "sync array nested in an array: splice inserts": [
+  "action=\"replace\" newValue={\"rows\":[[0]#2,[{\"id\":1}#4,{\"id\":2}#5,{\"id\":3}#6]#3]#1}#0 path=[]#7",
+  "action=\"array-splice\" deleteCount=0 items=[{\"id\":9}#1]#0 key=1 oldValues=undefined path=[\"rows\",\"1\"]#2"
+ ],
+ "sync array nested in an array: splice replaces": [
+  "action=\"replace\" newValue={\"rows\":[[0]#2,[{\"id\":1}#4,{\"id\":2}#5,{\"id\":3}#6]#3]#1}#0 path=[]#7",
+  "action=\"array-splice\" deleteCount=1 items=[{\"id\":9}#1]#0 key=1 oldValues=[{\"id\":2}#3]#2 path=[\"rows\",\"1\"]#4"
+ ],
+ "sync array nested in an array: splice with no arguments": [
+  "action=\"replace\" newValue={\"rows\":[[0]#2,[{\"id\":1}#4,{\"id\":2}#5,{\"id\":3}#6]#3]#1}#0 path=[]#7"
+ ],
+ "sync array nested in an array: splice with a start only": [
+  "action=\"replace\" newValue={\"rows\":[[0]#2,[{\"id\":1}#4,{\"id\":2}#5,{\"id\":3}#6]#3]#1}#0 path=[]#7",
+  "action=\"array-splice\" deleteCount=2 items=undefined key=1 oldValues=[{\"id\":2}#1,{\"id\":3}#2]#0 path=[\"rows\",\"1\"]#3"
+ ],
+ "sync array nested in an array: splice from the end": [
+  "action=\"replace\" newValue={\"rows\":[[0]#2,[{\"id\":1}#4,{\"id\":2}#5,{\"id\":3}#6]#3]#1}#0 path=[]#7",
+  "action=\"array-splice\" deleteCount=1 items=[{\"id\":9}#1,{\"id\":8}#2]#0 key=2 oldValues=[{\"id\":3}#4]#3 path=[\"rows\",\"1\"]#5"
+ ],
+ "sync array nested in an array: reverse": [
+  "action=\"replace\" newValue={\"rows\":[[0]#2,[{\"id\":1}#4,{\"id\":2}#5,{\"id\":3}#6]#3]#1}#0 path=[]#7",
+  "action=\"replace\" newValue=[{\"id\":3}#1,{\"id\":2}#2,{\"id\":1}#3]#0 oldValue=[{\"id\":1}#5,{\"id\":2}#6,{\"id\":3}#7]#4 path=[\"rows\",\"1\"]#8"
+ ],
+ "sync array nested in an array: sort": [
+  "action=\"replace\" newValue={\"rows\":[[0]#2,[{\"id\":1}#4,{\"id\":2}#5,{\"id\":3}#6]#3]#1}#0 path=[]#7",
+  "action=\"replace\" newValue=[{\"id\":3}#1,{\"id\":2}#2,{\"id\":1}#3]#0 oldValue=[{\"id\":1}#5,{\"id\":2}#6,{\"id\":3}#7]#4 path=[\"rows\",\"1\"]#8"
+ ],
+ "sync array nested in an array: sort that changes nothing": [
+  "action=\"replace\" newValue={\"rows\":[[0]#2,[{\"id\":1}#4,{\"id\":2}#5,{\"id\":3}#6]#3]#1}#0 path=[]#7"
+ ],
+ "sync array nested in an array: fill": [
+  "action=\"replace\" newValue={\"rows\":[[0]#2,[{\"id\":1}#4,{\"id\":2}#5,{\"id\":3}#6]#3]#1}#0 path=[]#7",
+  "action=\"replace\" newValue=[{\"id\":9}#1,{\"id\":2}#2,{\"id\":3}#3]#0 oldValue=[{\"id\":1}#5,{\"id\":2}#6,{\"id\":3}#7]#4 path=[\"rows\",\"1\"]#8"
+ ],
+ "sync array nested in an array: fill of all": [
+  "action=\"replace\" newValue={\"rows\":[[0]#2,[{\"id\":1}#4,{\"id\":2}#5,{\"id\":3}#6]#3]#1}#0 path=[]#7",
+  "action=\"replace\" newValue=[0,0,0]#0 oldValue=[{\"id\":1}#2,{\"id\":2}#3,{\"id\":3}#4]#1 path=[\"rows\",\"1\"]#5"
+ ],
+ "sync array nested in an array: copyWithin": [
+  "action=\"replace\" newValue={\"rows\":[[0]#2,[{\"id\":1}#4,{\"id\":2}#5,{\"id\":3}#6]#3]#1}#0 path=[]#7",
+  "action=\"replace\" newValue=[{\"id\":2}#1,{\"id\":3}#2,{\"id\":3}#3]#0 oldValue=[{\"id\":1}#5,{\"id\":2}#6,{\"id\":3}#7]#4 path=[\"rows\",\"1\"]#8"
+ ],
+ "sync array nested in an array: write through an item": [
+  "action=\"replace\" newValue={\"rows\":[[0]#2,[{\"id\":1}#4,{\"id\":2}#5,{\"id\":3}#6]#3]#1}#0 path=[]#7",
+  "action=\"set\" newValue=20 oldValue=2 path=[\"rows\",\"1\",\"1\",\"id\"]#0"
+ ],
+ "sync array nested in an array: write through an item after a shift": [
+  "action=\"replace\" newValue={\"rows\":[[0]#2,[{\"id\":1}#4,{\"id\":2}#5,{\"id\":3}#6]#3]#1}#0 path=[]#7",
+  "action=\"array-shift\" key=0 oldValue={\"id\":1}#0 path=[\"rows\",\"1\"]#1",
+  "action=\"set\" newValue=30 oldValue=3 path=[\"rows\",\"1\",\"1\",\"id\"]#0"
+ ],
+ "sync array nested in an array: write through an item after a reverse": [
+  "action=\"replace\" newValue={\"rows\":[[0]#2,[{\"id\":1}#4,{\"id\":2}#5,{\"id\":3}#6]#3]#1}#0 path=[]#7",
+  "action=\"replace\" newValue=[{\"id\":3}#1,{\"id\":2}#2,{\"id\":1}#3]#0 oldValue=[{\"id\":1}#5,{\"id\":2}#6,{\"id\":3}#7]#4 path=[\"rows\",\"1\"]#8",
+  "action=\"set\" newValue=10 oldValue=1 path=[\"rows\",\"1\",\"2\",\"id\"]#0"
+ ],
+ "sync array nested in an array: a run of writes": [
+  "action=\"replace\" newValue={\"rows\":[[0]#2,[{\"id\":1}#4,{\"id\":2}#5,{\"id\":3}#6]#3]#1}#0 path=[]#7",
+  "action=\"array-push\" items=[{\"id\":4}#1]#0 key=3 path=[\"rows\",\"1\"]#2",
+  "action=\"set\" newValue=11 oldValue=1 path=[\"rows\",\"1\",\"0\",\"id\"]#0",
+  "action=\"array-splice\" deleteCount=1 items=undefined key=1 oldValues=[{\"id\":2}#1]#0 path=[\"rows\",\"1\"]#2",
+  "action=\"array-unshift\" items=[0]#0 key=0 path=[\"rows\",\"1\"]#1",
+  "action=\"set\" newValue=2 oldValue=4 path=[\"rows\",\"1\",\"length\"]#0"
+ ],
+ "sync array at two places: index set": [
+  "action=\"replace\" newValue={\"a\":[{\"id\":1}#2,{\"id\":2}#3,{\"id\":3}#4]#1,\"b\":{\"inner\":[{\"id\":1}#7,{\"id\":2}#8,{\"id\":3}#9]#6}#5}#0 path=[]#10",
+  "action=\"set\" newValue={\"id\":9}#0 oldValue={\"id\":1}#1 path=[\"a\",\"0\"]#2",
+  "action=\"set\" newValue={\"id\":9}#0 oldValue={\"id\":1}#1 path=[\"b\",\"inner\",\"0\"]#2"
+ ],
+ "sync array at two places: index set of a primitive": [
+  "action=\"replace\" newValue={\"a\":[{\"id\":1}#2,{\"id\":2}#3,{\"id\":3}#4]#1,\"b\":{\"inner\":[{\"id\":1}#7,{\"id\":2}#8,{\"id\":3}#9]#6}#5}#0 path=[]#10",
+  "action=\"set\" newValue=5 oldValue={\"id\":2}#0 path=[\"a\",\"1\"]#1",
+  "action=\"set\" newValue=5 oldValue={\"id\":2}#0 path=[\"b\",\"inner\",\"1\"]#1"
+ ],
+ "sync array at two places: index set to the same object": [
+  "action=\"replace\" newValue={\"a\":[{\"id\":1}#2,{\"id\":2}#3,{\"id\":3}#4]#1,\"b\":{\"inner\":[{\"id\":1}#7,{\"id\":2}#8,{\"id\":3}#9]#6}#5}#0 path=[]#10"
+ ],
+ "sync array at two places: index set to an equal object": [
+  "action=\"replace\" newValue={\"a\":[{\"id\":1}#2,{\"id\":2}#3,{\"id\":3}#4]#1,\"b\":{\"inner\":[{\"id\":1}#7,{\"id\":2}#8,{\"id\":3}#9]#6}#5}#0 path=[]#10"
+ ],
+ "sync array at two places: index set past the end": [
+  "action=\"replace\" newValue={\"a\":[{\"id\":1}#2,{\"id\":2}#3,{\"id\":3}#4]#1,\"b\":{\"inner\":[{\"id\":1}#7,{\"id\":2}#8,{\"id\":3}#9]#6}#5}#0 path=[]#10",
+  "action=\"set\" newValue={\"id\":9}#0 oldValue=undefined path=[\"a\",\"3\"]#1",
+  "action=\"set\" newValue={\"id\":9}#0 oldValue=undefined path=[\"b\",\"inner\",\"3\"]#1"
+ ],
+ "sync array at two places: index set far past the end": [
+  "action=\"replace\" newValue={\"a\":[{\"id\":1}#2,{\"id\":2}#3,{\"id\":3}#4]#1,\"b\":{\"inner\":[{\"id\":1}#7,{\"id\":2}#8,{\"id\":3}#9]#6}#5}#0 path=[]#10",
+  "action=\"set\" newValue={\"id\":9}#0 oldValue=undefined path=[\"a\",\"5\"]#1",
+  "action=\"set\" newValue={\"id\":9}#0 oldValue=undefined path=[\"b\",\"inner\",\"5\"]#1"
+ ],
+ "sync array at two places: index set to undefined past the end": [
+  "action=\"replace\" newValue={\"a\":[{\"id\":1}#2,{\"id\":2}#3,{\"id\":3}#4]#1,\"b\":{\"inner\":[{\"id\":1}#7,{\"id\":2}#8,{\"id\":3}#9]#6}#5}#0 path=[]#10",
+  "action=\"set\" newValue=undefined oldValue=undefined path=[\"a\",\"3\"]#0",
+  "action=\"set\" newValue=undefined oldValue=undefined path=[\"b\",\"inner\",\"3\"]#0"
+ ],
+ "sync array at two places: index delete": [
+  "action=\"replace\" newValue={\"a\":[{\"id\":1}#2,{\"id\":2}#3,{\"id\":3}#4]#1,\"b\":{\"inner\":[{\"id\":1}#7,{\"id\":2}#8,{\"id\":3}#9]#6}#5}#0 path=[]#10",
+  "action=\"delete\" oldValue={\"id\":1}#0 path=[\"a\",\"0\"]#1",
+  "action=\"delete\" oldValue={\"id\":1}#0 path=[\"b\",\"inner\",\"0\"]#1"
+ ],
+ "sync array at two places: last index delete": [
+  "action=\"replace\" newValue={\"a\":[{\"id\":1}#2,{\"id\":2}#3,{\"id\":3}#4]#1,\"b\":{\"inner\":[{\"id\":1}#7,{\"id\":2}#8,{\"id\":3}#9]#6}#5}#0 path=[]#10",
+  "action=\"delete\" oldValue={\"id\":3}#0 path=[\"a\",\"2\"]#1",
+  "action=\"delete\" oldValue={\"id\":3}#0 path=[\"b\",\"inner\",\"2\"]#1"
+ ],
+ "sync array at two places: delete of a missing index": [
+  "action=\"replace\" newValue={\"a\":[{\"id\":1}#2,{\"id\":2}#3,{\"id\":3}#4]#1,\"b\":{\"inner\":[{\"id\":1}#7,{\"id\":2}#8,{\"id\":3}#9]#6}#5}#0 path=[]#10"
+ ],
+ "sync array at two places: shorter length": [
+  "action=\"replace\" newValue={\"a\":[{\"id\":1}#2,{\"id\":2}#3,{\"id\":3}#4]#1,\"b\":{\"inner\":[{\"id\":1}#7,{\"id\":2}#8,{\"id\":3}#9]#6}#5}#0 path=[]#10",
+  "action=\"set\" newValue=1 oldValue=3 path=[\"a\",\"length\"]#0",
+  "action=\"set\" newValue=1 oldValue=3 path=[\"b\",\"inner\",\"length\"]#0"
+ ],
+ "sync array at two places: length 0": [
+  "action=\"replace\" newValue={\"a\":[{\"id\":1}#2,{\"id\":2}#3,{\"id\":3}#4]#1,\"b\":{\"inner\":[{\"id\":1}#7,{\"id\":2}#8,{\"id\":3}#9]#6}#5}#0 path=[]#10",
+  "action=\"set\" newValue=0 oldValue=3 path=[\"a\",\"length\"]#0",
+  "action=\"set\" newValue=0 oldValue=3 path=[\"b\",\"inner\",\"length\"]#0"
+ ],
+ "sync array at two places: longer length": [
+  "action=\"replace\" newValue={\"a\":[{\"id\":1}#2,{\"id\":2}#3,{\"id\":3}#4]#1,\"b\":{\"inner\":[{\"id\":1}#7,{\"id\":2}#8,{\"id\":3}#9]#6}#5}#0 path=[]#10",
+  "action=\"set\" newValue=undefined path=[\"a\",\"3\"]#0",
+  "action=\"set\" newValue=undefined path=[\"b\",\"inner\",\"3\"]#0",
+  "action=\"set\" newValue=undefined path=[\"a\",\"4\"]#0",
+  "action=\"set\" newValue=undefined path=[\"b\",\"inner\",\"4\"]#0"
+ ],
+ "sync array at two places: same length": [
+  "action=\"replace\" newValue={\"a\":[{\"id\":1}#2,{\"id\":2}#3,{\"id\":3}#4]#1,\"b\":{\"inner\":[{\"id\":1}#7,{\"id\":2}#8,{\"id\":3}#9]#6}#5}#0 path=[]#10"
+ ],
+ "sync array at two places: named property": [
+  "action=\"replace\" newValue={\"a\":[{\"id\":1}#2,{\"id\":2}#3,{\"id\":3}#4]#1,\"b\":{\"inner\":[{\"id\":1}#7,{\"id\":2}#8,{\"id\":3}#9]#6}#5}#0 path=[]#10",
+  "action=\"set\" newValue=\"x\" oldValue=undefined path=[\"a\",\"label\"]#0",
+  "action=\"set\" newValue=\"x\" oldValue=undefined path=[\"b\",\"inner\",\"label\"]#0"
+ ],
+ "sync array at two places: push": [
+  "action=\"replace\" newValue={\"a\":[{\"id\":1}#2,{\"id\":2}#3,{\"id\":3}#4]#1,\"b\":{\"inner\":[{\"id\":1}#7,{\"id\":2}#8,{\"id\":3}#9]#6}#5}#0 path=[]#10",
+  "action=\"array-push\" items=[{\"id\":9}#1]#0 key=3 path=[\"a\"]#2",
+  "action=\"array-push\" items=[{\"id\":9}#1]#0 key=3 path=[\"b\",\"inner\"]#2"
+ ],
+ "sync array at two places: push of two": [
+  "action=\"replace\" newValue={\"a\":[{\"id\":1}#2,{\"id\":2}#3,{\"id\":3}#4]#1,\"b\":{\"inner\":[{\"id\":1}#7,{\"id\":2}#8,{\"id\":3}#9]#6}#5}#0 path=[]#10",
+  "action=\"array-push\" items=[{\"id\":8}#1,7]#0 key=3 path=[\"a\"]#2",
+  "action=\"array-push\" items=[{\"id\":8}#1,7]#0 key=3 path=[\"b\",\"inner\"]#2"
+ ],
+ "sync array at two places: push of nothing": [
+  "action=\"replace\" newValue={\"a\":[{\"id\":1}#2,{\"id\":2}#3,{\"id\":3}#4]#1,\"b\":{\"inner\":[{\"id\":1}#7,{\"id\":2}#8,{\"id\":3}#9]#6}#5}#0 path=[]#10"
+ ],
+ "sync array at two places: pop": [
+  "action=\"replace\" newValue={\"a\":[{\"id\":1}#2,{\"id\":2}#3,{\"id\":3}#4]#1,\"b\":{\"inner\":[{\"id\":1}#7,{\"id\":2}#8,{\"id\":3}#9]#6}#5}#0 path=[]#10",
+  "action=\"array-pop\" key=2 oldValue={\"id\":3}#0 path=[\"a\"]#1",
+  "action=\"array-pop\" key=2 oldValue={\"id\":3}#0 path=[\"b\",\"inner\"]#1"
+ ],
+ "sync array at two places: shift": [
+  "action=\"replace\" newValue={\"a\":[{\"id\":1}#2,{\"id\":2}#3,{\"id\":3}#4]#1,\"b\":{\"inner\":[{\"id\":1}#7,{\"id\":2}#8,{\"id\":3}#9]#6}#5}#0 path=[]#10",
+  "action=\"array-shift\" key=0 oldValue={\"id\":1}#0 path=[\"a\"]#1",
+  "action=\"array-shift\" key=0 oldValue={\"id\":1}#0 path=[\"b\",\"inner\"]#1"
+ ],
+ "sync array at two places: unshift": [
+  "action=\"replace\" newValue={\"a\":[{\"id\":1}#2,{\"id\":2}#3,{\"id\":3}#4]#1,\"b\":{\"inner\":[{\"id\":1}#7,{\"id\":2}#8,{\"id\":3}#9]#6}#5}#0 path=[]#10",
+  "action=\"array-unshift\" items=[{\"id\":9}#1]#0 key=0 path=[\"a\"]#2",
+  "action=\"array-unshift\" items=[{\"id\":9}#1]#0 key=0 path=[\"b\",\"inner\"]#2"
+ ],
+ "sync array at two places: unshift of nothing": [
+  "action=\"replace\" newValue={\"a\":[{\"id\":1}#2,{\"id\":2}#3,{\"id\":3}#4]#1,\"b\":{\"inner\":[{\"id\":1}#7,{\"id\":2}#8,{\"id\":3}#9]#6}#5}#0 path=[]#10"
+ ],
+ "sync array at two places: splice removes": [
+  "action=\"replace\" newValue={\"a\":[{\"id\":1}#2,{\"id\":2}#3,{\"id\":3}#4]#1,\"b\":{\"inner\":[{\"id\":1}#7,{\"id\":2}#8,{\"id\":3}#9]#6}#5}#0 path=[]#10",
+  "action=\"array-splice\" deleteCount=1 items=undefined key=0 oldValues=[{\"id\":1}#1]#0 path=[\"a\"]#2",
+  "action=\"array-splice\" deleteCount=1 items=undefined key=0 oldValues=[{\"id\":1}#1]#0 path=[\"b\",\"inner\"]#2"
+ ],
+ "sync array at two places: splice inserts": [
+  "action=\"replace\" newValue={\"a\":[{\"id\":1}#2,{\"id\":2}#3,{\"id\":3}#4]#1,\"b\":{\"inner\":[{\"id\":1}#7,{\"id\":2}#8,{\"id\":3}#9]#6}#5}#0 path=[]#10",
+  "action=\"array-splice\" deleteCount=0 items=[{\"id\":9}#1]#0 key=1 oldValues=undefined path=[\"a\"]#2",
+  "action=\"array-splice\" deleteCount=0 items=[{\"id\":9}#1]#0 key=1 oldValues=undefined path=[\"b\",\"inner\"]#2"
+ ],
+ "sync array at two places: splice replaces": [
+  "action=\"replace\" newValue={\"a\":[{\"id\":1}#2,{\"id\":2}#3,{\"id\":3}#4]#1,\"b\":{\"inner\":[{\"id\":1}#7,{\"id\":2}#8,{\"id\":3}#9]#6}#5}#0 path=[]#10",
+  "action=\"array-splice\" deleteCount=1 items=[{\"id\":9}#1]#0 key=1 oldValues=[{\"id\":2}#3]#2 path=[\"a\"]#4",
+  "action=\"array-splice\" deleteCount=1 items=[{\"id\":9}#1]#0 key=1 oldValues=[{\"id\":2}#3]#2 path=[\"b\",\"inner\"]#4"
+ ],
+ "sync array at two places: splice with no arguments": [
+  "action=\"replace\" newValue={\"a\":[{\"id\":1}#2,{\"id\":2}#3,{\"id\":3}#4]#1,\"b\":{\"inner\":[{\"id\":1}#7,{\"id\":2}#8,{\"id\":3}#9]#6}#5}#0 path=[]#10"
+ ],
+ "sync array at two places: splice with a start only": [
+  "action=\"replace\" newValue={\"a\":[{\"id\":1}#2,{\"id\":2}#3,{\"id\":3}#4]#1,\"b\":{\"inner\":[{\"id\":1}#7,{\"id\":2}#8,{\"id\":3}#9]#6}#5}#0 path=[]#10",
+  "action=\"array-splice\" deleteCount=2 items=undefined key=1 oldValues=[{\"id\":2}#1,{\"id\":3}#2]#0 path=[\"a\"]#3",
+  "action=\"array-splice\" deleteCount=2 items=undefined key=1 oldValues=[{\"id\":2}#1,{\"id\":3}#2]#0 path=[\"b\",\"inner\"]#3"
+ ],
+ "sync array at two places: splice from the end": [
+  "action=\"replace\" newValue={\"a\":[{\"id\":1}#2,{\"id\":2}#3,{\"id\":3}#4]#1,\"b\":{\"inner\":[{\"id\":1}#7,{\"id\":2}#8,{\"id\":3}#9]#6}#5}#0 path=[]#10",
+  "action=\"array-splice\" deleteCount=1 items=[{\"id\":9}#1,{\"id\":8}#2]#0 key=2 oldValues=[{\"id\":3}#4]#3 path=[\"a\"]#5",
+  "action=\"array-splice\" deleteCount=1 items=[{\"id\":9}#1,{\"id\":8}#2]#0 key=2 oldValues=[{\"id\":3}#4]#3 path=[\"b\",\"inner\"]#5"
+ ],
+ "sync array at two places: reverse": [
+  "action=\"replace\" newValue={\"a\":[{\"id\":1}#2,{\"id\":2}#3,{\"id\":3}#4]#1,\"b\":{\"inner\":[{\"id\":1}#7,{\"id\":2}#8,{\"id\":3}#9]#6}#5}#0 path=[]#10",
+  "action=\"replace\" newValue=[{\"id\":3}#1,{\"id\":2}#2,{\"id\":1}#3]#0 oldValue=[{\"id\":1}#5,{\"id\":2}#6,{\"id\":3}#7]#4 path=[\"a\"]#8",
+  "action=\"replace\" newValue=[{\"id\":3}#1,{\"id\":2}#2,{\"id\":1}#3]#0 oldValue=[{\"id\":1}#5,{\"id\":2}#6,{\"id\":3}#7]#4 path=[\"b\",\"inner\"]#8"
+ ],
+ "sync array at two places: sort": [
+  "action=\"replace\" newValue={\"a\":[{\"id\":1}#2,{\"id\":2}#3,{\"id\":3}#4]#1,\"b\":{\"inner\":[{\"id\":1}#7,{\"id\":2}#8,{\"id\":3}#9]#6}#5}#0 path=[]#10",
+  "action=\"replace\" newValue=[{\"id\":3}#1,{\"id\":2}#2,{\"id\":1}#3]#0 oldValue=[{\"id\":1}#5,{\"id\":2}#6,{\"id\":3}#7]#4 path=[\"a\"]#8",
+  "action=\"replace\" newValue=[{\"id\":3}#1,{\"id\":2}#2,{\"id\":1}#3]#0 oldValue=[{\"id\":1}#5,{\"id\":2}#6,{\"id\":3}#7]#4 path=[\"b\",\"inner\"]#8"
+ ],
+ "sync array at two places: sort that changes nothing": [
+  "action=\"replace\" newValue={\"a\":[{\"id\":1}#2,{\"id\":2}#3,{\"id\":3}#4]#1,\"b\":{\"inner\":[{\"id\":1}#7,{\"id\":2}#8,{\"id\":3}#9]#6}#5}#0 path=[]#10"
+ ],
+ "sync array at two places: fill": [
+  "action=\"replace\" newValue={\"a\":[{\"id\":1}#2,{\"id\":2}#3,{\"id\":3}#4]#1,\"b\":{\"inner\":[{\"id\":1}#7,{\"id\":2}#8,{\"id\":3}#9]#6}#5}#0 path=[]#10",
+  "action=\"replace\" newValue=[{\"id\":9}#1,{\"id\":2}#2,{\"id\":3}#3]#0 oldValue=[{\"id\":1}#5,{\"id\":2}#6,{\"id\":3}#7]#4 path=[\"a\"]#8",
+  "action=\"replace\" newValue=[{\"id\":9}#1,{\"id\":2}#2,{\"id\":3}#3]#0 oldValue=[{\"id\":1}#5,{\"id\":2}#6,{\"id\":3}#7]#4 path=[\"b\",\"inner\"]#8"
+ ],
+ "sync array at two places: fill of all": [
+  "action=\"replace\" newValue={\"a\":[{\"id\":1}#2,{\"id\":2}#3,{\"id\":3}#4]#1,\"b\":{\"inner\":[{\"id\":1}#7,{\"id\":2}#8,{\"id\":3}#9]#6}#5}#0 path=[]#10",
+  "action=\"replace\" newValue=[0,0,0]#0 oldValue=[{\"id\":1}#2,{\"id\":2}#3,{\"id\":3}#4]#1 path=[\"a\"]#5",
+  "action=\"replace\" newValue=[0,0,0]#0 oldValue=[{\"id\":1}#2,{\"id\":2}#3,{\"id\":3}#4]#1 path=[\"b\",\"inner\"]#5"
+ ],
+ "sync array at two places: copyWithin": [
+  "action=\"replace\" newValue={\"a\":[{\"id\":1}#2,{\"id\":2}#3,{\"id\":3}#4]#1,\"b\":{\"inner\":[{\"id\":1}#7,{\"id\":2}#8,{\"id\":3}#9]#6}#5}#0 path=[]#10",
+  "action=\"replace\" newValue=[{\"id\":2}#1,{\"id\":3}#2,{\"id\":3}#3]#0 oldValue=[{\"id\":1}#5,{\"id\":2}#6,{\"id\":3}#7]#4 path=[\"a\"]#8",
+  "action=\"replace\" newValue=[{\"id\":2}#1,{\"id\":3}#2,{\"id\":3}#3]#0 oldValue=[{\"id\":1}#5,{\"id\":2}#6,{\"id\":3}#7]#4 path=[\"b\",\"inner\"]#8"
+ ],
+ "sync array at two places: write through an item": [
+  "action=\"replace\" newValue={\"a\":[{\"id\":1}#2,{\"id\":2}#3,{\"id\":3}#4]#1,\"b\":{\"inner\":[{\"id\":1}#7,{\"id\":2}#8,{\"id\":3}#9]#6}#5}#0 path=[]#10",
+  "action=\"set\" newValue=20 oldValue=2 path=[\"a\",\"1\",\"id\"]#0",
+  "action=\"set\" newValue=20 oldValue=2 path=[\"b\",\"inner\",\"1\",\"id\"]#0"
+ ],
+ "sync array at two places: write through an item after a shift": [
+  "action=\"replace\" newValue={\"a\":[{\"id\":1}#2,{\"id\":2}#3,{\"id\":3}#4]#1,\"b\":{\"inner\":[{\"id\":1}#7,{\"id\":2}#8,{\"id\":3}#9]#6}#5}#0 path=[]#10",
+  "action=\"array-shift\" key=0 oldValue={\"id\":1}#0 path=[\"a\"]#1",
+  "action=\"array-shift\" key=0 oldValue={\"id\":1}#0 path=[\"b\",\"inner\"]#1",
+  "action=\"set\" newValue=30 oldValue=3 path=[\"a\",\"1\",\"id\"]#0",
+  "action=\"set\" newValue=30 oldValue=3 path=[\"b\",\"inner\",\"1\",\"id\"]#0"
+ ],
+ "sync array at two places: write through an item after a reverse": [
+  "action=\"replace\" newValue={\"a\":[{\"id\":1}#2,{\"id\":2}#3,{\"id\":3}#4]#1,\"b\":{\"inner\":[{\"id\":1}#7,{\"id\":2}#8,{\"id\":3}#9]#6}#5}#0 path=[]#10",
+  "action=\"replace\" newValue=[{\"id\":3}#1,{\"id\":2}#2,{\"id\":1}#3]#0 oldValue=[{\"id\":1}#5,{\"id\":2}#6,{\"id\":3}#7]#4 path=[\"a\"]#8",
+  "action=\"replace\" newValue=[{\"id\":3}#1,{\"id\":2}#2,{\"id\":1}#3]#0 oldValue=[{\"id\":1}#5,{\"id\":2}#6,{\"id\":3}#7]#4 path=[\"b\",\"inner\"]#8",
+  "action=\"set\" newValue=10 oldValue=1 path=[\"a\",\"2\",\"id\"]#0",
+  "action=\"set\" newValue=10 oldValue=1 path=[\"b\",\"inner\",\"2\",\"id\"]#0"
+ ],
+ "sync array at two places: a run of writes": [
+  "action=\"replace\" newValue={\"a\":[{\"id\":1}#2,{\"id\":2}#3,{\"id\":3}#4]#1,\"b\":{\"inner\":[{\"id\":1}#7,{\"id\":2}#8,{\"id\":3}#9]#6}#5}#0 path=[]#10",
+  "action=\"array-push\" items=[{\"id\":4}#1]#0 key=3 path=[\"a\"]#2",
+  "action=\"array-push\" items=[{\"id\":4}#1]#0 key=3 path=[\"b\",\"inner\"]#2",
+  "action=\"set\" newValue=11 oldValue=1 path=[\"a\",\"0\",\"id\"]#0",
+  "action=\"set\" newValue=11 oldValue=1 path=[\"b\",\"inner\",\"0\",\"id\"]#0",
+  "action=\"array-splice\" deleteCount=1 items=undefined key=1 oldValues=[{\"id\":2}#1]#0 path=[\"a\"]#2",
+  "action=\"array-splice\" deleteCount=1 items=undefined key=1 oldValues=[{\"id\":2}#1]#0 path=[\"b\",\"inner\"]#2",
+  "action=\"array-unshift\" items=[0]#0 key=0 path=[\"a\"]#1",
+  "action=\"array-unshift\" items=[0]#0 key=0 path=[\"b\",\"inner\"]#1",
+  "action=\"set\" newValue=2 oldValue=4 path=[\"a\",\"length\"]#0",
+  "action=\"set\" newValue=2 oldValue=4 path=[\"b\",\"inner\",\"length\"]#0"
+ ],
+ "sync object: set of a held key": [
+  "action=\"replace\" newValue={\"obj\":{\"a\":1,\"child\":{\"c\":1}#2}#1,\"setter\":{\"stored\":1,\"value\":1}#3,\"instance\":{\"id\":1}#4,\"alias\":{\"first\":{\"c\":1}#6,\"second\":{\"c\":1}#7}#5}#0 path=[]#8",
+  "action=\"set\" newValue=2 oldValue=1 path=[\"obj\",\"a\"]#0"
+ ],
+ "sync object: set of the same value": [
+  "action=\"replace\" newValue={\"obj\":{\"a\":1,\"child\":{\"c\":1}#2}#1,\"setter\":{\"stored\":1,\"value\":1}#3,\"instance\":{\"id\":1}#4,\"alias\":{\"first\":{\"c\":1}#6,\"second\":{\"c\":1}#7}#5}#0 path=[]#8"
+ ],
+ "sync object: set of a new key": [
+  "action=\"replace\" newValue={\"obj\":{\"a\":1,\"child\":{\"c\":1}#2}#1,\"setter\":{\"stored\":1,\"value\":1}#3,\"instance\":{\"id\":1}#4,\"alias\":{\"first\":{\"c\":1}#6,\"second\":{\"c\":1}#7}#5}#0 path=[]#8",
+  "action=\"set\" newValue=1 oldValue=undefined path=[\"obj\",\"z\"]#0"
+ ],
+ "sync object: set of a new key to undefined": [
+  "action=\"replace\" newValue={\"obj\":{\"a\":1,\"child\":{\"c\":1}#2}#1,\"setter\":{\"stored\":1,\"value\":1}#3,\"instance\":{\"id\":1}#4,\"alias\":{\"first\":{\"c\":1}#6,\"second\":{\"c\":1}#7}#5}#0 path=[]#8"
+ ],
+ "sync object: set of an object": [
+  "action=\"replace\" newValue={\"obj\":{\"a\":1,\"child\":{\"c\":1}#2}#1,\"setter\":{\"stored\":1,\"value\":1}#3,\"instance\":{\"id\":1}#4,\"alias\":{\"first\":{\"c\":1}#6,\"second\":{\"c\":1}#7}#5}#0 path=[]#8",
+  "action=\"set\" newValue={\"x\":[1,2]#1,\"m\":Map{\"k\"=>{\"v\":1}#3}#2}#0 oldValue=undefined path=[\"obj\",\"nested\"]#4"
+ ],
+ "sync object: set of an equal object": [
+  "action=\"replace\" newValue={\"obj\":{\"a\":1,\"child\":{\"c\":1}#2}#1,\"setter\":{\"stored\":1,\"value\":1}#3,\"instance\":{\"id\":1}#4,\"alias\":{\"first\":{\"c\":1}#6,\"second\":{\"c\":1}#7}#5}#0 path=[]#8"
+ ],
+ "sync object: set of a changed object": [
+  "action=\"replace\" newValue={\"obj\":{\"a\":1,\"child\":{\"c\":1}#2}#1,\"setter\":{\"stored\":1,\"value\":1}#3,\"instance\":{\"id\":1}#4,\"alias\":{\"first\":{\"c\":1}#6,\"second\":{\"c\":1}#7}#5}#0 path=[]#8",
+  "action=\"set\" newValue={\"c\":2}#0 oldValue={\"c\":1}#1 path=[\"obj\",\"child\"]#2"
+ ],
+ "sync object: nested set": [
+  "action=\"replace\" newValue={\"obj\":{\"a\":1,\"child\":{\"c\":1}#2}#1,\"setter\":{\"stored\":1,\"value\":1}#3,\"instance\":{\"id\":1}#4,\"alias\":{\"first\":{\"c\":1}#6,\"second\":{\"c\":1}#7}#5}#0 path=[]#8",
+  "action=\"set\" newValue=5 oldValue=1 path=[\"obj\",\"child\",\"c\"]#0",
+  "action=\"set\" newValue=5 oldValue=1 path=[\"alias\",\"first\",\"c\"]#0",
+  "action=\"set\" newValue=5 oldValue=1 path=[\"alias\",\"second\",\"c\"]#0"
+ ],
+ "sync object: nested new key": [
+  "action=\"replace\" newValue={\"obj\":{\"a\":1,\"child\":{\"c\":1}#2}#1,\"setter\":{\"stored\":1,\"value\":1}#3,\"instance\":{\"id\":1}#4,\"alias\":{\"first\":{\"c\":1}#6,\"second\":{\"c\":1}#7}#5}#0 path=[]#8",
+  "action=\"set\" newValue=6 oldValue=undefined path=[\"obj\",\"child\",\"d\"]#0",
+  "action=\"set\" newValue=6 oldValue=undefined path=[\"alias\",\"first\",\"d\"]#0",
+  "action=\"set\" newValue=6 oldValue=undefined path=[\"alias\",\"second\",\"d\"]#0"
+ ],
+ "sync object: delete": [
+  "action=\"replace\" newValue={\"obj\":{\"a\":1,\"child\":{\"c\":1}#2}#1,\"setter\":{\"stored\":1,\"value\":1}#3,\"instance\":{\"id\":1}#4,\"alias\":{\"first\":{\"c\":1}#6,\"second\":{\"c\":1}#7}#5}#0 path=[]#8",
+  "action=\"delete\" oldValue=1 path=[\"obj\",\"a\"]#0"
+ ],
+ "sync object: delete of a missing key": [
+  "action=\"replace\" newValue={\"obj\":{\"a\":1,\"child\":{\"c\":1}#2}#1,\"setter\":{\"stored\":1,\"value\":1}#3,\"instance\":{\"id\":1}#4,\"alias\":{\"first\":{\"c\":1}#6,\"second\":{\"c\":1}#7}#5}#0 path=[]#8"
+ ],
+ "sync object: delete of an object": [
+  "action=\"replace\" newValue={\"obj\":{\"a\":1,\"child\":{\"c\":1}#2}#1,\"setter\":{\"stored\":1,\"value\":1}#3,\"instance\":{\"id\":1}#4,\"alias\":{\"first\":{\"c\":1}#6,\"second\":{\"c\":1}#7}#5}#0 path=[]#8",
+  "action=\"delete\" oldValue={\"c\":1}#0 path=[\"obj\",\"child\"]#1"
+ ],
+ "sync object: set of a symbol key": [
+  "action=\"replace\" newValue={\"obj\":{\"a\":1,\"child\":{\"c\":1}#2}#1,\"setter\":{\"stored\":1,\"value\":1}#3,\"instance\":{\"id\":1}#4,\"alias\":{\"first\":{\"c\":1}#6,\"second\":{\"c\":1}#7}#5}#0 path=[]#8",
+  "action=\"set\" newValue=1 oldValue=undefined path=[\"obj\",\"Symbol(rps.key)\"]#0"
+ ],
+ "sync object: replace of the object": [
+  "action=\"replace\" newValue={\"obj\":{\"a\":1,\"child\":{\"c\":1}#2}#1,\"setter\":{\"stored\":1,\"value\":1}#3,\"instance\":{\"id\":1}#4,\"alias\":{\"first\":{\"c\":1}#6,\"second\":{\"c\":1}#7}#5}#0 path=[]#8",
+  "action=\"set\" newValue={\"fresh\":true}#0 oldValue={\"a\":1,\"child\":{\"c\":1}#2}#1 path=[\"obj\"]#3"
+ ],
+ "sync object: set of a date": [
+  "action=\"replace\" newValue={\"obj\":{\"a\":1,\"child\":{\"c\":1}#2}#1,\"setter\":{\"stored\":1,\"value\":1}#3,\"instance\":{\"id\":1}#4,\"alias\":{\"first\":{\"c\":1}#6,\"second\":{\"c\":1}#7}#5}#0 path=[]#8",
+  "action=\"set\" newValue=Date(0)#0 oldValue=undefined path=[\"obj\",\"when\"]#1"
+ ],
+ "sync object: set through a setter": [
+  "action=\"replace\" newValue={\"obj\":{\"a\":1,\"child\":{\"c\":1}#2}#1,\"setter\":{\"stored\":1,\"value\":1}#3,\"instance\":{\"id\":1}#4,\"alias\":{\"first\":{\"c\":1}#6,\"second\":{\"c\":1}#7}#5}#0 path=[]#8",
+  "action=\"set\" newValue=7 oldValue=1 path=[\"setter\",\"stored\"]#0"
+ ],
+ "sync object: set of a class instance": [
+  "action=\"replace\" newValue={\"obj\":{\"a\":1,\"child\":{\"c\":1}#2}#1,\"setter\":{\"stored\":1,\"value\":1}#3,\"instance\":{\"id\":1}#4,\"alias\":{\"first\":{\"c\":1}#6,\"second\":{\"c\":1}#7}#5}#0 path=[]#8",
+  "action=\"set\" newValue={\"id\":4}#0 oldValue=undefined path=[\"obj\",\"item\"]#1"
+ ],
+ "sync object: write through a class instance": [
+  "action=\"replace\" newValue={\"obj\":{\"a\":1,\"child\":{\"c\":1}#2}#1,\"setter\":{\"stored\":1,\"value\":1}#3,\"instance\":{\"id\":1}#4,\"alias\":{\"first\":{\"c\":1}#6,\"second\":{\"c\":1}#7}#5}#0 path=[]#8",
+  "action=\"set\" newValue=8 oldValue=1 path=[\"instance\",\"id\"]#0"
+ ],
+ "sync object: write through an alias": [
+  "action=\"replace\" newValue={\"obj\":{\"a\":1,\"child\":{\"c\":1}#2}#1,\"setter\":{\"stored\":1,\"value\":1}#3,\"instance\":{\"id\":1}#4,\"alias\":{\"first\":{\"c\":1}#6,\"second\":{\"c\":1}#7}#5}#0 path=[]#8",
+  "action=\"set\" newValue=9 oldValue=1 path=[\"obj\",\"child\",\"c\"]#0",
+  "action=\"set\" newValue=9 oldValue=1 path=[\"alias\",\"first\",\"c\"]#0",
+  "action=\"set\" newValue=9 oldValue=1 path=[\"alias\",\"second\",\"c\"]#0"
+ ],
+ "sync object: a spread back in": [
+  "action=\"replace\" newValue={\"obj\":{\"a\":1,\"child\":{\"c\":1}#2}#1,\"setter\":{\"stored\":1,\"value\":1}#3,\"instance\":{\"id\":1}#4,\"alias\":{\"first\":{\"c\":1}#6,\"second\":{\"c\":1}#7}#5}#0 path=[]#8",
+  "action=\"set\" newValue={\"a\":3,\"child\":{\"c\":1}#1}#0 oldValue={\"a\":1,\"child\":{\"c\":1}#3}#2 path=[\"obj\"]#4"
+ ],
+ "sync object: a run of writes": [
+  "action=\"replace\" newValue={\"obj\":{\"a\":1,\"child\":{\"c\":1}#2}#1,\"setter\":{\"stored\":1,\"value\":1}#3,\"instance\":{\"id\":1}#4,\"alias\":{\"first\":{\"c\":1}#6,\"second\":{\"c\":1}#7}#5}#0 path=[]#8",
+  "action=\"set\" newValue=1 oldValue=undefined path=[\"obj\",\"z\"]#0",
+  "action=\"set\" newValue=2 oldValue=1 path=[\"obj\",\"child\",\"c\"]#0",
+  "action=\"set\" newValue=2 oldValue=1 path=[\"alias\",\"first\",\"c\"]#0",
+  "action=\"set\" newValue=2 oldValue=1 path=[\"alias\",\"second\",\"c\"]#0",
+  "action=\"delete\" oldValue=1 path=[\"obj\",\"a\"]#0",
+  "action=\"set\" newValue=[{\"c\":2}#1]#0 oldValue=undefined path=[\"obj\",\"list\"]#2",
+  "action=\"set\" newValue=3 oldValue=2 path=[\"obj\",\"child\",\"c\"]#0",
+  "action=\"set\" newValue=3 oldValue=2 path=[\"alias\",\"first\",\"c\"]#0",
+  "action=\"set\" newValue=3 oldValue=2 path=[\"alias\",\"second\",\"c\"]#0",
+  "action=\"set\" newValue=3 oldValue=2 path=[\"obj\",\"list\",\"0\",\"c\"]#0"
+ ],
+ "sync map: set of a held key": [
+  "action=\"replace\" newValue={\"map\":Map{\"a\"=>1,\"obj\"=>{\"id\":1}#2,{\"key\":0}#3=>\"h\",0=>\"zero\"}#1}#0 path=[]#4",
+  "action=\"map-set\" key=\"a\" newValue=5 oldValue=1 path=[\"map\"]#0"
+ ],
+ "sync map: set of the same value": [
+  "action=\"replace\" newValue={\"map\":Map{\"a\"=>1,\"obj\"=>{\"id\":1}#2,{\"key\":0}#3=>\"h\",0=>\"zero\"}#1}#0 path=[]#4"
+ ],
+ "sync map: set of a new key": [
+  "action=\"replace\" newValue={\"map\":Map{\"a\"=>1,\"obj\"=>{\"id\":1}#2,{\"key\":0}#3=>\"h\",0=>\"zero\"}#1}#0 path=[]#4",
+  "action=\"map-set\" key=\"z\" newValue=9 oldValue=undefined path=[\"map\"]#0"
+ ],
+ "sync map: set of a new key to undefined": [
+  "action=\"replace\" newValue={\"map\":Map{\"a\"=>1,\"obj\"=>{\"id\":1}#2,{\"key\":0}#3=>\"h\",0=>\"zero\"}#1}#0 path=[]#4",
+  "action=\"map-set\" key=\"z\" newValue=undefined oldValue=undefined path=[\"map\"]#0"
+ ],
+ "sync map: set of an object value": [
+  "action=\"replace\" newValue={\"map\":Map{\"a\"=>1,\"obj\"=>{\"id\":1}#2,{\"key\":0}#3=>\"h\",0=>\"zero\"}#1}#0 path=[]#4",
+  "action=\"map-set\" key=\"o\" newValue={\"id\":1}#0 oldValue=undefined path=[\"map\"]#1"
+ ],
+ "sync map: set of an equal object value": [
+  "action=\"replace\" newValue={\"map\":Map{\"a\"=>1,\"obj\"=>{\"id\":1}#2,{\"key\":0}#3=>\"h\",0=>\"zero\"}#1}#0 path=[]#4"
+ ],
+ "sync map: set of an object key": [
+  "action=\"replace\" newValue={\"map\":Map{\"a\"=>1,\"obj\"=>{\"id\":1}#2,{\"key\":0}#3=>\"h\",0=>\"zero\"}#1}#0 path=[]#4",
+  "action=\"map-set\" key={\"key\":1}#0 newValue=\"v\" oldValue=undefined path=[\"map\"]#1"
+ ],
+ "sync map: set of a held object key": [
+  "action=\"replace\" newValue={\"map\":Map{\"a\"=>1,\"obj\"=>{\"id\":1}#2,{\"key\":0}#3=>\"h\",0=>\"zero\"}#1}#0 path=[]#4",
+  "action=\"map-set\" key={\"key\":0}#0 newValue=\"w\" oldValue=\"h\" path=[\"map\"]#1"
+ ],
+ "sync map: set of a NaN key": [
+  "action=\"replace\" newValue={\"map\":Map{\"a\"=>1,\"obj\"=>{\"id\":1}#2,{\"key\":0}#3=>\"h\",0=>\"zero\"}#1}#0 path=[]#4",
+  "action=\"map-set\" key=NaN newValue=1 oldValue=undefined path=[\"map\"]#0"
+ ],
+ "sync map: set of -0": [
+  "action=\"replace\" newValue={\"map\":Map{\"a\"=>1,\"obj\"=>{\"id\":1}#2,{\"key\":0}#3=>\"h\",0=>\"zero\"}#1}#0 path=[]#4",
+  "action=\"map-set\" key=-0 newValue=1 oldValue=\"zero\" path=[\"map\"]#0"
+ ],
+ "sync map: delete": [
+  "action=\"replace\" newValue={\"map\":Map{\"a\"=>1,\"obj\"=>{\"id\":1}#2,{\"key\":0}#3=>\"h\",0=>\"zero\"}#1}#0 path=[]#4",
+  "action=\"map-delete\" key=\"a\" oldValue=1 path=[\"map\"]#0"
+ ],
+ "sync map: delete of a missing key": [
+  "action=\"replace\" newValue={\"map\":Map{\"a\"=>1,\"obj\"=>{\"id\":1}#2,{\"key\":0}#3=>\"h\",0=>\"zero\"}#1}#0 path=[]#4"
+ ],
+ "sync map: delete of an object key": [
+  "action=\"replace\" newValue={\"map\":Map{\"a\"=>1,\"obj\"=>{\"id\":1}#2,{\"key\":0}#3=>\"h\",0=>\"zero\"}#1}#0 path=[]#4",
+  "action=\"map-delete\" key={\"key\":0}#0 oldValue=\"h\" path=[\"map\"]#1"
+ ],
+ "sync map: clear": [
+  "action=\"replace\" newValue={\"map\":Map{\"a\"=>1,\"obj\"=>{\"id\":1}#2,{\"key\":0}#3=>\"h\",0=>\"zero\"}#1}#0 path=[]#4",
+  "action=\"map-clear\" key=null path=[\"map\"]#0"
+ ],
+ "sync map: write through a value": [
+  "action=\"replace\" newValue={\"map\":Map{\"a\"=>1,\"obj\"=>{\"id\":1}#2,{\"key\":0}#3=>\"h\",0=>\"zero\"}#1}#0 path=[]#4",
+  "action=\"set\" newValue=2 oldValue=1 path=[\"map\",\"obj\",\"id\"]#0"
+ ],
+ "sync map: write through a value from values()": [
+  "action=\"replace\" newValue={\"map\":Map{\"a\"=>1,\"obj\"=>{\"id\":1}#2,{\"key\":0}#3=>\"h\",0=>\"zero\"}#1}#0 path=[]#4",
+  "action=\"set\" newValue=3 oldValue=1 path=[\"map\",\"obj\",\"id\"]#0"
+ ],
+ "sync map: a run of writes": [
+  "action=\"replace\" newValue={\"map\":Map{\"a\"=>1,\"obj\"=>{\"id\":1}#2,{\"key\":0}#3=>\"h\",0=>\"zero\"}#1}#0 path=[]#4",
+  "action=\"map-set\" key=\"z\" newValue=1 oldValue=undefined path=[\"map\"]#0",
+  "action=\"map-delete\" key=\"a\" oldValue=1 path=[\"map\"]#0",
+  "action=\"set\" newValue=4 oldValue=1 path=[\"map\",\"obj\",\"id\"]#0",
+  "action=\"map-set\" key=\"obj\" newValue={\"id\":5}#0 oldValue={\"id\":4}#1 path=[\"map\"]#2",
+  "action=\"map-clear\" key=null path=[\"map\"]#0",
+  "action=\"map-set\" key=\"a\" newValue=1 oldValue=undefined path=[\"map\"]#0"
+ ],
+ "sync set: add of a new value": [
+  "action=\"replace\" newValue={\"set\":Set{1,\"1\",{\"id\":1}#2}#1}#0 path=[]#3",
+  "action=\"set-add\" path=[\"set\"]#0 value=9"
+ ],
+ "sync set: add of a held value": [
+  "action=\"replace\" newValue={\"set\":Set{1,\"1\",{\"id\":1}#2}#1}#0 path=[]#3"
+ ],
+ "sync set: add of an object": [
+  "action=\"replace\" newValue={\"set\":Set{1,\"1\",{\"id\":1}#2}#1}#0 path=[]#3",
+  "action=\"set-add\" path=[\"set\"]#0 value={\"id\":7}#1"
+ ],
+ "sync set: add of a held object": [
+  "action=\"replace\" newValue={\"set\":Set{1,\"1\",{\"id\":1}#2}#1}#0 path=[]#3"
+ ],
+ "sync set: add of NaN": [
+  "action=\"replace\" newValue={\"set\":Set{1,\"1\",{\"id\":1}#2}#1}#0 path=[]#3",
+  "action=\"set-add\" path=[\"set\"]#0 value=NaN"
+ ],
+ "sync set: delete": [
+  "action=\"replace\" newValue={\"set\":Set{1,\"1\",{\"id\":1}#2}#1}#0 path=[]#3",
+  "action=\"set-delete\" oldValue=1 path=[\"set\"]#0 value=1"
+ ],
+ "sync set: delete of a missing value": [
+  "action=\"replace\" newValue={\"set\":Set{1,\"1\",{\"id\":1}#2}#1}#0 path=[]#3"
+ ],
+ "sync set: delete of an object": [
+  "action=\"replace\" newValue={\"set\":Set{1,\"1\",{\"id\":1}#2}#1}#0 path=[]#3",
+  "action=\"set-delete\" oldValue={\"id\":1}#0 path=[\"set\"]#1 value=#0"
+ ],
+ "sync set: clear": [
+  "action=\"replace\" newValue={\"set\":Set{1,\"1\",{\"id\":1}#2}#1}#0 path=[]#3",
+  "action=\"set-clear\" path=[\"set\"]#0 value=null"
+ ],
+ "sync set: write through a member": [
+  "action=\"replace\" newValue={\"set\":Set{1,\"1\",{\"id\":1}#2}#1}#0 path=[]#3",
+  "action=\"set\" newValue=5 oldValue=1 path=[\"set\",\"2\",\"id\"]#0"
+ ],
+ "sync set: a run of writes": [
+  "action=\"replace\" newValue={\"set\":Set{1,\"1\",{\"id\":1}#2}#1}#0 path=[]#3",
+  "action=\"set-add\" path=[\"set\"]#0 value=2",
+  "action=\"set-delete\" oldValue=1 path=[\"set\"]#0 value=1",
+  "action=\"set-add\" path=[\"set\"]#0 value={\"id\":3}#1",
+  "action=\"set-clear\" path=[\"set\"]#0 value=null",
+  "action=\"set-add\" path=[\"set\"]#0 value=1"
+ ],
+ "async array in an object: index set": [
+  "action=\"replace\" newValue={\"list\":[{\"id\":1}#2,{\"id\":2}#3,{\"id\":3}#4]#1}#0 path=[]#5",
+  "action=\"set\" newValue={\"id\":9}#0 oldValue={\"id\":1}#1 path=[\"list\",\"0\"]#2"
+ ],
+ "async array in an object: index set of a primitive": [
+  "action=\"replace\" newValue={\"list\":[{\"id\":1}#2,{\"id\":2}#3,{\"id\":3}#4]#1}#0 path=[]#5",
+  "action=\"set\" newValue=5 oldValue={\"id\":2}#0 path=[\"list\",\"1\"]#1"
+ ],
+ "async array in an object: index set to the same object": [
+  "action=\"replace\" newValue={\"list\":[{\"id\":1}#2,{\"id\":2}#3,{\"id\":3}#4]#1}#0 path=[]#5"
+ ],
+ "async array in an object: index set to an equal object": [
+  "action=\"replace\" newValue={\"list\":[{\"id\":1}#2,{\"id\":2}#3,{\"id\":3}#4]#1}#0 path=[]#5"
+ ],
+ "async array in an object: index set past the end": [
+  "action=\"replace\" newValue={\"list\":[{\"id\":1}#2,{\"id\":2}#3,{\"id\":3}#4]#1}#0 path=[]#5",
+  "action=\"set\" newValue={\"id\":9}#0 oldValue=undefined path=[\"list\",\"3\"]#1"
+ ],
+ "async array in an object: index set far past the end": [
+  "action=\"replace\" newValue={\"list\":[{\"id\":1}#2,{\"id\":2}#3,{\"id\":3}#4]#1}#0 path=[]#5",
+  "action=\"set\" newValue={\"id\":9}#0 oldValue=undefined path=[\"list\",\"5\"]#1"
+ ],
+ "async array in an object: index set to undefined past the end": [
+  "action=\"replace\" newValue={\"list\":[{\"id\":1}#2,{\"id\":2}#3,{\"id\":3}#4]#1}#0 path=[]#5",
+  "action=\"set\" newValue=undefined oldValue=undefined path=[\"list\",\"3\"]#0"
+ ],
+ "async array in an object: index delete": [
+  "action=\"replace\" newValue={\"list\":[{\"id\":1}#2,{\"id\":2}#3,{\"id\":3}#4]#1}#0 path=[]#5",
+  "action=\"delete\" oldValue={\"id\":1}#0 path=[\"list\",\"0\"]#1"
+ ],
+ "async array in an object: last index delete": [
+  "action=\"replace\" newValue={\"list\":[{\"id\":1}#2,{\"id\":2}#3,{\"id\":3}#4]#1}#0 path=[]#5",
+  "action=\"delete\" oldValue={\"id\":3}#0 path=[\"list\",\"2\"]#1"
+ ],
+ "async array in an object: delete of a missing index": [
+  "action=\"replace\" newValue={\"list\":[{\"id\":1}#2,{\"id\":2}#3,{\"id\":3}#4]#1}#0 path=[]#5"
+ ],
+ "async array in an object: shorter length": [
+  "action=\"replace\" newValue={\"list\":[{\"id\":1}#2,{\"id\":2}#3,{\"id\":3}#4]#1}#0 path=[]#5",
+  "action=\"set\" newValue=1 oldValue=3 path=[\"list\",\"length\"]#0"
+ ],
+ "async array in an object: length 0": [
+  "action=\"replace\" newValue={\"list\":[{\"id\":1}#2,{\"id\":2}#3,{\"id\":3}#4]#1}#0 path=[]#5",
+  "action=\"set\" newValue=0 oldValue=3 path=[\"list\",\"length\"]#0"
+ ],
+ "async array in an object: longer length": [
+  "action=\"replace\" newValue={\"list\":[{\"id\":1}#2,{\"id\":2}#3,{\"id\":3}#4]#1}#0 path=[]#5",
+  "action=\"set\" newValue=undefined path=[\"list\",\"3\"]#0",
+  "action=\"set\" newValue=undefined path=[\"list\",\"4\"]#0"
+ ],
+ "async array in an object: same length": [
+  "action=\"replace\" newValue={\"list\":[{\"id\":1}#2,{\"id\":2}#3,{\"id\":3}#4]#1}#0 path=[]#5"
+ ],
+ "async array in an object: named property": [
+  "action=\"replace\" newValue={\"list\":[{\"id\":1}#2,{\"id\":2}#3,{\"id\":3}#4]#1}#0 path=[]#5",
+  "action=\"set\" newValue=\"x\" oldValue=undefined path=[\"list\",\"label\"]#0"
+ ],
+ "async array in an object: push": [
+  "action=\"replace\" newValue={\"list\":[{\"id\":1}#2,{\"id\":2}#3,{\"id\":3}#4]#1}#0 path=[]#5",
+  "action=\"array-push\" items=[{\"id\":9}#1]#0 key=3 path=[\"list\"]#2"
+ ],
+ "async array in an object: push of two": [
+  "action=\"replace\" newValue={\"list\":[{\"id\":1}#2,{\"id\":2}#3,{\"id\":3}#4]#1}#0 path=[]#5",
+  "action=\"array-push\" items=[{\"id\":8}#1,7]#0 key=3 path=[\"list\"]#2"
+ ],
+ "async array in an object: push of nothing": [
+  "action=\"replace\" newValue={\"list\":[{\"id\":1}#2,{\"id\":2}#3,{\"id\":3}#4]#1}#0 path=[]#5"
+ ],
+ "async array in an object: pop": [
+  "action=\"replace\" newValue={\"list\":[{\"id\":1}#2,{\"id\":2}#3,{\"id\":3}#4]#1}#0 path=[]#5",
+  "action=\"array-pop\" key=2 oldValue={\"id\":3}#0 path=[\"list\"]#1"
+ ],
+ "async array in an object: shift": [
+  "action=\"replace\" newValue={\"list\":[{\"id\":1}#2,{\"id\":2}#3,{\"id\":3}#4]#1}#0 path=[]#5",
+  "action=\"array-shift\" key=0 oldValue={\"id\":1}#0 path=[\"list\"]#1"
+ ],
+ "async array in an object: unshift": [
+  "action=\"replace\" newValue={\"list\":[{\"id\":1}#2,{\"id\":2}#3,{\"id\":3}#4]#1}#0 path=[]#5",
+  "action=\"array-unshift\" items=[{\"id\":9}#1]#0 key=0 path=[\"list\"]#2"
+ ],
+ "async array in an object: unshift of nothing": [
+  "action=\"replace\" newValue={\"list\":[{\"id\":1}#2,{\"id\":2}#3,{\"id\":3}#4]#1}#0 path=[]#5"
+ ],
+ "async array in an object: splice removes": [
+  "action=\"replace\" newValue={\"list\":[{\"id\":1}#2,{\"id\":2}#3,{\"id\":3}#4]#1}#0 path=[]#5",
+  "action=\"array-splice\" deleteCount=1 items=undefined key=0 oldValues=[{\"id\":1}#1]#0 path=[\"list\"]#2"
+ ],
+ "async array in an object: splice inserts": [
+  "action=\"replace\" newValue={\"list\":[{\"id\":1}#2,{\"id\":2}#3,{\"id\":3}#4]#1}#0 path=[]#5",
+  "action=\"array-splice\" deleteCount=0 items=[{\"id\":9}#1]#0 key=1 oldValues=undefined path=[\"list\"]#2"
+ ],
+ "async array in an object: splice replaces": [
+  "action=\"replace\" newValue={\"list\":[{\"id\":1}#2,{\"id\":2}#3,{\"id\":3}#4]#1}#0 path=[]#5",
+  "action=\"array-splice\" deleteCount=1 items=[{\"id\":9}#1]#0 key=1 oldValues=[{\"id\":2}#3]#2 path=[\"list\"]#4"
+ ],
+ "async array in an object: splice with no arguments": [
+  "action=\"replace\" newValue={\"list\":[{\"id\":1}#2,{\"id\":2}#3,{\"id\":3}#4]#1}#0 path=[]#5"
+ ],
+ "async array in an object: splice with a start only": [
+  "action=\"replace\" newValue={\"list\":[{\"id\":1}#2,{\"id\":2}#3,{\"id\":3}#4]#1}#0 path=[]#5",
+  "action=\"array-splice\" deleteCount=2 items=undefined key=1 oldValues=[{\"id\":2}#1,{\"id\":3}#2]#0 path=[\"list\"]#3"
+ ],
+ "async array in an object: splice from the end": [
+  "action=\"replace\" newValue={\"list\":[{\"id\":1}#2,{\"id\":2}#3,{\"id\":3}#4]#1}#0 path=[]#5",
+  "action=\"array-splice\" deleteCount=1 items=[{\"id\":9}#1,{\"id\":8}#2]#0 key=2 oldValues=[{\"id\":3}#4]#3 path=[\"list\"]#5"
+ ],
+ "async array in an object: reverse": [
+  "action=\"replace\" newValue={\"list\":[{\"id\":1}#2,{\"id\":2}#3,{\"id\":3}#4]#1}#0 path=[]#5",
+  "action=\"replace\" newValue=[{\"id\":3}#1,{\"id\":2}#2,{\"id\":1}#3]#0 oldValue=[{\"id\":1}#5,{\"id\":2}#6,{\"id\":3}#7]#4 path=[\"list\"]#8"
+ ],
+ "async array in an object: sort": [
+  "action=\"replace\" newValue={\"list\":[{\"id\":1}#2,{\"id\":2}#3,{\"id\":3}#4]#1}#0 path=[]#5",
+  "action=\"replace\" newValue=[{\"id\":3}#1,{\"id\":2}#2,{\"id\":1}#3]#0 oldValue=[{\"id\":1}#5,{\"id\":2}#6,{\"id\":3}#7]#4 path=[\"list\"]#8"
+ ],
+ "async array in an object: sort that changes nothing": [
+  "action=\"replace\" newValue={\"list\":[{\"id\":1}#2,{\"id\":2}#3,{\"id\":3}#4]#1}#0 path=[]#5"
+ ],
+ "async array in an object: fill": [
+  "action=\"replace\" newValue={\"list\":[{\"id\":1}#2,{\"id\":2}#3,{\"id\":3}#4]#1}#0 path=[]#5",
+  "action=\"replace\" newValue=[{\"id\":9}#1,{\"id\":2}#2,{\"id\":3}#3]#0 oldValue=[{\"id\":1}#5,{\"id\":2}#6,{\"id\":3}#7]#4 path=[\"list\"]#8"
+ ],
+ "async array in an object: fill of all": [
+  "action=\"replace\" newValue={\"list\":[{\"id\":1}#2,{\"id\":2}#3,{\"id\":3}#4]#1}#0 path=[]#5",
+  "action=\"replace\" newValue=[0,0,0]#0 oldValue=[{\"id\":1}#2,{\"id\":2}#3,{\"id\":3}#4]#1 path=[\"list\"]#5"
+ ],
+ "async array in an object: copyWithin": [
+  "action=\"replace\" newValue={\"list\":[{\"id\":1}#2,{\"id\":2}#3,{\"id\":3}#4]#1}#0 path=[]#5",
+  "action=\"replace\" newValue=[{\"id\":2}#1,{\"id\":3}#2,{\"id\":3}#3]#0 oldValue=[{\"id\":1}#5,{\"id\":2}#6,{\"id\":3}#7]#4 path=[\"list\"]#8"
+ ],
+ "async array in an object: write through an item": [
+  "action=\"replace\" newValue={\"list\":[{\"id\":1}#2,{\"id\":2}#3,{\"id\":3}#4]#1}#0 path=[]#5",
+  "action=\"set\" newValue=20 oldValue=2 path=[\"list\",\"1\",\"id\"]#0"
+ ],
+ "async array in an object: write through an item after a shift": [
+  "action=\"replace\" newValue={\"list\":[{\"id\":1}#2,{\"id\":2}#3,{\"id\":3}#4]#1}#0 path=[]#5",
+  "action=\"array-shift\" key=0 oldValue={\"id\":1}#0 path=[\"list\"]#1",
+  "action=\"set\" newValue=30 oldValue=3 path=[\"list\",\"1\",\"id\"]#0"
+ ],
+ "async array in an object: write through an item after a reverse": [
+  "action=\"replace\" newValue={\"list\":[{\"id\":1}#2,{\"id\":2}#3,{\"id\":3}#4]#1}#0 path=[]#5",
+  "action=\"replace\" newValue=[{\"id\":3}#1,{\"id\":2}#2,{\"id\":1}#3]#0 oldValue=[{\"id\":1}#5,{\"id\":2}#6,{\"id\":3}#7]#4 path=[\"list\"]#8",
+  "action=\"set\" newValue=10 oldValue=1 path=[\"list\",\"2\",\"id\"]#0"
+ ],
+ "async array in an object: a run of writes": [
+  "action=\"replace\" newValue={\"list\":[{\"id\":1}#2,{\"id\":2}#3,{\"id\":3}#4]#1}#0 path=[]#5",
+  "action=\"array-push\" items=[{\"id\":4}#1]#0 key=3 path=[\"list\"]#2",
+  "action=\"set\" newValue=11 oldValue=1 path=[\"list\",\"0\",\"id\"]#0",
+  "action=\"array-splice\" deleteCount=1 items=undefined key=1 oldValues=[{\"id\":2}#1]#0 path=[\"list\"]#2",
+  "action=\"array-unshift\" items=[0]#0 key=0 path=[\"list\"]#1",
+  "action=\"set\" newValue=2 oldValue=4 path=[\"list\",\"length\"]#0"
+ ],
+ "async array as the root: index set": [
+  "action=\"replace\" newValue=[{\"id\":1}#1,{\"id\":2}#2,{\"id\":3}#3]#0 path=[]#4",
+  "action=\"set\" newValue={\"id\":9}#0 oldValue={\"id\":1}#1 path=[\"0\"]#2"
+ ],
+ "async array as the root: index set of a primitive": [
+  "action=\"replace\" newValue=[{\"id\":1}#1,{\"id\":2}#2,{\"id\":3}#3]#0 path=[]#4",
+  "action=\"set\" newValue=5 oldValue={\"id\":2}#0 path=[\"1\"]#1"
+ ],
+ "async array as the root: index set to the same object": [
+  "action=\"replace\" newValue=[{\"id\":1}#1,{\"id\":2}#2,{\"id\":3}#3]#0 path=[]#4"
+ ],
+ "async array as the root: index set to an equal object": [
+  "action=\"replace\" newValue=[{\"id\":1}#1,{\"id\":2}#2,{\"id\":3}#3]#0 path=[]#4"
+ ],
+ "async array as the root: index set past the end": [
+  "action=\"replace\" newValue=[{\"id\":1}#1,{\"id\":2}#2,{\"id\":3}#3]#0 path=[]#4",
+  "action=\"set\" newValue={\"id\":9}#0 oldValue=undefined path=[\"3\"]#1"
+ ],
+ "async array as the root: index set far past the end": [
+  "action=\"replace\" newValue=[{\"id\":1}#1,{\"id\":2}#2,{\"id\":3}#3]#0 path=[]#4",
+  "action=\"set\" newValue={\"id\":9}#0 oldValue=undefined path=[\"5\"]#1"
+ ],
+ "async array as the root: index set to undefined past the end": [
+  "action=\"replace\" newValue=[{\"id\":1}#1,{\"id\":2}#2,{\"id\":3}#3]#0 path=[]#4",
+  "action=\"set\" newValue=undefined oldValue=undefined path=[\"3\"]#0"
+ ],
+ "async array as the root: index delete": [
+  "action=\"replace\" newValue=[{\"id\":1}#1,{\"id\":2}#2,{\"id\":3}#3]#0 path=[]#4",
+  "action=\"delete\" oldValue={\"id\":1}#0 path=[\"0\"]#1"
+ ],
+ "async array as the root: last index delete": [
+  "action=\"replace\" newValue=[{\"id\":1}#1,{\"id\":2}#2,{\"id\":3}#3]#0 path=[]#4",
+  "action=\"delete\" oldValue={\"id\":3}#0 path=[\"2\"]#1"
+ ],
+ "async array as the root: delete of a missing index": [
+  "action=\"replace\" newValue=[{\"id\":1}#1,{\"id\":2}#2,{\"id\":3}#3]#0 path=[]#4"
+ ],
+ "async array as the root: shorter length": [
+  "action=\"replace\" newValue=[{\"id\":1}#1,{\"id\":2}#2,{\"id\":3}#3]#0 path=[]#4",
+  "action=\"set\" newValue=1 oldValue=3 path=[\"length\"]#0"
+ ],
+ "async array as the root: length 0": [
+  "action=\"replace\" newValue=[{\"id\":1}#1,{\"id\":2}#2,{\"id\":3}#3]#0 path=[]#4",
+  "action=\"set\" newValue=0 oldValue=3 path=[\"length\"]#0"
+ ],
+ "async array as the root: longer length": [
+  "action=\"replace\" newValue=[{\"id\":1}#1,{\"id\":2}#2,{\"id\":3}#3]#0 path=[]#4",
+  "action=\"set\" newValue=undefined path=[\"3\"]#0",
+  "action=\"set\" newValue=undefined path=[\"4\"]#0"
+ ],
+ "async array as the root: same length": [
+  "action=\"replace\" newValue=[{\"id\":1}#1,{\"id\":2}#2,{\"id\":3}#3]#0 path=[]#4"
+ ],
+ "async array as the root: named property": [
+  "action=\"replace\" newValue=[{\"id\":1}#1,{\"id\":2}#2,{\"id\":3}#3]#0 path=[]#4",
+  "action=\"set\" newValue=\"x\" oldValue=undefined path=[\"label\"]#0"
+ ],
+ "async array as the root: push": [
+  "action=\"replace\" newValue=[{\"id\":1}#1,{\"id\":2}#2,{\"id\":3}#3]#0 path=[]#4",
+  "action=\"array-push\" items=[{\"id\":9}#1]#0 key=3 path=[]#2"
+ ],
+ "async array as the root: push of two": [
+  "action=\"replace\" newValue=[{\"id\":1}#1,{\"id\":2}#2,{\"id\":3}#3]#0 path=[]#4",
+  "action=\"array-push\" items=[{\"id\":8}#1,7]#0 key=3 path=[]#2"
+ ],
+ "async array as the root: push of nothing": [
+  "action=\"replace\" newValue=[{\"id\":1}#1,{\"id\":2}#2,{\"id\":3}#3]#0 path=[]#4"
+ ],
+ "async array as the root: pop": [
+  "action=\"replace\" newValue=[{\"id\":1}#1,{\"id\":2}#2,{\"id\":3}#3]#0 path=[]#4",
+  "action=\"array-pop\" key=2 oldValue={\"id\":3}#0 path=[]#1"
+ ],
+ "async array as the root: shift": [
+  "action=\"replace\" newValue=[{\"id\":1}#1,{\"id\":2}#2,{\"id\":3}#3]#0 path=[]#4",
+  "action=\"array-shift\" key=0 oldValue={\"id\":1}#0 path=[]#1"
+ ],
+ "async array as the root: unshift": [
+  "action=\"replace\" newValue=[{\"id\":1}#1,{\"id\":2}#2,{\"id\":3}#3]#0 path=[]#4",
+  "action=\"array-unshift\" items=[{\"id\":9}#1]#0 key=0 path=[]#2"
+ ],
+ "async array as the root: unshift of nothing": [
+  "action=\"replace\" newValue=[{\"id\":1}#1,{\"id\":2}#2,{\"id\":3}#3]#0 path=[]#4"
+ ],
+ "async array as the root: splice removes": [
+  "action=\"replace\" newValue=[{\"id\":1}#1,{\"id\":2}#2,{\"id\":3}#3]#0 path=[]#4",
+  "action=\"array-splice\" deleteCount=1 items=undefined key=0 oldValues=[{\"id\":1}#1]#0 path=[]#2"
+ ],
+ "async array as the root: splice inserts": [
+  "action=\"replace\" newValue=[{\"id\":1}#1,{\"id\":2}#2,{\"id\":3}#3]#0 path=[]#4",
+  "action=\"array-splice\" deleteCount=0 items=[{\"id\":9}#1]#0 key=1 oldValues=undefined path=[]#2"
+ ],
+ "async array as the root: splice replaces": [
+  "action=\"replace\" newValue=[{\"id\":1}#1,{\"id\":2}#2,{\"id\":3}#3]#0 path=[]#4",
+  "action=\"array-splice\" deleteCount=1 items=[{\"id\":9}#1]#0 key=1 oldValues=[{\"id\":2}#3]#2 path=[]#4"
+ ],
+ "async array as the root: splice with no arguments": [
+  "action=\"replace\" newValue=[{\"id\":1}#1,{\"id\":2}#2,{\"id\":3}#3]#0 path=[]#4"
+ ],
+ "async array as the root: splice with a start only": [
+  "action=\"replace\" newValue=[{\"id\":1}#1,{\"id\":2}#2,{\"id\":3}#3]#0 path=[]#4",
+  "action=\"array-splice\" deleteCount=2 items=undefined key=1 oldValues=[{\"id\":2}#1,{\"id\":3}#2]#0 path=[]#3"
+ ],
+ "async array as the root: splice from the end": [
+  "action=\"replace\" newValue=[{\"id\":1}#1,{\"id\":2}#2,{\"id\":3}#3]#0 path=[]#4",
+  "action=\"array-splice\" deleteCount=1 items=[{\"id\":9}#1,{\"id\":8}#2]#0 key=2 oldValues=[{\"id\":3}#4]#3 path=[]#5"
+ ],
+ "async array as the root: reverse": [
+  "action=\"replace\" newValue=[{\"id\":1}#1,{\"id\":2}#2,{\"id\":3}#3]#0 path=[]#4",
+  "action=\"replace\" newValue=[{\"id\":3}#1,{\"id\":2}#2,{\"id\":1}#3]#0 oldValue=[{\"id\":1}#5,{\"id\":2}#6,{\"id\":3}#7]#4 path=[]#8"
+ ],
+ "async array as the root: sort": [
+  "action=\"replace\" newValue=[{\"id\":1}#1,{\"id\":2}#2,{\"id\":3}#3]#0 path=[]#4",
+  "action=\"replace\" newValue=[{\"id\":3}#1,{\"id\":2}#2,{\"id\":1}#3]#0 oldValue=[{\"id\":1}#5,{\"id\":2}#6,{\"id\":3}#7]#4 path=[]#8"
+ ],
+ "async array as the root: sort that changes nothing": [
+  "action=\"replace\" newValue=[{\"id\":1}#1,{\"id\":2}#2,{\"id\":3}#3]#0 path=[]#4"
+ ],
+ "async array as the root: fill": [
+  "action=\"replace\" newValue=[{\"id\":1}#1,{\"id\":2}#2,{\"id\":3}#3]#0 path=[]#4",
+  "action=\"replace\" newValue=[{\"id\":9}#1,{\"id\":2}#2,{\"id\":3}#3]#0 oldValue=[{\"id\":1}#5,{\"id\":2}#6,{\"id\":3}#7]#4 path=[]#8"
+ ],
+ "async array as the root: fill of all": [
+  "action=\"replace\" newValue=[{\"id\":1}#1,{\"id\":2}#2,{\"id\":3}#3]#0 path=[]#4",
+  "action=\"replace\" newValue=[0,0,0]#0 oldValue=[{\"id\":1}#2,{\"id\":2}#3,{\"id\":3}#4]#1 path=[]#5"
+ ],
+ "async array as the root: copyWithin": [
+  "action=\"replace\" newValue=[{\"id\":1}#1,{\"id\":2}#2,{\"id\":3}#3]#0 path=[]#4",
+  "action=\"replace\" newValue=[{\"id\":2}#1,{\"id\":3}#2,{\"id\":3}#3]#0 oldValue=[{\"id\":1}#5,{\"id\":2}#6,{\"id\":3}#7]#4 path=[]#8"
+ ],
+ "async array as the root: write through an item": [
+  "action=\"replace\" newValue=[{\"id\":1}#1,{\"id\":2}#2,{\"id\":3}#3]#0 path=[]#4",
+  "action=\"set\" newValue=20 oldValue=2 path=[\"1\",\"id\"]#0"
+ ],
+ "async array as the root: write through an item after a shift": [
+  "action=\"replace\" newValue=[{\"id\":1}#1,{\"id\":2}#2,{\"id\":3}#3]#0 path=[]#4",
+  "action=\"array-shift\" key=0 oldValue={\"id\":1}#0 path=[]#1",
+  "action=\"set\" newValue=30 oldValue=3 path=[\"1\",\"id\"]#0"
+ ],
+ "async array as the root: write through an item after a reverse": [
+  "action=\"replace\" newValue=[{\"id\":1}#1,{\"id\":2}#2,{\"id\":3}#3]#0 path=[]#4",
+  "action=\"replace\" newValue=[{\"id\":3}#1,{\"id\":2}#2,{\"id\":1}#3]#0 oldValue=[{\"id\":1}#5,{\"id\":2}#6,{\"id\":3}#7]#4 path=[]#8",
+  "action=\"set\" newValue=10 oldValue=1 path=[\"2\",\"id\"]#0"
+ ],
+ "async array as the root: a run of writes": [
+  "action=\"replace\" newValue=[{\"id\":1}#1,{\"id\":2}#2,{\"id\":3}#3]#0 path=[]#4",
+  "action=\"array-push\" items=[{\"id\":4}#1]#0 key=3 path=[]#2",
+  "action=\"set\" newValue=11 oldValue=1 path=[\"0\",\"id\"]#0",
+  "action=\"array-splice\" deleteCount=1 items=undefined key=1 oldValues=[{\"id\":2}#1]#0 path=[]#2",
+  "action=\"array-unshift\" items=[0]#0 key=0 path=[]#1",
+  "action=\"set\" newValue=2 oldValue=4 path=[\"length\"]#0"
+ ],
+ "async array nested in an array: index set": [
+  "action=\"replace\" newValue={\"rows\":[[0]#2,[{\"id\":1}#4,{\"id\":2}#5,{\"id\":3}#6]#3]#1}#0 path=[]#7",
+  "action=\"set\" newValue={\"id\":9}#0 oldValue={\"id\":1}#1 path=[\"rows\",\"1\",\"0\"]#2"
+ ],
+ "async array nested in an array: index set of a primitive": [
+  "action=\"replace\" newValue={\"rows\":[[0]#2,[{\"id\":1}#4,{\"id\":2}#5,{\"id\":3}#6]#3]#1}#0 path=[]#7",
+  "action=\"set\" newValue=5 oldValue={\"id\":2}#0 path=[\"rows\",\"1\",\"1\"]#1"
+ ],
+ "async array nested in an array: index set to the same object": [
+  "action=\"replace\" newValue={\"rows\":[[0]#2,[{\"id\":1}#4,{\"id\":2}#5,{\"id\":3}#6]#3]#1}#0 path=[]#7"
+ ],
+ "async array nested in an array: index set to an equal object": [
+  "action=\"replace\" newValue={\"rows\":[[0]#2,[{\"id\":1}#4,{\"id\":2}#5,{\"id\":3}#6]#3]#1}#0 path=[]#7"
+ ],
+ "async array nested in an array: index set past the end": [
+  "action=\"replace\" newValue={\"rows\":[[0]#2,[{\"id\":1}#4,{\"id\":2}#5,{\"id\":3}#6]#3]#1}#0 path=[]#7",
+  "action=\"set\" newValue={\"id\":9}#0 oldValue=undefined path=[\"rows\",\"1\",\"3\"]#1"
+ ],
+ "async array nested in an array: index set far past the end": [
+  "action=\"replace\" newValue={\"rows\":[[0]#2,[{\"id\":1}#4,{\"id\":2}#5,{\"id\":3}#6]#3]#1}#0 path=[]#7",
+  "action=\"set\" newValue={\"id\":9}#0 oldValue=undefined path=[\"rows\",\"1\",\"5\"]#1"
+ ],
+ "async array nested in an array: index set to undefined past the end": [
+  "action=\"replace\" newValue={\"rows\":[[0]#2,[{\"id\":1}#4,{\"id\":2}#5,{\"id\":3}#6]#3]#1}#0 path=[]#7",
+  "action=\"set\" newValue=undefined oldValue=undefined path=[\"rows\",\"1\",\"3\"]#0"
+ ],
+ "async array nested in an array: index delete": [
+  "action=\"replace\" newValue={\"rows\":[[0]#2,[{\"id\":1}#4,{\"id\":2}#5,{\"id\":3}#6]#3]#1}#0 path=[]#7",
+  "action=\"delete\" oldValue={\"id\":1}#0 path=[\"rows\",\"1\",\"0\"]#1"
+ ],
+ "async array nested in an array: last index delete": [
+  "action=\"replace\" newValue={\"rows\":[[0]#2,[{\"id\":1}#4,{\"id\":2}#5,{\"id\":3}#6]#3]#1}#0 path=[]#7",
+  "action=\"delete\" oldValue={\"id\":3}#0 path=[\"rows\",\"1\",\"2\"]#1"
+ ],
+ "async array nested in an array: delete of a missing index": [
+  "action=\"replace\" newValue={\"rows\":[[0]#2,[{\"id\":1}#4,{\"id\":2}#5,{\"id\":3}#6]#3]#1}#0 path=[]#7"
+ ],
+ "async array nested in an array: shorter length": [
+  "action=\"replace\" newValue={\"rows\":[[0]#2,[{\"id\":1}#4,{\"id\":2}#5,{\"id\":3}#6]#3]#1}#0 path=[]#7",
+  "action=\"set\" newValue=1 oldValue=3 path=[\"rows\",\"1\",\"length\"]#0"
+ ],
+ "async array nested in an array: length 0": [
+  "action=\"replace\" newValue={\"rows\":[[0]#2,[{\"id\":1}#4,{\"id\":2}#5,{\"id\":3}#6]#3]#1}#0 path=[]#7",
+  "action=\"set\" newValue=0 oldValue=3 path=[\"rows\",\"1\",\"length\"]#0"
+ ],
+ "async array nested in an array: longer length": [
+  "action=\"replace\" newValue={\"rows\":[[0]#2,[{\"id\":1}#4,{\"id\":2}#5,{\"id\":3}#6]#3]#1}#0 path=[]#7",
+  "action=\"set\" newValue=undefined path=[\"rows\",\"1\",\"3\"]#0",
+  "action=\"set\" newValue=undefined path=[\"rows\",\"1\",\"4\"]#0"
+ ],
+ "async array nested in an array: same length": [
+  "action=\"replace\" newValue={\"rows\":[[0]#2,[{\"id\":1}#4,{\"id\":2}#5,{\"id\":3}#6]#3]#1}#0 path=[]#7"
+ ],
+ "async array nested in an array: named property": [
+  "action=\"replace\" newValue={\"rows\":[[0]#2,[{\"id\":1}#4,{\"id\":2}#5,{\"id\":3}#6]#3]#1}#0 path=[]#7",
+  "action=\"set\" newValue=\"x\" oldValue=undefined path=[\"rows\",\"1\",\"label\"]#0"
+ ],
+ "async array nested in an array: push": [
+  "action=\"replace\" newValue={\"rows\":[[0]#2,[{\"id\":1}#4,{\"id\":2}#5,{\"id\":3}#6]#3]#1}#0 path=[]#7",
+  "action=\"array-push\" items=[{\"id\":9}#1]#0 key=3 path=[\"rows\",\"1\"]#2"
+ ],
+ "async array nested in an array: push of two": [
+  "action=\"replace\" newValue={\"rows\":[[0]#2,[{\"id\":1}#4,{\"id\":2}#5,{\"id\":3}#6]#3]#1}#0 path=[]#7",
+  "action=\"array-push\" items=[{\"id\":8}#1,7]#0 key=3 path=[\"rows\",\"1\"]#2"
+ ],
+ "async array nested in an array: push of nothing": [
+  "action=\"replace\" newValue={\"rows\":[[0]#2,[{\"id\":1}#4,{\"id\":2}#5,{\"id\":3}#6]#3]#1}#0 path=[]#7"
+ ],
+ "async array nested in an array: pop": [
+  "action=\"replace\" newValue={\"rows\":[[0]#2,[{\"id\":1}#4,{\"id\":2}#5,{\"id\":3}#6]#3]#1}#0 path=[]#7",
+  "action=\"array-pop\" key=2 oldValue={\"id\":3}#0 path=[\"rows\",\"1\"]#1"
+ ],
+ "async array nested in an array: shift": [
+  "action=\"replace\" newValue={\"rows\":[[0]#2,[{\"id\":1}#4,{\"id\":2}#5,{\"id\":3}#6]#3]#1}#0 path=[]#7",
+  "action=\"array-shift\" key=0 oldValue={\"id\":1}#0 path=[\"rows\",\"1\"]#1"
+ ],
+ "async array nested in an array: unshift": [
+  "action=\"replace\" newValue={\"rows\":[[0]#2,[{\"id\":1}#4,{\"id\":2}#5,{\"id\":3}#6]#3]#1}#0 path=[]#7",
+  "action=\"array-unshift\" items=[{\"id\":9}#1]#0 key=0 path=[\"rows\",\"1\"]#2"
+ ],
+ "async array nested in an array: unshift of nothing": [
+  "action=\"replace\" newValue={\"rows\":[[0]#2,[{\"id\":1}#4,{\"id\":2}#5,{\"id\":3}#6]#3]#1}#0 path=[]#7"
+ ],
+ "async array nested in an array: splice removes": [
+  "action=\"replace\" newValue={\"rows\":[[0]#2,[{\"id\":1}#4,{\"id\":2}#5,{\"id\":3}#6]#3]#1}#0 path=[]#7",
+  "action=\"array-splice\" deleteCount=1 items=undefined key=0 oldValues=[{\"id\":1}#1]#0 path=[\"rows\",\"1\"]#2"
+ ],
+ "async array nested in an array: splice inserts": [
+  "action=\"replace\" newValue={\"rows\":[[0]#2,[{\"id\":1}#4,{\"id\":2}#5,{\"id\":3}#6]#3]#1}#0 path=[]#7",
+  "action=\"array-splice\" deleteCount=0 items=[{\"id\":9}#1]#0 key=1 oldValues=undefined path=[\"rows\",\"1\"]#2"
+ ],
+ "async array nested in an array: splice replaces": [
+  "action=\"replace\" newValue={\"rows\":[[0]#2,[{\"id\":1}#4,{\"id\":2}#5,{\"id\":3}#6]#3]#1}#0 path=[]#7",
+  "action=\"array-splice\" deleteCount=1 items=[{\"id\":9}#1]#0 key=1 oldValues=[{\"id\":2}#3]#2 path=[\"rows\",\"1\"]#4"
+ ],
+ "async array nested in an array: splice with no arguments": [
+  "action=\"replace\" newValue={\"rows\":[[0]#2,[{\"id\":1}#4,{\"id\":2}#5,{\"id\":3}#6]#3]#1}#0 path=[]#7"
+ ],
+ "async array nested in an array: splice with a start only": [
+  "action=\"replace\" newValue={\"rows\":[[0]#2,[{\"id\":1}#4,{\"id\":2}#5,{\"id\":3}#6]#3]#1}#0 path=[]#7",
+  "action=\"array-splice\" deleteCount=2 items=undefined key=1 oldValues=[{\"id\":2}#1,{\"id\":3}#2]#0 path=[\"rows\",\"1\"]#3"
+ ],
+ "async array nested in an array: splice from the end": [
+  "action=\"replace\" newValue={\"rows\":[[0]#2,[{\"id\":1}#4,{\"id\":2}#5,{\"id\":3}#6]#3]#1}#0 path=[]#7",
+  "action=\"array-splice\" deleteCount=1 items=[{\"id\":9}#1,{\"id\":8}#2]#0 key=2 oldValues=[{\"id\":3}#4]#3 path=[\"rows\",\"1\"]#5"
+ ],
+ "async array nested in an array: reverse": [
+  "action=\"replace\" newValue={\"rows\":[[0]#2,[{\"id\":1}#4,{\"id\":2}#5,{\"id\":3}#6]#3]#1}#0 path=[]#7",
+  "action=\"replace\" newValue=[{\"id\":3}#1,{\"id\":2}#2,{\"id\":1}#3]#0 oldValue=[{\"id\":1}#5,{\"id\":2}#6,{\"id\":3}#7]#4 path=[\"rows\",\"1\"]#8"
+ ],
+ "async array nested in an array: sort": [
+  "action=\"replace\" newValue={\"rows\":[[0]#2,[{\"id\":1}#4,{\"id\":2}#5,{\"id\":3}#6]#3]#1}#0 path=[]#7",
+  "action=\"replace\" newValue=[{\"id\":3}#1,{\"id\":2}#2,{\"id\":1}#3]#0 oldValue=[{\"id\":1}#5,{\"id\":2}#6,{\"id\":3}#7]#4 path=[\"rows\",\"1\"]#8"
+ ],
+ "async array nested in an array: sort that changes nothing": [
+  "action=\"replace\" newValue={\"rows\":[[0]#2,[{\"id\":1}#4,{\"id\":2}#5,{\"id\":3}#6]#3]#1}#0 path=[]#7"
+ ],
+ "async array nested in an array: fill": [
+  "action=\"replace\" newValue={\"rows\":[[0]#2,[{\"id\":1}#4,{\"id\":2}#5,{\"id\":3}#6]#3]#1}#0 path=[]#7",
+  "action=\"replace\" newValue=[{\"id\":9}#1,{\"id\":2}#2,{\"id\":3}#3]#0 oldValue=[{\"id\":1}#5,{\"id\":2}#6,{\"id\":3}#7]#4 path=[\"rows\",\"1\"]#8"
+ ],
+ "async array nested in an array: fill of all": [
+  "action=\"replace\" newValue={\"rows\":[[0]#2,[{\"id\":1}#4,{\"id\":2}#5,{\"id\":3}#6]#3]#1}#0 path=[]#7",
+  "action=\"replace\" newValue=[0,0,0]#0 oldValue=[{\"id\":1}#2,{\"id\":2}#3,{\"id\":3}#4]#1 path=[\"rows\",\"1\"]#5"
+ ],
+ "async array nested in an array: copyWithin": [
+  "action=\"replace\" newValue={\"rows\":[[0]#2,[{\"id\":1}#4,{\"id\":2}#5,{\"id\":3}#6]#3]#1}#0 path=[]#7",
+  "action=\"replace\" newValue=[{\"id\":2}#1,{\"id\":3}#2,{\"id\":3}#3]#0 oldValue=[{\"id\":1}#5,{\"id\":2}#6,{\"id\":3}#7]#4 path=[\"rows\",\"1\"]#8"
+ ],
+ "async array nested in an array: write through an item": [
+  "action=\"replace\" newValue={\"rows\":[[0]#2,[{\"id\":1}#4,{\"id\":2}#5,{\"id\":3}#6]#3]#1}#0 path=[]#7",
+  "action=\"set\" newValue=20 oldValue=2 path=[\"rows\",\"1\",\"1\",\"id\"]#0"
+ ],
+ "async array nested in an array: write through an item after a shift": [
+  "action=\"replace\" newValue={\"rows\":[[0]#2,[{\"id\":1}#4,{\"id\":2}#5,{\"id\":3}#6]#3]#1}#0 path=[]#7",
+  "action=\"array-shift\" key=0 oldValue={\"id\":1}#0 path=[\"rows\",\"1\"]#1",
+  "action=\"set\" newValue=30 oldValue=3 path=[\"rows\",\"1\",\"1\",\"id\"]#0"
+ ],
+ "async array nested in an array: write through an item after a reverse": [
+  "action=\"replace\" newValue={\"rows\":[[0]#2,[{\"id\":1}#4,{\"id\":2}#5,{\"id\":3}#6]#3]#1}#0 path=[]#7",
+  "action=\"replace\" newValue=[{\"id\":3}#1,{\"id\":2}#2,{\"id\":1}#3]#0 oldValue=[{\"id\":1}#5,{\"id\":2}#6,{\"id\":3}#7]#4 path=[\"rows\",\"1\"]#8",
+  "action=\"set\" newValue=10 oldValue=1 path=[\"rows\",\"1\",\"2\",\"id\"]#0"
+ ],
+ "async array nested in an array: a run of writes": [
+  "action=\"replace\" newValue={\"rows\":[[0]#2,[{\"id\":1}#4,{\"id\":2}#5,{\"id\":3}#6]#3]#1}#0 path=[]#7",
+  "action=\"array-push\" items=[{\"id\":4}#1]#0 key=3 path=[\"rows\",\"1\"]#2",
+  "action=\"set\" newValue=11 oldValue=1 path=[\"rows\",\"1\",\"0\",\"id\"]#0",
+  "action=\"array-splice\" deleteCount=1 items=undefined key=1 oldValues=[{\"id\":2}#1]#0 path=[\"rows\",\"1\"]#2",
+  "action=\"array-unshift\" items=[0]#0 key=0 path=[\"rows\",\"1\"]#1",
+  "action=\"set\" newValue=2 oldValue=4 path=[\"rows\",\"1\",\"length\"]#0"
+ ],
+ "async array at two places: index set": [
+  "action=\"replace\" newValue={\"a\":[{\"id\":1}#2,{\"id\":2}#3,{\"id\":3}#4]#1,\"b\":{\"inner\":[{\"id\":1}#7,{\"id\":2}#8,{\"id\":3}#9]#6}#5}#0 path=[]#10",
+  "action=\"set\" newValue={\"id\":9}#0 oldValue={\"id\":1}#1 path=[\"a\",\"0\"]#2",
+  "action=\"set\" newValue={\"id\":9}#0 oldValue={\"id\":1}#1 path=[\"b\",\"inner\",\"0\"]#2"
+ ],
+ "async array at two places: index set of a primitive": [
+  "action=\"replace\" newValue={\"a\":[{\"id\":1}#2,{\"id\":2}#3,{\"id\":3}#4]#1,\"b\":{\"inner\":[{\"id\":1}#7,{\"id\":2}#8,{\"id\":3}#9]#6}#5}#0 path=[]#10",
+  "action=\"set\" newValue=5 oldValue={\"id\":2}#0 path=[\"a\",\"1\"]#1",
+  "action=\"set\" newValue=5 oldValue={\"id\":2}#0 path=[\"b\",\"inner\",\"1\"]#1"
+ ],
+ "async array at two places: index set to the same object": [
+  "action=\"replace\" newValue={\"a\":[{\"id\":1}#2,{\"id\":2}#3,{\"id\":3}#4]#1,\"b\":{\"inner\":[{\"id\":1}#7,{\"id\":2}#8,{\"id\":3}#9]#6}#5}#0 path=[]#10"
+ ],
+ "async array at two places: index set to an equal object": [
+  "action=\"replace\" newValue={\"a\":[{\"id\":1}#2,{\"id\":2}#3,{\"id\":3}#4]#1,\"b\":{\"inner\":[{\"id\":1}#7,{\"id\":2}#8,{\"id\":3}#9]#6}#5}#0 path=[]#10"
+ ],
+ "async array at two places: index set past the end": [
+  "action=\"replace\" newValue={\"a\":[{\"id\":1}#2,{\"id\":2}#3,{\"id\":3}#4]#1,\"b\":{\"inner\":[{\"id\":1}#7,{\"id\":2}#8,{\"id\":3}#9]#6}#5}#0 path=[]#10",
+  "action=\"set\" newValue={\"id\":9}#0 oldValue=undefined path=[\"a\",\"3\"]#1",
+  "action=\"set\" newValue={\"id\":9}#0 oldValue=undefined path=[\"b\",\"inner\",\"3\"]#1"
+ ],
+ "async array at two places: index set far past the end": [
+  "action=\"replace\" newValue={\"a\":[{\"id\":1}#2,{\"id\":2}#3,{\"id\":3}#4]#1,\"b\":{\"inner\":[{\"id\":1}#7,{\"id\":2}#8,{\"id\":3}#9]#6}#5}#0 path=[]#10",
+  "action=\"set\" newValue={\"id\":9}#0 oldValue=undefined path=[\"a\",\"5\"]#1",
+  "action=\"set\" newValue={\"id\":9}#0 oldValue=undefined path=[\"b\",\"inner\",\"5\"]#1"
+ ],
+ "async array at two places: index set to undefined past the end": [
+  "action=\"replace\" newValue={\"a\":[{\"id\":1}#2,{\"id\":2}#3,{\"id\":3}#4]#1,\"b\":{\"inner\":[{\"id\":1}#7,{\"id\":2}#8,{\"id\":3}#9]#6}#5}#0 path=[]#10",
+  "action=\"set\" newValue=undefined oldValue=undefined path=[\"a\",\"3\"]#0",
+  "action=\"set\" newValue=undefined oldValue=undefined path=[\"b\",\"inner\",\"3\"]#0"
+ ],
+ "async array at two places: index delete": [
+  "action=\"replace\" newValue={\"a\":[{\"id\":1}#2,{\"id\":2}#3,{\"id\":3}#4]#1,\"b\":{\"inner\":[{\"id\":1}#7,{\"id\":2}#8,{\"id\":3}#9]#6}#5}#0 path=[]#10",
+  "action=\"delete\" oldValue={\"id\":1}#0 path=[\"a\",\"0\"]#1",
+  "action=\"delete\" oldValue={\"id\":1}#0 path=[\"b\",\"inner\",\"0\"]#1"
+ ],
+ "async array at two places: last index delete": [
+  "action=\"replace\" newValue={\"a\":[{\"id\":1}#2,{\"id\":2}#3,{\"id\":3}#4]#1,\"b\":{\"inner\":[{\"id\":1}#7,{\"id\":2}#8,{\"id\":3}#9]#6}#5}#0 path=[]#10",
+  "action=\"delete\" oldValue={\"id\":3}#0 path=[\"a\",\"2\"]#1",
+  "action=\"delete\" oldValue={\"id\":3}#0 path=[\"b\",\"inner\",\"2\"]#1"
+ ],
+ "async array at two places: delete of a missing index": [
+  "action=\"replace\" newValue={\"a\":[{\"id\":1}#2,{\"id\":2}#3,{\"id\":3}#4]#1,\"b\":{\"inner\":[{\"id\":1}#7,{\"id\":2}#8,{\"id\":3}#9]#6}#5}#0 path=[]#10"
+ ],
+ "async array at two places: shorter length": [
+  "action=\"replace\" newValue={\"a\":[{\"id\":1}#2,{\"id\":2}#3,{\"id\":3}#4]#1,\"b\":{\"inner\":[{\"id\":1}#7,{\"id\":2}#8,{\"id\":3}#9]#6}#5}#0 path=[]#10",
+  "action=\"set\" newValue=1 oldValue=3 path=[\"a\",\"length\"]#0",
+  "action=\"set\" newValue=1 oldValue=3 path=[\"b\",\"inner\",\"length\"]#0"
+ ],
+ "async array at two places: length 0": [
+  "action=\"replace\" newValue={\"a\":[{\"id\":1}#2,{\"id\":2}#3,{\"id\":3}#4]#1,\"b\":{\"inner\":[{\"id\":1}#7,{\"id\":2}#8,{\"id\":3}#9]#6}#5}#0 path=[]#10",
+  "action=\"set\" newValue=0 oldValue=3 path=[\"a\",\"length\"]#0",
+  "action=\"set\" newValue=0 oldValue=3 path=[\"b\",\"inner\",\"length\"]#0"
+ ],
+ "async array at two places: longer length": [
+  "action=\"replace\" newValue={\"a\":[{\"id\":1}#2,{\"id\":2}#3,{\"id\":3}#4]#1,\"b\":{\"inner\":[{\"id\":1}#7,{\"id\":2}#8,{\"id\":3}#9]#6}#5}#0 path=[]#10",
+  "action=\"set\" newValue=undefined path=[\"a\",\"3\"]#0",
+  "action=\"set\" newValue=undefined path=[\"b\",\"inner\",\"3\"]#0",
+  "action=\"set\" newValue=undefined path=[\"a\",\"4\"]#0",
+  "action=\"set\" newValue=undefined path=[\"b\",\"inner\",\"4\"]#0"
+ ],
+ "async array at two places: same length": [
+  "action=\"replace\" newValue={\"a\":[{\"id\":1}#2,{\"id\":2}#3,{\"id\":3}#4]#1,\"b\":{\"inner\":[{\"id\":1}#7,{\"id\":2}#8,{\"id\":3}#9]#6}#5}#0 path=[]#10"
+ ],
+ "async array at two places: named property": [
+  "action=\"replace\" newValue={\"a\":[{\"id\":1}#2,{\"id\":2}#3,{\"id\":3}#4]#1,\"b\":{\"inner\":[{\"id\":1}#7,{\"id\":2}#8,{\"id\":3}#9]#6}#5}#0 path=[]#10",
+  "action=\"set\" newValue=\"x\" oldValue=undefined path=[\"a\",\"label\"]#0",
+  "action=\"set\" newValue=\"x\" oldValue=undefined path=[\"b\",\"inner\",\"label\"]#0"
+ ],
+ "async array at two places: push": [
+  "action=\"replace\" newValue={\"a\":[{\"id\":1}#2,{\"id\":2}#3,{\"id\":3}#4]#1,\"b\":{\"inner\":[{\"id\":1}#7,{\"id\":2}#8,{\"id\":3}#9]#6}#5}#0 path=[]#10",
+  "action=\"array-push\" items=[{\"id\":9}#1]#0 key=3 path=[\"a\"]#2",
+  "action=\"array-push\" items=[{\"id\":9}#1]#0 key=3 path=[\"b\",\"inner\"]#2"
+ ],
+ "async array at two places: push of two": [
+  "action=\"replace\" newValue={\"a\":[{\"id\":1}#2,{\"id\":2}#3,{\"id\":3}#4]#1,\"b\":{\"inner\":[{\"id\":1}#7,{\"id\":2}#8,{\"id\":3}#9]#6}#5}#0 path=[]#10",
+  "action=\"array-push\" items=[{\"id\":8}#1,7]#0 key=3 path=[\"a\"]#2",
+  "action=\"array-push\" items=[{\"id\":8}#1,7]#0 key=3 path=[\"b\",\"inner\"]#2"
+ ],
+ "async array at two places: push of nothing": [
+  "action=\"replace\" newValue={\"a\":[{\"id\":1}#2,{\"id\":2}#3,{\"id\":3}#4]#1,\"b\":{\"inner\":[{\"id\":1}#7,{\"id\":2}#8,{\"id\":3}#9]#6}#5}#0 path=[]#10"
+ ],
+ "async array at two places: pop": [
+  "action=\"replace\" newValue={\"a\":[{\"id\":1}#2,{\"id\":2}#3,{\"id\":3}#4]#1,\"b\":{\"inner\":[{\"id\":1}#7,{\"id\":2}#8,{\"id\":3}#9]#6}#5}#0 path=[]#10",
+  "action=\"array-pop\" key=2 oldValue={\"id\":3}#0 path=[\"a\"]#1",
+  "action=\"array-pop\" key=2 oldValue={\"id\":3}#0 path=[\"b\",\"inner\"]#1"
+ ],
+ "async array at two places: shift": [
+  "action=\"replace\" newValue={\"a\":[{\"id\":1}#2,{\"id\":2}#3,{\"id\":3}#4]#1,\"b\":{\"inner\":[{\"id\":1}#7,{\"id\":2}#8,{\"id\":3}#9]#6}#5}#0 path=[]#10",
+  "action=\"array-shift\" key=0 oldValue={\"id\":1}#0 path=[\"a\"]#1",
+  "action=\"array-shift\" key=0 oldValue={\"id\":1}#0 path=[\"b\",\"inner\"]#1"
+ ],
+ "async array at two places: unshift": [
+  "action=\"replace\" newValue={\"a\":[{\"id\":1}#2,{\"id\":2}#3,{\"id\":3}#4]#1,\"b\":{\"inner\":[{\"id\":1}#7,{\"id\":2}#8,{\"id\":3}#9]#6}#5}#0 path=[]#10",
+  "action=\"array-unshift\" items=[{\"id\":9}#1]#0 key=0 path=[\"a\"]#2",
+  "action=\"array-unshift\" items=[{\"id\":9}#1]#0 key=0 path=[\"b\",\"inner\"]#2"
+ ],
+ "async array at two places: unshift of nothing": [
+  "action=\"replace\" newValue={\"a\":[{\"id\":1}#2,{\"id\":2}#3,{\"id\":3}#4]#1,\"b\":{\"inner\":[{\"id\":1}#7,{\"id\":2}#8,{\"id\":3}#9]#6}#5}#0 path=[]#10"
+ ],
+ "async array at two places: splice removes": [
+  "action=\"replace\" newValue={\"a\":[{\"id\":1}#2,{\"id\":2}#3,{\"id\":3}#4]#1,\"b\":{\"inner\":[{\"id\":1}#7,{\"id\":2}#8,{\"id\":3}#9]#6}#5}#0 path=[]#10",
+  "action=\"array-splice\" deleteCount=1 items=undefined key=0 oldValues=[{\"id\":1}#1]#0 path=[\"a\"]#2",
+  "action=\"array-splice\" deleteCount=1 items=undefined key=0 oldValues=[{\"id\":1}#1]#0 path=[\"b\",\"inner\"]#2"
+ ],
+ "async array at two places: splice inserts": [
+  "action=\"replace\" newValue={\"a\":[{\"id\":1}#2,{\"id\":2}#3,{\"id\":3}#4]#1,\"b\":{\"inner\":[{\"id\":1}#7,{\"id\":2}#8,{\"id\":3}#9]#6}#5}#0 path=[]#10",
+  "action=\"array-splice\" deleteCount=0 items=[{\"id\":9}#1]#0 key=1 oldValues=undefined path=[\"a\"]#2",
+  "action=\"array-splice\" deleteCount=0 items=[{\"id\":9}#1]#0 key=1 oldValues=undefined path=[\"b\",\"inner\"]#2"
+ ],
+ "async array at two places: splice replaces": [
+  "action=\"replace\" newValue={\"a\":[{\"id\":1}#2,{\"id\":2}#3,{\"id\":3}#4]#1,\"b\":{\"inner\":[{\"id\":1}#7,{\"id\":2}#8,{\"id\":3}#9]#6}#5}#0 path=[]#10",
+  "action=\"array-splice\" deleteCount=1 items=[{\"id\":9}#1]#0 key=1 oldValues=[{\"id\":2}#3]#2 path=[\"a\"]#4",
+  "action=\"array-splice\" deleteCount=1 items=[{\"id\":9}#1]#0 key=1 oldValues=[{\"id\":2}#3]#2 path=[\"b\",\"inner\"]#4"
+ ],
+ "async array at two places: splice with no arguments": [
+  "action=\"replace\" newValue={\"a\":[{\"id\":1}#2,{\"id\":2}#3,{\"id\":3}#4]#1,\"b\":{\"inner\":[{\"id\":1}#7,{\"id\":2}#8,{\"id\":3}#9]#6}#5}#0 path=[]#10"
+ ],
+ "async array at two places: splice with a start only": [
+  "action=\"replace\" newValue={\"a\":[{\"id\":1}#2,{\"id\":2}#3,{\"id\":3}#4]#1,\"b\":{\"inner\":[{\"id\":1}#7,{\"id\":2}#8,{\"id\":3}#9]#6}#5}#0 path=[]#10",
+  "action=\"array-splice\" deleteCount=2 items=undefined key=1 oldValues=[{\"id\":2}#1,{\"id\":3}#2]#0 path=[\"a\"]#3",
+  "action=\"array-splice\" deleteCount=2 items=undefined key=1 oldValues=[{\"id\":2}#1,{\"id\":3}#2]#0 path=[\"b\",\"inner\"]#3"
+ ],
+ "async array at two places: splice from the end": [
+  "action=\"replace\" newValue={\"a\":[{\"id\":1}#2,{\"id\":2}#3,{\"id\":3}#4]#1,\"b\":{\"inner\":[{\"id\":1}#7,{\"id\":2}#8,{\"id\":3}#9]#6}#5}#0 path=[]#10",
+  "action=\"array-splice\" deleteCount=1 items=[{\"id\":9}#1,{\"id\":8}#2]#0 key=2 oldValues=[{\"id\":3}#4]#3 path=[\"a\"]#5",
+  "action=\"array-splice\" deleteCount=1 items=[{\"id\":9}#1,{\"id\":8}#2]#0 key=2 oldValues=[{\"id\":3}#4]#3 path=[\"b\",\"inner\"]#5"
+ ],
+ "async array at two places: reverse": [
+  "action=\"replace\" newValue={\"a\":[{\"id\":1}#2,{\"id\":2}#3,{\"id\":3}#4]#1,\"b\":{\"inner\":[{\"id\":1}#7,{\"id\":2}#8,{\"id\":3}#9]#6}#5}#0 path=[]#10",
+  "action=\"replace\" newValue=[{\"id\":3}#1,{\"id\":2}#2,{\"id\":1}#3]#0 oldValue=[{\"id\":1}#5,{\"id\":2}#6,{\"id\":3}#7]#4 path=[\"a\"]#8",
+  "action=\"replace\" newValue=[{\"id\":3}#1,{\"id\":2}#2,{\"id\":1}#3]#0 oldValue=[{\"id\":1}#5,{\"id\":2}#6,{\"id\":3}#7]#4 path=[\"b\",\"inner\"]#8"
+ ],
+ "async array at two places: sort": [
+  "action=\"replace\" newValue={\"a\":[{\"id\":1}#2,{\"id\":2}#3,{\"id\":3}#4]#1,\"b\":{\"inner\":[{\"id\":1}#7,{\"id\":2}#8,{\"id\":3}#9]#6}#5}#0 path=[]#10",
+  "action=\"replace\" newValue=[{\"id\":3}#1,{\"id\":2}#2,{\"id\":1}#3]#0 oldValue=[{\"id\":1}#5,{\"id\":2}#6,{\"id\":3}#7]#4 path=[\"a\"]#8",
+  "action=\"replace\" newValue=[{\"id\":3}#1,{\"id\":2}#2,{\"id\":1}#3]#0 oldValue=[{\"id\":1}#5,{\"id\":2}#6,{\"id\":3}#7]#4 path=[\"b\",\"inner\"]#8"
+ ],
+ "async array at two places: sort that changes nothing": [
+  "action=\"replace\" newValue={\"a\":[{\"id\":1}#2,{\"id\":2}#3,{\"id\":3}#4]#1,\"b\":{\"inner\":[{\"id\":1}#7,{\"id\":2}#8,{\"id\":3}#9]#6}#5}#0 path=[]#10"
+ ],
+ "async array at two places: fill": [
+  "action=\"replace\" newValue={\"a\":[{\"id\":1}#2,{\"id\":2}#3,{\"id\":3}#4]#1,\"b\":{\"inner\":[{\"id\":1}#7,{\"id\":2}#8,{\"id\":3}#9]#6}#5}#0 path=[]#10",
+  "action=\"replace\" newValue=[{\"id\":9}#1,{\"id\":2}#2,{\"id\":3}#3]#0 oldValue=[{\"id\":1}#5,{\"id\":2}#6,{\"id\":3}#7]#4 path=[\"a\"]#8",
+  "action=\"replace\" newValue=[{\"id\":9}#1,{\"id\":2}#2,{\"id\":3}#3]#0 oldValue=[{\"id\":1}#5,{\"id\":2}#6,{\"id\":3}#7]#4 path=[\"b\",\"inner\"]#8"
+ ],
+ "async array at two places: fill of all": [
+  "action=\"replace\" newValue={\"a\":[{\"id\":1}#2,{\"id\":2}#3,{\"id\":3}#4]#1,\"b\":{\"inner\":[{\"id\":1}#7,{\"id\":2}#8,{\"id\":3}#9]#6}#5}#0 path=[]#10",
+  "action=\"replace\" newValue=[0,0,0]#0 oldValue=[{\"id\":1}#2,{\"id\":2}#3,{\"id\":3}#4]#1 path=[\"a\"]#5",
+  "action=\"replace\" newValue=[0,0,0]#0 oldValue=[{\"id\":1}#2,{\"id\":2}#3,{\"id\":3}#4]#1 path=[\"b\",\"inner\"]#5"
+ ],
+ "async array at two places: copyWithin": [
+  "action=\"replace\" newValue={\"a\":[{\"id\":1}#2,{\"id\":2}#3,{\"id\":3}#4]#1,\"b\":{\"inner\":[{\"id\":1}#7,{\"id\":2}#8,{\"id\":3}#9]#6}#5}#0 path=[]#10",
+  "action=\"replace\" newValue=[{\"id\":2}#1,{\"id\":3}#2,{\"id\":3}#3]#0 oldValue=[{\"id\":1}#5,{\"id\":2}#6,{\"id\":3}#7]#4 path=[\"a\"]#8",
+  "action=\"replace\" newValue=[{\"id\":2}#1,{\"id\":3}#2,{\"id\":3}#3]#0 oldValue=[{\"id\":1}#5,{\"id\":2}#6,{\"id\":3}#7]#4 path=[\"b\",\"inner\"]#8"
+ ],
+ "async array at two places: write through an item": [
+  "action=\"replace\" newValue={\"a\":[{\"id\":1}#2,{\"id\":2}#3,{\"id\":3}#4]#1,\"b\":{\"inner\":[{\"id\":1}#7,{\"id\":2}#8,{\"id\":3}#9]#6}#5}#0 path=[]#10",
+  "action=\"set\" newValue=20 oldValue=2 path=[\"a\",\"1\",\"id\"]#0",
+  "action=\"set\" newValue=20 oldValue=2 path=[\"b\",\"inner\",\"1\",\"id\"]#0"
+ ],
+ "async array at two places: write through an item after a shift": [
+  "action=\"replace\" newValue={\"a\":[{\"id\":1}#2,{\"id\":2}#3,{\"id\":3}#4]#1,\"b\":{\"inner\":[{\"id\":1}#7,{\"id\":2}#8,{\"id\":3}#9]#6}#5}#0 path=[]#10",
+  "action=\"array-shift\" key=0 oldValue={\"id\":1}#0 path=[\"a\"]#1",
+  "action=\"array-shift\" key=0 oldValue={\"id\":1}#0 path=[\"b\",\"inner\"]#1",
+  "action=\"set\" newValue=30 oldValue=3 path=[\"a\",\"1\",\"id\"]#0",
+  "action=\"set\" newValue=30 oldValue=3 path=[\"b\",\"inner\",\"1\",\"id\"]#0"
+ ],
+ "async array at two places: write through an item after a reverse": [
+  "action=\"replace\" newValue={\"a\":[{\"id\":1}#2,{\"id\":2}#3,{\"id\":3}#4]#1,\"b\":{\"inner\":[{\"id\":1}#7,{\"id\":2}#8,{\"id\":3}#9]#6}#5}#0 path=[]#10",
+  "action=\"replace\" newValue=[{\"id\":3}#1,{\"id\":2}#2,{\"id\":1}#3]#0 oldValue=[{\"id\":1}#5,{\"id\":2}#6,{\"id\":3}#7]#4 path=[\"a\"]#8",
+  "action=\"replace\" newValue=[{\"id\":3}#1,{\"id\":2}#2,{\"id\":1}#3]#0 oldValue=[{\"id\":1}#5,{\"id\":2}#6,{\"id\":3}#7]#4 path=[\"b\",\"inner\"]#8",
+  "action=\"set\" newValue=10 oldValue=1 path=[\"a\",\"2\",\"id\"]#0",
+  "action=\"set\" newValue=10 oldValue=1 path=[\"b\",\"inner\",\"2\",\"id\"]#0"
+ ],
+ "async array at two places: a run of writes": [
+  "action=\"replace\" newValue={\"a\":[{\"id\":1}#2,{\"id\":2}#3,{\"id\":3}#4]#1,\"b\":{\"inner\":[{\"id\":1}#7,{\"id\":2}#8,{\"id\":3}#9]#6}#5}#0 path=[]#10",
+  "action=\"array-push\" items=[{\"id\":4}#1]#0 key=3 path=[\"a\"]#2",
+  "action=\"array-push\" items=[{\"id\":4}#1]#0 key=3 path=[\"b\",\"inner\"]#2",
+  "action=\"set\" newValue=11 oldValue=1 path=[\"a\",\"0\",\"id\"]#0",
+  "action=\"set\" newValue=11 oldValue=1 path=[\"b\",\"inner\",\"0\",\"id\"]#0",
+  "action=\"array-splice\" deleteCount=1 items=undefined key=1 oldValues=[{\"id\":2}#1]#0 path=[\"a\"]#2",
+  "action=\"array-splice\" deleteCount=1 items=undefined key=1 oldValues=[{\"id\":2}#1]#0 path=[\"b\",\"inner\"]#2",
+  "action=\"array-unshift\" items=[0]#0 key=0 path=[\"a\"]#1",
+  "action=\"array-unshift\" items=[0]#0 key=0 path=[\"b\",\"inner\"]#1",
+  "action=\"set\" newValue=2 oldValue=4 path=[\"a\",\"length\"]#0",
+  "action=\"set\" newValue=2 oldValue=4 path=[\"b\",\"inner\",\"length\"]#0"
+ ],
+ "async object: set of a held key": [
+  "action=\"replace\" newValue={\"obj\":{\"a\":1,\"child\":{\"c\":1}#2}#1,\"setter\":{\"stored\":1,\"value\":1}#3,\"instance\":{\"id\":1}#4,\"alias\":{\"first\":{\"c\":1}#6,\"second\":{\"c\":1}#7}#5}#0 path=[]#8",
+  "action=\"set\" newValue=2 oldValue=1 path=[\"obj\",\"a\"]#0"
+ ],
+ "async object: set of the same value": [
+  "action=\"replace\" newValue={\"obj\":{\"a\":1,\"child\":{\"c\":1}#2}#1,\"setter\":{\"stored\":1,\"value\":1}#3,\"instance\":{\"id\":1}#4,\"alias\":{\"first\":{\"c\":1}#6,\"second\":{\"c\":1}#7}#5}#0 path=[]#8"
+ ],
+ "async object: set of a new key": [
+  "action=\"replace\" newValue={\"obj\":{\"a\":1,\"child\":{\"c\":1}#2}#1,\"setter\":{\"stored\":1,\"value\":1}#3,\"instance\":{\"id\":1}#4,\"alias\":{\"first\":{\"c\":1}#6,\"second\":{\"c\":1}#7}#5}#0 path=[]#8",
+  "action=\"set\" newValue=1 oldValue=undefined path=[\"obj\",\"z\"]#0"
+ ],
+ "async object: set of a new key to undefined": [
+  "action=\"replace\" newValue={\"obj\":{\"a\":1,\"child\":{\"c\":1}#2}#1,\"setter\":{\"stored\":1,\"value\":1}#3,\"instance\":{\"id\":1}#4,\"alias\":{\"first\":{\"c\":1}#6,\"second\":{\"c\":1}#7}#5}#0 path=[]#8"
+ ],
+ "async object: set of an object": [
+  "action=\"replace\" newValue={\"obj\":{\"a\":1,\"child\":{\"c\":1}#2}#1,\"setter\":{\"stored\":1,\"value\":1}#3,\"instance\":{\"id\":1}#4,\"alias\":{\"first\":{\"c\":1}#6,\"second\":{\"c\":1}#7}#5}#0 path=[]#8",
+  "action=\"set\" newValue={\"x\":[1,2]#1,\"m\":Map{\"k\"=>{\"v\":1}#3}#2}#0 oldValue=undefined path=[\"obj\",\"nested\"]#4"
+ ],
+ "async object: set of an equal object": [
+  "action=\"replace\" newValue={\"obj\":{\"a\":1,\"child\":{\"c\":1}#2}#1,\"setter\":{\"stored\":1,\"value\":1}#3,\"instance\":{\"id\":1}#4,\"alias\":{\"first\":{\"c\":1}#6,\"second\":{\"c\":1}#7}#5}#0 path=[]#8",
+  "action=\"set\" newValue={\"c\":1}#0 oldValue={\"c\":1}#1 path=[\"obj\",\"child\"]#2"
+ ],
+ "async object: set of a changed object": [
+  "action=\"replace\" newValue={\"obj\":{\"a\":1,\"child\":{\"c\":1}#2}#1,\"setter\":{\"stored\":1,\"value\":1}#3,\"instance\":{\"id\":1}#4,\"alias\":{\"first\":{\"c\":1}#6,\"second\":{\"c\":1}#7}#5}#0 path=[]#8",
+  "action=\"set\" newValue={\"c\":2}#0 oldValue={\"c\":1}#1 path=[\"obj\",\"child\"]#2"
+ ],
+ "async object: nested set": [
+  "action=\"replace\" newValue={\"obj\":{\"a\":1,\"child\":{\"c\":1}#2}#1,\"setter\":{\"stored\":1,\"value\":1}#3,\"instance\":{\"id\":1}#4,\"alias\":{\"first\":{\"c\":1}#6,\"second\":{\"c\":1}#7}#5}#0 path=[]#8",
+  "action=\"set\" newValue=5 oldValue=1 path=[\"obj\",\"child\",\"c\"]#0",
+  "action=\"set\" newValue=5 oldValue=1 path=[\"alias\",\"first\",\"c\"]#0",
+  "action=\"set\" newValue=5 oldValue=1 path=[\"alias\",\"second\",\"c\"]#0"
+ ],
+ "async object: nested new key": [
+  "action=\"replace\" newValue={\"obj\":{\"a\":1,\"child\":{\"c\":1}#2}#1,\"setter\":{\"stored\":1,\"value\":1}#3,\"instance\":{\"id\":1}#4,\"alias\":{\"first\":{\"c\":1}#6,\"second\":{\"c\":1}#7}#5}#0 path=[]#8",
+  "action=\"set\" newValue=6 oldValue=undefined path=[\"obj\",\"child\",\"d\"]#0",
+  "action=\"set\" newValue=6 oldValue=undefined path=[\"alias\",\"first\",\"d\"]#0",
+  "action=\"set\" newValue=6 oldValue=undefined path=[\"alias\",\"second\",\"d\"]#0"
+ ],
+ "async object: delete": [
+  "action=\"replace\" newValue={\"obj\":{\"a\":1,\"child\":{\"c\":1}#2}#1,\"setter\":{\"stored\":1,\"value\":1}#3,\"instance\":{\"id\":1}#4,\"alias\":{\"first\":{\"c\":1}#6,\"second\":{\"c\":1}#7}#5}#0 path=[]#8",
+  "action=\"delete\" oldValue=1 path=[\"obj\",\"a\"]#0"
+ ],
+ "async object: delete of a missing key": [
+  "action=\"replace\" newValue={\"obj\":{\"a\":1,\"child\":{\"c\":1}#2}#1,\"setter\":{\"stored\":1,\"value\":1}#3,\"instance\":{\"id\":1}#4,\"alias\":{\"first\":{\"c\":1}#6,\"second\":{\"c\":1}#7}#5}#0 path=[]#8"
+ ],
+ "async object: delete of an object": [
+  "action=\"replace\" newValue={\"obj\":{\"a\":1,\"child\":{\"c\":1}#2}#1,\"setter\":{\"stored\":1,\"value\":1}#3,\"instance\":{\"id\":1}#4,\"alias\":{\"first\":{\"c\":1}#6,\"second\":{\"c\":1}#7}#5}#0 path=[]#8",
+  "action=\"delete\" oldValue={\"c\":1}#0 path=[\"obj\",\"child\"]#1"
+ ],
+ "async object: set of a symbol key": [
+  "action=\"replace\" newValue={\"obj\":{\"a\":1,\"child\":{\"c\":1}#2}#1,\"setter\":{\"stored\":1,\"value\":1}#3,\"instance\":{\"id\":1}#4,\"alias\":{\"first\":{\"c\":1}#6,\"second\":{\"c\":1}#7}#5}#0 path=[]#8",
+  "action=\"set\" newValue=1 oldValue=undefined path=[\"obj\",\"Symbol(rps.key)\"]#0"
+ ],
+ "async object: replace of the object": [
+  "action=\"replace\" newValue={\"obj\":{\"a\":1,\"child\":{\"c\":1}#2}#1,\"setter\":{\"stored\":1,\"value\":1}#3,\"instance\":{\"id\":1}#4,\"alias\":{\"first\":{\"c\":1}#6,\"second\":{\"c\":1}#7}#5}#0 path=[]#8",
+  "action=\"set\" newValue={\"fresh\":true}#0 oldValue={\"a\":1,\"child\":{\"c\":1}#2}#1 path=[\"obj\"]#3"
+ ],
+ "async object: set of a date": [
+  "action=\"replace\" newValue={\"obj\":{\"a\":1,\"child\":{\"c\":1}#2}#1,\"setter\":{\"stored\":1,\"value\":1}#3,\"instance\":{\"id\":1}#4,\"alias\":{\"first\":{\"c\":1}#6,\"second\":{\"c\":1}#7}#5}#0 path=[]#8",
+  "action=\"set\" newValue=Date(0)#0 oldValue=undefined path=[\"obj\",\"when\"]#1"
+ ],
+ "async object: set through a setter": [
+  "action=\"replace\" newValue={\"obj\":{\"a\":1,\"child\":{\"c\":1}#2}#1,\"setter\":{\"stored\":1,\"value\":1}#3,\"instance\":{\"id\":1}#4,\"alias\":{\"first\":{\"c\":1}#6,\"second\":{\"c\":1}#7}#5}#0 path=[]#8",
+  "action=\"set\" newValue=7 oldValue=1 path=[\"setter\",\"stored\"]#0"
+ ],
+ "async object: set of a class instance": [
+  "action=\"replace\" newValue={\"obj\":{\"a\":1,\"child\":{\"c\":1}#2}#1,\"setter\":{\"stored\":1,\"value\":1}#3,\"instance\":{\"id\":1}#4,\"alias\":{\"first\":{\"c\":1}#6,\"second\":{\"c\":1}#7}#5}#0 path=[]#8",
+  "action=\"set\" newValue={\"id\":4}#0 oldValue=undefined path=[\"obj\",\"item\"]#1"
+ ],
+ "async object: write through a class instance": [
+  "action=\"replace\" newValue={\"obj\":{\"a\":1,\"child\":{\"c\":1}#2}#1,\"setter\":{\"stored\":1,\"value\":1}#3,\"instance\":{\"id\":1}#4,\"alias\":{\"first\":{\"c\":1}#6,\"second\":{\"c\":1}#7}#5}#0 path=[]#8",
+  "action=\"set\" newValue=8 oldValue=1 path=[\"instance\",\"id\"]#0"
+ ],
+ "async object: write through an alias": [
+  "action=\"replace\" newValue={\"obj\":{\"a\":1,\"child\":{\"c\":1}#2}#1,\"setter\":{\"stored\":1,\"value\":1}#3,\"instance\":{\"id\":1}#4,\"alias\":{\"first\":{\"c\":1}#6,\"second\":{\"c\":1}#7}#5}#0 path=[]#8",
+  "action=\"set\" newValue=9 oldValue=1 path=[\"obj\",\"child\",\"c\"]#0",
+  "action=\"set\" newValue=9 oldValue=1 path=[\"alias\",\"first\",\"c\"]#0",
+  "action=\"set\" newValue=9 oldValue=1 path=[\"alias\",\"second\",\"c\"]#0"
+ ],
+ "async object: a spread back in": [
+  "action=\"replace\" newValue={\"obj\":{\"a\":1,\"child\":{\"c\":1}#2}#1,\"setter\":{\"stored\":1,\"value\":1}#3,\"instance\":{\"id\":1}#4,\"alias\":{\"first\":{\"c\":1}#6,\"second\":{\"c\":1}#7}#5}#0 path=[]#8",
+  "action=\"set\" newValue={\"a\":3,\"child\":{\"c\":1}#1}#0 oldValue={\"a\":1,\"child\":{\"c\":1}#3}#2 path=[\"obj\"]#4"
+ ],
+ "async object: a run of writes": [
+  "action=\"replace\" newValue={\"obj\":{\"a\":1,\"child\":{\"c\":1}#2}#1,\"setter\":{\"stored\":1,\"value\":1}#3,\"instance\":{\"id\":1}#4,\"alias\":{\"first\":{\"c\":1}#6,\"second\":{\"c\":1}#7}#5}#0 path=[]#8",
+  "action=\"set\" newValue=1 oldValue=undefined path=[\"obj\",\"z\"]#0",
+  "action=\"set\" newValue=2 oldValue=1 path=[\"obj\",\"child\",\"c\"]#0",
+  "action=\"set\" newValue=2 oldValue=1 path=[\"alias\",\"first\",\"c\"]#0",
+  "action=\"set\" newValue=2 oldValue=1 path=[\"alias\",\"second\",\"c\"]#0",
+  "action=\"delete\" oldValue=1 path=[\"obj\",\"a\"]#0",
+  "action=\"set\" newValue=[{\"c\":2}#1]#0 oldValue=undefined path=[\"obj\",\"list\"]#2",
+  "action=\"set\" newValue=3 oldValue=2 path=[\"obj\",\"child\",\"c\"]#0",
+  "action=\"set\" newValue=3 oldValue=2 path=[\"alias\",\"first\",\"c\"]#0",
+  "action=\"set\" newValue=3 oldValue=2 path=[\"alias\",\"second\",\"c\"]#0",
+  "action=\"set\" newValue=3 oldValue=2 path=[\"obj\",\"list\",\"0\",\"c\"]#0"
+ ],
+ "async map: set of a held key": [
+  "action=\"replace\" newValue={\"map\":Map{\"a\"=>1,\"obj\"=>{\"id\":1}#2,{\"key\":0}#3=>\"h\",0=>\"zero\"}#1}#0 path=[]#4",
+  "action=\"map-set\" key=\"a\" newValue=5 oldValue=1 path=[\"map\"]#0"
+ ],
+ "async map: set of the same value": [
+  "action=\"replace\" newValue={\"map\":Map{\"a\"=>1,\"obj\"=>{\"id\":1}#2,{\"key\":0}#3=>\"h\",0=>\"zero\"}#1}#0 path=[]#4"
+ ],
+ "async map: set of a new key": [
+  "action=\"replace\" newValue={\"map\":Map{\"a\"=>1,\"obj\"=>{\"id\":1}#2,{\"key\":0}#3=>\"h\",0=>\"zero\"}#1}#0 path=[]#4",
+  "action=\"map-set\" key=\"z\" newValue=9 oldValue=undefined path=[\"map\"]#0"
+ ],
+ "async map: set of a new key to undefined": [
+  "action=\"replace\" newValue={\"map\":Map{\"a\"=>1,\"obj\"=>{\"id\":1}#2,{\"key\":0}#3=>\"h\",0=>\"zero\"}#1}#0 path=[]#4",
+  "action=\"map-set\" key=\"z\" newValue=undefined oldValue=undefined path=[\"map\"]#0"
+ ],
+ "async map: set of an object value": [
+  "action=\"replace\" newValue={\"map\":Map{\"a\"=>1,\"obj\"=>{\"id\":1}#2,{\"key\":0}#3=>\"h\",0=>\"zero\"}#1}#0 path=[]#4",
+  "action=\"map-set\" key=\"o\" newValue={\"id\":1}#0 oldValue=undefined path=[\"map\"]#1"
+ ],
+ "async map: set of an equal object value": [
+  "action=\"replace\" newValue={\"map\":Map{\"a\"=>1,\"obj\"=>{\"id\":1}#2,{\"key\":0}#3=>\"h\",0=>\"zero\"}#1}#0 path=[]#4"
+ ],
+ "async map: set of an object key": [
+  "action=\"replace\" newValue={\"map\":Map{\"a\"=>1,\"obj\"=>{\"id\":1}#2,{\"key\":0}#3=>\"h\",0=>\"zero\"}#1}#0 path=[]#4",
+  "action=\"map-set\" key={\"key\":1}#0 newValue=\"v\" oldValue=undefined path=[\"map\"]#1"
+ ],
+ "async map: set of a held object key": [
+  "action=\"replace\" newValue={\"map\":Map{\"a\"=>1,\"obj\"=>{\"id\":1}#2,{\"key\":0}#3=>\"h\",0=>\"zero\"}#1}#0 path=[]#4",
+  "action=\"map-set\" key={\"key\":0}#0 newValue=\"w\" oldValue=\"h\" path=[\"map\"]#1"
+ ],
+ "async map: set of a NaN key": [
+  "action=\"replace\" newValue={\"map\":Map{\"a\"=>1,\"obj\"=>{\"id\":1}#2,{\"key\":0}#3=>\"h\",0=>\"zero\"}#1}#0 path=[]#4",
+  "action=\"map-set\" key=NaN newValue=1 oldValue=undefined path=[\"map\"]#0"
+ ],
+ "async map: set of -0": [
+  "action=\"replace\" newValue={\"map\":Map{\"a\"=>1,\"obj\"=>{\"id\":1}#2,{\"key\":0}#3=>\"h\",0=>\"zero\"}#1}#0 path=[]#4",
+  "action=\"map-set\" key=-0 newValue=1 oldValue=\"zero\" path=[\"map\"]#0"
+ ],
+ "async map: delete": [
+  "action=\"replace\" newValue={\"map\":Map{\"a\"=>1,\"obj\"=>{\"id\":1}#2,{\"key\":0}#3=>\"h\",0=>\"zero\"}#1}#0 path=[]#4",
+  "action=\"map-delete\" key=\"a\" oldValue=1 path=[\"map\"]#0"
+ ],
+ "async map: delete of a missing key": [
+  "action=\"replace\" newValue={\"map\":Map{\"a\"=>1,\"obj\"=>{\"id\":1}#2,{\"key\":0}#3=>\"h\",0=>\"zero\"}#1}#0 path=[]#4"
+ ],
+ "async map: delete of an object key": [
+  "action=\"replace\" newValue={\"map\":Map{\"a\"=>1,\"obj\"=>{\"id\":1}#2,{\"key\":0}#3=>\"h\",0=>\"zero\"}#1}#0 path=[]#4",
+  "action=\"map-delete\" key={\"key\":0}#0 oldValue=\"h\" path=[\"map\"]#1"
+ ],
+ "async map: clear": [
+  "action=\"replace\" newValue={\"map\":Map{\"a\"=>1,\"obj\"=>{\"id\":1}#2,{\"key\":0}#3=>\"h\",0=>\"zero\"}#1}#0 path=[]#4",
+  "action=\"map-clear\" key=null path=[\"map\"]#0"
+ ],
+ "async map: write through a value": [
+  "action=\"replace\" newValue={\"map\":Map{\"a\"=>1,\"obj\"=>{\"id\":1}#2,{\"key\":0}#3=>\"h\",0=>\"zero\"}#1}#0 path=[]#4",
+  "action=\"set\" newValue=2 oldValue=1 path=[\"map\",\"obj\",\"id\"]#0"
+ ],
+ "async map: write through a value from values()": [
+  "action=\"replace\" newValue={\"map\":Map{\"a\"=>1,\"obj\"=>{\"id\":1}#2,{\"key\":0}#3=>\"h\",0=>\"zero\"}#1}#0 path=[]#4",
+  "action=\"set\" newValue=3 oldValue=1 path=[\"map\",\"obj\",\"id\"]#0"
+ ],
+ "async map: a run of writes": [
+  "action=\"replace\" newValue={\"map\":Map{\"a\"=>1,\"obj\"=>{\"id\":1}#2,{\"key\":0}#3=>\"h\",0=>\"zero\"}#1}#0 path=[]#4",
+  "action=\"map-set\" key=\"z\" newValue=1 oldValue=undefined path=[\"map\"]#0",
+  "action=\"map-delete\" key=\"a\" oldValue=1 path=[\"map\"]#0",
+  "action=\"set\" newValue=4 oldValue=1 path=[\"map\",\"obj\",\"id\"]#0",
+  "action=\"map-set\" key=\"obj\" newValue={\"id\":5}#0 oldValue={\"id\":4}#1 path=[\"map\"]#2",
+  "action=\"map-clear\" key=null path=[\"map\"]#0",
+  "action=\"map-set\" key=\"a\" newValue=1 oldValue=undefined path=[\"map\"]#0"
+ ],
+ "async set: add of a new value": [
+  "action=\"replace\" newValue={\"set\":Set{1,\"1\",{\"id\":1}#2}#1}#0 path=[]#3",
+  "action=\"set-add\" path=[\"set\"]#0 value=9"
+ ],
+ "async set: add of a held value": [
+  "action=\"replace\" newValue={\"set\":Set{1,\"1\",{\"id\":1}#2}#1}#0 path=[]#3"
+ ],
+ "async set: add of an object": [
+  "action=\"replace\" newValue={\"set\":Set{1,\"1\",{\"id\":1}#2}#1}#0 path=[]#3",
+  "action=\"set-add\" path=[\"set\"]#0 value={\"id\":7}#1"
+ ],
+ "async set: add of a held object": [
+  "action=\"replace\" newValue={\"set\":Set{1,\"1\",{\"id\":1}#2}#1}#0 path=[]#3"
+ ],
+ "async set: add of NaN": [
+  "action=\"replace\" newValue={\"set\":Set{1,\"1\",{\"id\":1}#2}#1}#0 path=[]#3",
+  "action=\"set-add\" path=[\"set\"]#0 value=NaN"
+ ],
+ "async set: delete": [
+  "action=\"replace\" newValue={\"set\":Set{1,\"1\",{\"id\":1}#2}#1}#0 path=[]#3",
+  "action=\"set-delete\" oldValue=1 path=[\"set\"]#0 value=1"
+ ],
+ "async set: delete of a missing value": [
+  "action=\"replace\" newValue={\"set\":Set{1,\"1\",{\"id\":1}#2}#1}#0 path=[]#3"
+ ],
+ "async set: delete of an object": [
+  "action=\"replace\" newValue={\"set\":Set{1,\"1\",{\"id\":1}#2}#1}#0 path=[]#3",
+  "action=\"set-delete\" oldValue={\"id\":1}#0 path=[\"set\"]#1 value=#0"
+ ],
+ "async set: clear": [
+  "action=\"replace\" newValue={\"set\":Set{1,\"1\",{\"id\":1}#2}#1}#0 path=[]#3",
+  "action=\"set-clear\" path=[\"set\"]#0 value=null"
+ ],
+ "async set: write through a member": [
+  "action=\"replace\" newValue={\"set\":Set{1,\"1\",{\"id\":1}#2}#1}#0 path=[]#3",
+  "action=\"set\" newValue=5 oldValue=1 path=[\"set\",\"2\",\"id\"]#0"
+ ],
+ "async set: a run of writes": [
+  "action=\"replace\" newValue={\"set\":Set{1,\"1\",{\"id\":1}#2}#1}#0 path=[]#3",
+  "action=\"set-add\" path=[\"set\"]#0 value=2",
+  "action=\"set-delete\" oldValue=1 path=[\"set\"]#0 value=1",
+  "action=\"set-add\" path=[\"set\"]#0 value={\"id\":3}#1",
+  "action=\"set-clear\" path=[\"set\"]#0 value=null",
+  "action=\"set-add\" path=[\"set\"]#0 value=1"
+ ],
+ "effect: a mirror of a key": [
+  "action=\"replace\" newValue={\"count\":0,\"copy\":0}#0 path=[]#1",
+  "action=\"set\" newValue=1 oldValue=0 path=[\"count\"]#0",
+  "action=\"set\" newValue=2 oldValue=0 path=[\"copy\"]#0",
+  "action=\"set\" newValue=2 oldValue=1 path=[\"count\"]#0",
+  "action=\"set\" newValue=4 oldValue=2 path=[\"copy\"]#0"
+ ],
+ "effect: a sum of an array": [
+  "action=\"replace\" newValue={\"list\":[1,2,3]#1,\"sum\":0}#0 path=[]#2",
+  "action=\"set\" newValue=6 oldValue=0 path=[\"sum\"]#0",
+  "action=\"array-push\" items=[4]#0 key=3 path=[\"list\"]#1",
+  "action=\"set\" newValue=10 oldValue=6 path=[\"sum\"]#0",
+  "action=\"set\" newValue=10 oldValue=1 path=[\"list\",\"0\"]#0",
+  "action=\"set\" newValue=19 oldValue=10 path=[\"sum\"]#0",
+  "action=\"array-splice\" deleteCount=1 items=undefined key=1 oldValues=[2]#0 path=[\"list\"]#1",
+  "action=\"set\" newValue=17 oldValue=19 path=[\"sum\"]#0",
+  "action=\"set\" newValue=1 oldValue=3 path=[\"list\",\"length\"]#0",
+  "action=\"set\" newValue=10 oldValue=17 path=[\"sum\"]#0"
+ ],
+ "effect: a size of a map and a set": [
+  "action=\"replace\" newValue={\"map\":Map{\"a\"=>1}#1,\"set\":Set{1}#2,\"sizes\":[0,0]#3}#0 path=[]#4",
+  "action=\"set\" newValue=[1,1]#0 oldValue=[0,0]#1 path=[\"sizes\"]#2",
+  "action=\"map-set\" key=\"b\" newValue=2 oldValue=undefined path=[\"map\"]#0",
+  "action=\"set\" newValue=[2,1]#0 oldValue=[1,1]#1 path=[\"sizes\"]#2",
+  "action=\"set-add\" path=[\"set\"]#0 value=2",
+  "action=\"set\" newValue=[2,2]#0 oldValue=[2,1]#1 path=[\"sizes\"]#2",
+  "action=\"map-delete\" key=\"a\" oldValue=1 path=[\"map\"]#0",
+  "action=\"set\" newValue=[1,2]#0 oldValue=[2,2]#1 path=[\"sizes\"]#2",
+  "action=\"set-clear\" path=[\"set\"]#0 value=null",
+  "action=\"set\" newValue=[1,0]#0 oldValue=[1,2]#1 path=[\"sizes\"]#2"
+ ],
+ "effect: two effects that count and copy": [
+  "action=\"replace\" newValue={\"count\":0,\"seen\":0}#0 path=[]#1",
+  "action=\"set\" newValue=1 oldValue=0 path=[\"count\"]#0",
+  "action=\"set\" newValue=1 oldValue=0 path=[\"seen\"]#0",
+  "action=\"set\" newValue=5 oldValue=1 path=[\"count\"]#0",
+  "action=\"set\" newValue=6 oldValue=5 path=[\"count\"]#0",
+  "action=\"set\" newValue=6 oldValue=1 path=[\"seen\"]#0"
+ ],
+ "effect: an effect over items that writes each": [
+  "action=\"replace\" newValue={\"items\":[{\"done\":false}#2,{\"done\":false}#3]#1,\"total\":0}#0 path=[]#4",
+  "action=\"set\" newValue=true oldValue=false path=[\"items\",\"0\",\"done\"]#0",
+  "action=\"array-push\" items=[{\"done\":true}#1]#0 key=2 path=[\"items\"]#2",
+  "action=\"set\" newValue=2 oldValue=0 path=[\"total\"]#0",
+  "action=\"set\" newValue=true oldValue=false path=[\"items\",\"1\",\"done\"]#0"
+ ],
+ "listener: writes while it receives an event": [
+  "action=\"replace\" newValue={\"a\":0,\"b\":0,\"list\":[]#1}#0 path=[]#2",
+  "action=\"set\" newValue=1 oldValue=0 path=[\"a\"]#0",
+  "action=\"set\" newValue=1 oldValue=0 path=[\"b\"]#0",
+  "action=\"array-push\" items=[1]#0 key=0 path=[\"list\"]#1",
+  "action=\"set\" newValue=2 oldValue=1 path=[\"a\"]#0"
+ ]
+}
