@@ -784,6 +784,16 @@ export function newMethodCache(): MethodCache {
   return new (MethodCacheObject as unknown as new () => MethodCache)();
 }
 
+/**
+ * What a Map or Set proxy gives for a property it does not wrap: a function
+ * runs on the raw collection, and `valueOf` gives its receiver, the proxy.
+ * @internal
+ */
+export function collectionMember(target: object, prop: string | symbol, value: unknown): unknown {
+  if (typeof value !== "function" || prop === "valueOf") return value;
+  return value.bind(target);
+}
+
 /** What a copy is filled with. */
 const enum Fill {
     Object,

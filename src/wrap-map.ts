@@ -1,6 +1,8 @@
 import {
   deepEqual,
+  collectionMember,
   forgetReplicaIndex,
+  hasOwn,
   newMethodCache,
   indexAdded,
   indexRemoved,
@@ -86,6 +88,12 @@ export function wrapMap<K, V>(map: Map<K, V>, node: LocationNode): Map<K, V> {
       // that tracked nothing
       const cached = methodCache[prop];
       if (cached !== undefined) return cached;
+      if (prop === "size") {
+        track(target, "size");
+        return target.size;
+      }
+      // an own property in place of a method is read as it is
+      if (hasOwn.call(target, prop)) return collectionMember(target, prop, Reflect.get(target, prop, receiver));
 
       if (prop === "set") {
         methodCache[prop] = function (key: K, value: V): Map<K, V> {
@@ -148,7 +156,7 @@ export function wrapMap<K, V>(map: Map<K, V>, node: LocationNode): Map<K, V> {
       }
       // only where the raw map has them: a feature check on the proxy
       // answers as on the map
-      if ((prop === "getOrInsert" || prop === "getOrInsertComputed") && typeof (target as any)[prop] === "function") {
+      if ((prop === "getOrInsert" || prop === "getOrInsertComputed") && hasOwn.call(Map.prototype, prop)) {
         methodCache[prop] = function (key: K, value: V | ((key: K) => V)): V | undefined {
           if (prop === "getOrInsertComputed" && typeof value !== "function") {
             throw new TypeError("Map.getOrInsertComputed callback must be a function");
@@ -288,23 +296,20 @@ export function wrapMap<K, V>(map: Map<K, V>, node: LocationNode): Map<K, V> {
         return methodCache[prop];
       }
 
-      if (prop === "size") {
-        track(target, "size");
-        return target.size;
-      }
-
       // Forward constructor property for instanceof checks
       if (prop === "constructor") {
         return Map;
       }
 
-      const value = Reflect.get(target, prop, receiver);
-      if (typeof value === "function") {
-        // `valueOf` gives its receiver: the proxy
-        if (prop === "valueOf") return value;
-        return value.bind(target);
-      }
-      return value;
+      return collectionMember(target, prop, Reflect.get(target, prop, receiver));
+    },
+    defineProperty(target: Map<K, V>, prop: string | symbol, descriptor: PropertyDescriptor): boolean {
+      // `map.get = fn` ends here too. The map's own properties are no entries:
+      // no effect reads them and no event sends them.
+      const result = Reflect.defineProperty(target, prop, descriptor);
+      // the new own property is read from now on
+      if (result && methodCache[prop] !== undefined) methodCache[prop] = undefined;
+      return result;
     },
   });
 

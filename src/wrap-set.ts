@@ -1,4 +1,4 @@
-import { forgetReplicaIndex, indexAdded, indexRemoved, newMethodCache, unwrapForStore, watchIndex, wrapperCache, globalSeen, proxyStats } from "./utils";
+import { collectionMember, forgetReplicaIndex, hasOwn, indexAdded, indexRemoved, newMethodCache, unwrapForStore, watchIndex, wrapperCache, globalSeen, proxyStats } from "./utils";
 import { wrapChild } from "./reactive";
 import {
   Copied,
@@ -82,6 +82,12 @@ export function wrapSet<T>(set: Set<T>, node: LocationNode): Set<T> {
       // that tracked nothing
       const cached = methodCache[prop];
       if (cached !== undefined) return cached;
+      if (prop === "size") {
+        track(target, "size");
+        return target.size;
+      }
+      // an own property in place of a method is read as it is
+      if (hasOwn.call(target, prop)) return collectionMember(target, prop, Reflect.get(target, prop, receiver));
 
       if (prop === "add") {
         methodCache[prop] = function (value: T): Set<T> {
@@ -228,31 +234,30 @@ export function wrapSet<T>(set: Set<T>, node: LocationNode): Set<T> {
         };
         return methodCache[prop];
       }
-      if (prop === "size") {
-        track(target, "size");
-        return target.size;
-      }
-
       // Forward constructor property for instanceof checks
       if (prop === "constructor") {
         return Set;
       }
 
       const value = Reflect.get(target, prop, receiver);
-      if (typeof value === "function") {
-        // `valueOf` gives its receiver: the proxy
-        if (prop === "valueOf") return value;
-        // `union`, `isSubsetOf` and the other set methods read every value
-        if (setReaders.has(prop)) {
-          methodCache[prop] = function (this: unknown) {
-            track(target, Symbol.iterator);
-            return value.apply(target, arguments);
-          };
-          return methodCache[prop];
-        }
-        return value.bind(target);
+      // `union`, `isSubsetOf` and the other set methods read every value
+      // (Set.prototype's own: a polyfill elsewhere is read again each time)
+      if (typeof value === "function" && setReaders.has(prop) && hasOwn.call(Set.prototype, prop) && (Set.prototype as any)[prop] === value) {
+        methodCache[prop] = function (this: unknown) {
+          track(target, Symbol.iterator);
+          return value.apply(target, arguments);
+        };
+        return methodCache[prop];
       }
-      return value;
+      return collectionMember(target, prop, value);
+    },
+    defineProperty(target: Set<T>, prop: string | symbol, descriptor: PropertyDescriptor): boolean {
+      // `set.add = fn` ends here too. The set's own properties are no values:
+      // no effect reads them and no event sends them.
+      const result = Reflect.defineProperty(target, prop, descriptor);
+      // the new own property is read from now on
+      if (result && methodCache[prop] !== undefined) methodCache[prop] = undefined;
+      return result;
     },
   });
 

@@ -267,8 +267,10 @@ export function wrapArray<T extends any[]>(arr: T, node: LocationNode): T {
 
   // cache for wrapped methods to avoid re-creating them on each call
   const methodCache = newMethodCache();
+  // the key `set` is writing: `Reflect.set` ends in `defineProperty` on the proxy
+  let writing: string | symbol | undefined;
 
-  const proxy: T = new Proxy(arr, {
+  const handler = {
     get(target: T, prop: string | symbol, receiver: any): any {
       if (prop === ReactiveFlags.RAW) return target;
       if (prop === ReactiveFlags.IS_REACTIVE) return true;
@@ -619,13 +621,17 @@ export function wrapArray<T extends any[]>(arr: T, node: LocationNode): T {
       if (typeof value === "function") {
         if (prop === "constructor" || prop === "valueOf") return value;
         const method = readerOf(target, value);
-        // the array's own method, or Array.prototype's: one per proxy
-        if ((Array.prototype as any)[prop] === value) methodCache[prop] = method;
+        // Array.prototype's own methods, one per proxy. A function from
+        // Object.prototype or a subclass is read again each time, so a
+        // change there is seen; a change to Array.prototype after a proxy
+        // read the method is not.
+        if (hasOwn.call(Array.prototype, prop) && (Array.prototype as any)[prop] === value) methodCache[prop] = method;
         return method;
       }
       return value;
     },
-    set(target: T, prop: string | symbol, value: any, receiver: any): boolean {
+    // `descriptor`: the write is `Object.defineProperty` with a value (see below)
+    set(target: T, prop: string | symbol, value: any, receiver: any, descriptor?: PropertyDescriptor): boolean {
       if (isObject(value)) value = unwrapForStore(value);
 
       const oldValue = (target as any)[prop];
@@ -633,16 +639,14 @@ export function wrapArray<T extends any[]>(arr: T, node: LocationNode): T {
       // avoid unnecessary triggers if value hasn't changed. Reading past the end of an
       // array also yields undefined, so also require the prop to already exist —
       // otherwise growing into a brand-new hole with newValue: undefined would be
-      // mistaken for a no-op and silently dropped.
-      if (oldValue === value && Reflect.has(target, prop)) return true;
+      // mistaken for a no-op and silently dropped. A define still sets its flags.
+      if (
+        (oldValue === value && Reflect.has(target, prop)) ||
+        (isObject(oldValue) && isObject(value) && deepEqual(oldValue, value))
+      )
+        return descriptor === undefined || Reflect.defineProperty(target, prop, { ...descriptor, value: oldValue });
       // NaN in place of NaN is sent, as until now, but changes nothing an effect reads
       const sameNaN = oldValue !== oldValue && value !== value && Reflect.has(target, prop);
-      if (
-        isObject(oldValue) &&
-        isObject(value) &&
-        deepEqual(oldValue, value)
-      )
-        return true;
 
       // a shorter length removes the items past it
       const truncated =
@@ -657,7 +661,7 @@ export function wrapArray<T extends any[]>(arr: T, node: LocationNode): T {
         (typeof prop === "string" && !isNaN(parseInt(prop)));
       // emit event and trigger effects only if the set was successful and wasn't intercepted by a setter
       // (unless it's a direct numeric index set, which doesn't have a descriptor.set; `length` never has one)
-      const emits = isNumericIndex || prop === "length" || !writesThroughSetter(target, prop, node);
+      const emits = descriptor !== undefined || isNumericIndex || prop === "length" || !writesThroughSetter(target, prop, node);
       // direct length grow (e.g. arr.length = N) — emit ascending per-index sets
       // instead of a bare length event so the remote fills every index and never
       // ends up with a hole.
@@ -678,7 +682,17 @@ export function wrapArray<T extends any[]>(arr: T, node: LocationNode): T {
         copyPayloadReaching(event!, located!, target, after);
       }
       const oldLength = target.length;
-      const result = Reflect.set(target, prop, value, receiver);
+      let result: boolean;
+      if (descriptor !== undefined) {
+        result = Reflect.defineProperty(target, prop, { ...descriptor, value });
+      } else {
+        writing = prop;
+        try {
+          result = Reflect.set(target, prop, value, receiver);
+        } finally {
+          writing = undefined;
+        }
+      }
 
       if (result && emits) {
         // move places before anything can write again (emit may throw)
@@ -769,7 +783,33 @@ export function wrapArray<T extends any[]>(arr: T, node: LocationNode): T {
       }
       return result;
     },
-  });
+    defineProperty(target: T, prop: string | symbol, descriptor: PropertyDescriptor): boolean {
+      // the last step of a write through `set`
+      if (prop === writing) return Reflect.defineProperty(target, prop, descriptor);
+      // a value is written as `set` writes it: the same event, and the same effects rerun
+      if ("value" in descriptor) return handler.set(target, prop, descriptor.value, proxy, descriptor);
+      // an accessor, or new flags: effects rerun, and no event is sent
+      // (an accessor added later is outside the supported input, see `writesThroughSetter`)
+      const oldLength = target.length;
+      const result = Reflect.defineProperty(target, prop, descriptor);
+      if (result) {
+        node.dataOnly = undefined;
+        beginWrite();
+        try {
+          const index = arrayIndex(prop);
+          if (index >= 0) triggerArray(target, index, index + 1, target.length !== oldLength);
+          else {
+            if (methodCache[prop] !== undefined) methodCache[prop] = undefined;
+            trigger(target, prop);
+          }
+        } finally {
+          endWrite();
+        }
+      }
+      return result;
+    },
+  };
+  const proxy: T = new Proxy(arr, handler);
 
   globalSeen.set(arr, proxy);
   wrapperCache.set(arr, proxy);
