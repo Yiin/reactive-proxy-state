@@ -508,20 +508,18 @@ export function wrapArray<T extends any[]>(arr: T, node: LocationNode): T {
         }
         // special wrapper for at to ensure returned element is reactive
         case "at": {
-          track(target, Symbol.iterator);
-          if (!methodCache[prop]) {
-            methodCache[prop] = function (index: number): any {
-              // emulate Array.prototype.at to support negative indexes
-              let idx = Number(index);
-              if (!Number.isInteger(idx)) idx = Math.trunc(idx);
-              if (idx < 0) idx = target.length + idx;
-              if (idx < 0 || idx >= target.length) return undefined;
+          methodCache[prop] = function (index: number): any {
+            trackIteration(target);
+            // emulate Array.prototype.at to support negative indexes
+            let idx = Number(index);
+            if (!Number.isInteger(idx)) idx = Math.trunc(idx);
+            if (idx < 0) idx = target.length + idx;
+            if (idx < 0 || idx >= target.length) return undefined;
 
-              const value = target[idx];
-              if (!isObject(value)) return value;
-              return wrapChild(value, node, idx);
-            };
-          }
+            const value = target[idx];
+            if (!isObject(value)) return value;
+            return wrapChild(value, node, idx);
+          };
           return methodCache[prop];
         }
         case Symbol.iterator:

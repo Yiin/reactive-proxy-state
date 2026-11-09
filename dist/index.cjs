@@ -2969,22 +2969,20 @@ function wrapArray(arr, node) {
           return methodCache[prop];
         }
         case "at": {
-          track(target, Symbol.iterator);
-          if (!methodCache[prop]) {
-            methodCache[prop] = function(index2) {
-              let idx = Number(index2);
-              if (!Number.isInteger(idx))
-                idx = Math.trunc(idx);
-              if (idx < 0)
-                idx = target.length + idx;
-              if (idx < 0 || idx >= target.length)
-                return;
-              const value2 = target[idx];
-              if (!isObject3(value2))
-                return value2;
-              return wrapChild(value2, node, idx);
-            };
-          }
+          methodCache[prop] = function(index2) {
+            trackIteration(target);
+            let idx = Number(index2);
+            if (!Number.isInteger(idx))
+              idx = Math.trunc(idx);
+            if (idx < 0)
+              idx = target.length + idx;
+            if (idx < 0 || idx >= target.length)
+              return;
+            const value2 = target[idx];
+            if (!isObject3(value2))
+              return value2;
+            return wrapChild(value2, node, idx);
+          };
           return methodCache[prop];
         }
         case Symbol.iterator:

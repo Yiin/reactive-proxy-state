@@ -255,20 +255,24 @@ describe("costs and effects", () => {
     stop();
   });
 
-  test("an effect that uses find or includes reruns on a push, also after the method was read before", () => {
+  test("an effect that uses find, at or includes reruns on a push, also after the method was read before", () => {
     const state = reactive({ list: [{ id: 1 }] });
     const extra = { id: 2 };
     // the first read of a method caches it on the proxy
     state.list.find(() => false);
+    state.list.at(0);
     state.list.includes(extra);
     let found: unknown;
+    let last: unknown;
     let included = false;
     const stop = watchEffect(() => {
       found = state.list.find((item) => item.id === 2);
+      last = state.list.at(-1);
       included = state.list.includes(extra);
     });
     state.list.push(extra);
     expect(found).toBe(state.list[1]);
+    expect(last).toBe(state.list[1]);
     expect(included).toBe(true);
     stop();
   });
