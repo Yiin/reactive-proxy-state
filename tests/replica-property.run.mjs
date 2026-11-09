@@ -1,7 +1,7 @@
 /**
  * The replica property of tests/replica-property.bun.test.ts on built
  * bundles, over many seeds, with counts.
- * Run with: node tests/replica-property.run.mjs <bundle> <3.0.6 bundle> [seeds] [runs per seed]
+ * Run with: node tests/replica-property.run.mjs <bundle> <baseline bundle> [seeds] [runs per seed] [exact|catch]
  * Fails when the replica of `bundle` differs from its source after a
  * write, or when a case 3.0.6's order applies to (see `comparable`, and
  * `comparableWhenFinite` for listener writes 3.0.6 ends) sends other
@@ -15,7 +15,7 @@ import { caseArbitrary, classify, comparable, comparableWhenFinite, runCase, sam
 
 const [bundle, baselineBundle, seedArg, runArg, mode] = process.argv.slice(2);
 if (bundle === undefined || baselineBundle === undefined) {
-  console.error("usage: node tests/replica-property.run.mjs <bundle> <3.0.6 bundle> [seeds] [runs per seed]");
+  console.error("usage: node tests/replica-property.run.mjs <bundle> <baseline bundle> [seeds] [runs per seed] [exact|catch]");
   process.exit(2);
 }
 const lib = await import(pathToFileURL(resolve(bundle)).href);
@@ -70,12 +70,12 @@ for (let seed = 1; seed <= seeds; seed++) {
   const result = fc.check(
     fc.property(caseArbitrary(), (spec) => {
       const ours = runCase(lib, spec);
-      const strict = comparable(spec);
+      const strict = mode === "exact" || comparable(spec);
       const finite = !strict && comparableWhenFinite(spec) ? runCase(baseline, spec, { stopLoops: true }) : undefined;
       const theirs = strict ? runCase(baseline, spec) : finite !== undefined && !finite.looped ? finite : undefined;
       const kinds = classify(spec);
       const exact = theirs !== undefined && ours.log.join("\n") === theirs.log.join("\n");
-      const same = theirs !== undefined && sameEventLog(spec, ours, theirs);
+      const same = theirs !== undefined && (mode === "exact" ? exact : sameEventLog(spec, ours, theirs));
       counts.cases++;
       counts.writes += spec.writes.length;
       counts.events += ours.log.filter((line) => !line.startsWith("threw ") && !line.startsWith("skipped ")).length;
