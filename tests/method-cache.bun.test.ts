@@ -65,3 +65,46 @@ describe("Object.prototype names read through a proxy are the collection's", () 
     expect(`${state.list}`).toBe("1,2");
   });
 });
+
+/**
+ * Index reads return before the method cache (3.0.11). Keys that start with
+ * a digit but are no index, and names, still read what the array holds.
+ */
+describe("index-like keys read what the array holds", () => {
+  test("indexes, numeric-looking keys, length and names", () => {
+    const raw: any = [10, { n: 1 }, 30];
+    for (const key of ["", "00", "01", "1.5", "-1", "1e1", "4294967295", "9x", "2abc"]) raw[key] = { key };
+    raw.custom = 7;
+    const state = reactive({ list: raw }, () => {});
+    const list: any = state.list;
+    expect(list[0]).toBe(10);
+    expect(list["0"]).toBe(10);
+    expect(list[1].n).toBe(1);
+    expect(toRaw(list[1])).toBe(raw[1]);
+    expect(list[2]).toBe(30);
+    expect(list[3]).toBeUndefined();
+    expect(list["4294967294"]).toBeUndefined();
+    expect(list.length).toBe(3);
+    expect(list.custom).toBe(7);
+    for (const key of ["", "00", "01", "1.5", "-1", "1e1", "4294967295", "9x", "2abc"]) {
+      expect([key, list[key].key]).toEqual([key, key]);
+      expect(toRaw(list[key])).toBe(raw[key]);
+    }
+    expect(typeof list[Symbol.iterator]).toBe("function");
+    expect(list[Symbol.toStringTag]).toBeUndefined();
+  });
+
+  test("a write through an item read by index or by a numeric-looking key emits at that key", () => {
+    const events: any[] = [];
+    const raw: any = [{ n: 1 }];
+    raw["01"] = { n: 2 };
+    const state = reactive({ list: raw }, (event) => events.push(event));
+    events.length = 0;
+    (state.list as any)[0].n = 5;
+    (state.list as any)["01"].n = 6;
+    expect(events.map((event) => [event.action, event.path, event.newValue])).toEqual([
+      ["set", ["list", "0", "n"], 5],
+      ["set", ["list", "01", "n"], 6],
+    ]);
+  });
+});

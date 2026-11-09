@@ -275,16 +275,25 @@ export function wrapArray<T extends any[]>(arr: T, node: LocationNode): T {
 
       track(target, prop);
 
-      // an array index ("0", "17"), parsed once. Index reads come first: they
-      // are the most frequent, and an index never names a cached method
-      const index = arrayIndex(prop);
-      if (index >= 0) {
-        const value = Reflect.get(target, prop, receiver);
-        if (!isObject(value)) return value;
-        // recursively wrap nested structures
-        return wrapChild(value, node, index);
+      // Index reads come first: they are the most frequent, and an index
+      // never names a cached method. A key whose first character is no digit
+      // is no index, and this test needs no call: calling `arrayIndex` for
+      // every key made method reads 2.5x slower on Bun.
+      if (typeof prop === "string") {
+        const first = prop.charCodeAt(0);
+        if (first <= 57 && first >= 48) {
+          // an array index ("0", "17"), parsed once
+          const index = arrayIndex(prop);
+          if (index >= 0) {
+            const value = Reflect.get(target, prop, receiver);
+            if (!isObject(value)) return value;
+            // recursively wrap nested structures
+            return wrapChild(value, node, index);
+          }
+        } else if (prop === "length") {
+          return Reflect.get(target, prop, receiver);
+        }
       }
-      if (prop === "length") return Reflect.get(target, prop, receiver);
 
       const cached = methodCache[prop];
       if (cached !== undefined) return cached;

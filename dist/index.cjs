@@ -3133,15 +3133,20 @@ function wrapArray(arr, node) {
       if (prop === "__v_isReactive" /* IS_REACTIVE */)
         return true;
       track(target, prop);
-      const index = arrayIndex(prop);
-      if (index >= 0) {
-        const value2 = Reflect.get(target, prop, receiver);
-        if (!isObject3(value2))
-          return value2;
-        return wrapChild(value2, node, index);
+      if (typeof prop === "string") {
+        const first = prop.charCodeAt(0);
+        if (first <= 57 && first >= 48) {
+          const index = arrayIndex(prop);
+          if (index >= 0) {
+            const value2 = Reflect.get(target, prop, receiver);
+            if (!isObject3(value2))
+              return value2;
+            return wrapChild(value2, node, index);
+          }
+        } else if (prop === "length") {
+          return Reflect.get(target, prop, receiver);
+        }
       }
-      if (prop === "length")
-        return Reflect.get(target, prop, receiver);
       const cached = methodCache[prop];
       if (cached !== undefined)
         return cached;
@@ -3421,9 +3426,9 @@ function wrapArray(arr, node) {
         case "at": {
           if (hasOwn.call(target, prop))
             break;
-          methodCache[prop] = function(index2) {
+          methodCache[prop] = function(index) {
             trackIteration(target);
-            let idx = Number(index2);
+            let idx = Number(index);
             if (!Number.isInteger(idx))
               idx = Math.trunc(idx);
             if (idx < 0)
