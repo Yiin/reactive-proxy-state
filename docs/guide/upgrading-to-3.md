@@ -35,5 +35,5 @@ In 3.0.0 and earlier, iterating an array proxy gave its raw items. A write throu
 
 What to check when you upgrade:
 
-- **Iterated objects are now proxies.** `structuredClone` throws on a proxy: pass it through `deepToRaw` first, as you would for an index read. A raw item from a callback or `slice` is not `===` to the proxy of the same object from iteration; compare `toRaw()` of both.
+- **Iterated objects, and the objects you read from them, are now proxies.** `structuredClone` throws on a proxy: pass it through `deepToRaw` first, as you would for an index read. A raw item from a callback or `slice` is not `===` to the proxy of the same object: `job.history[0]` of an iterated `job` is not one of the entries that `jobs.flatMap((job) => job.history)` gives. Compare `toRaw()` of both, or compare by a field such as an id.
 - **Iteration costs what an index read costs.** Measured on an idle arm64 host with Node 26, 400 objects: a `for...of` that reads one property of each item takes 18.4 µs (2.6 µs in 3.0.0, which skipped the proxies); an index loop over the same proxy takes 81 µs. A first loop makes each item's proxy, as a first index read does, and keeps about 800 bytes per item while the item stays in the state. A loop that only reads a long list can iterate `toRaw(list)` to skip the proxies; writes through those items send nothing.
