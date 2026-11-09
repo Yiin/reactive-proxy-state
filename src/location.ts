@@ -1,4 +1,4 @@
-import { checkListenerWrite, emitListener, listenerGeneration } from "./listener";
+import { checkListenerWrite, emitListener, writeGeneration } from "./listener";
 import { ReactiveFlags } from "./constants";
 import type { EmitFunction, Path, StateEvent } from "./types";
 import {
@@ -67,14 +67,17 @@ export interface LocationRoot {
 /**
  * A root's queue: `events[next]` is the oldest event not delivered yet. The
  * events of the write that started it have `generation` (see
- * `emitListener`). Events listener writes added have the generations in
- * `marks`, pairs of a first index and its generation, made only when a
- * listener writes.
+ * `emitListener`). Listener writes add events of other generations: from
+ * index `changeAt` on they have `changeGeneration`, and `marks` holds any
+ * later changes, pairs of a first index and its generation. Most queues
+ * change at most once, so they allocate no `marks`.
  */
 interface Undelivered {
   events: StateEvent[];
   next: number;
   generation: number;
+  changeAt: number;
+  changeGeneration: number;
   marks: number[] | undefined;
 }
 
@@ -513,7 +516,7 @@ function attachedBefore(node: LocationNode, former: LocationNode | undefined): b
 export function dispatch(target: Target, event: StateEvent): void {
   const { root, paths } = target;
   if (paths.length === 1) {
-    if (root.undelivered === undefined) emitListener(root.emit!, event, listenerGeneration + 1);
+    if (root.undelivered === undefined) emitListener(root.emit!, event, writeGeneration());
     else deliver(root, [event]);
     return;
   }
@@ -569,12 +572,19 @@ function copiesPerPath(event: StateEvent, paths: Path[], async: boolean): StateE
 export function deliver(root: LocationRoot, events: StateEvent[]): void {
   const emit = root.emit!;
   // the generation of this write's events: one past the listener that made it
-  const generation = listenerGeneration + 1;
+  const generation = writeGeneration();
   const waiting = root.undelivered;
   if (waiting !== undefined) {
-    const marks = waiting.marks;
-    if (marks === undefined ? generation !== waiting.generation : generation !== marks[marks.length - 1]) {
-      (waiting.marks ??= []).push(waiting.events.length, generation);
+    if (waiting.changeAt < 0) {
+      if (generation !== waiting.generation) {
+        waiting.changeAt = waiting.events.length;
+        waiting.changeGeneration = generation;
+      }
+    } else {
+      const marks = waiting.marks;
+      if (generation !== (marks === undefined ? waiting.changeGeneration : marks[marks.length - 1])) {
+        (waiting.marks ??= []).push(waiting.events.length, generation);
+      }
     }
     for (let i = 0; i < events.length; i++) {
       waiting.events.push(events[i]);
@@ -585,7 +595,14 @@ export function deliver(root: LocationRoot, events: StateEvent[]): void {
     emitListener(emit, events[0], generation);
     return;
   }
-  const queue: Undelivered = (root.undelivered = { events, next: 0, generation, marks: undefined });
+  const queue: Undelivered = (root.undelivered = {
+    events,
+    next: 0,
+    generation,
+    changeAt: -1,
+    changeGeneration: 0,
+    marks: undefined,
+  });
   let current = generation;
   let mark = 0;
   let failed = false;
@@ -593,9 +610,9 @@ export function deliver(root: LocationRoot, events: StateEvent[]): void {
   try {
     while (queue.next < queue.events.length) {
       const index = queue.next++;
-      const marks = queue.marks;
-      if (marks !== undefined && marks[mark] === index) {
-        current = marks[mark + 1];
+      if (index === queue.changeAt) current = queue.changeGeneration;
+      else if (queue.marks !== undefined && mark < queue.marks.length && queue.marks[mark] === index) {
+        current = queue.marks[mark + 1];
         mark += 2;
       }
       try {

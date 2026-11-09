@@ -1,4 +1,4 @@
-import { beginAsyncDelivery, emitListener, endAsyncDelivery, isRefusal, listenerGeneration } from "./listener";
+import { beginAsyncDelivery, emitListener, endAsyncDelivery, isRefusal, listenerGeneration, writeGeneration } from "./listener";
 import { EmitFunction, Path, ReactiveOptions, StateEvent } from "./types";
 import {
   Named,
@@ -69,7 +69,7 @@ function createAsyncEmit(emit: EmitFunction): EmitFunction {
   return (event: StateEvent) => {
     queue.push(event)
     // the wrapper is called as the root's listener, with the event's generation
-    generations.push(listenerGeneration)
+    generations.push(listenerGeneration())
     if (!flushScheduled) {
       flushScheduled = true
       queueMicrotask(() => {
@@ -153,7 +153,7 @@ export function reactive<T extends object>(
     try {
       const newValue = cloneStored(obj, undefined, Named.All);
       fresh = copiedFresh;
-      emitListener(emit, { action: "replace", path: [], newValue }, listenerGeneration + 1);
+      emitListener(emit, { action: "replace", path: [], newValue }, writeGeneration());
     } catch (error) {
       if (error instanceof SnapshotLimitError) throw error;
       console.error("Failed to emit initial reactive state:", error);

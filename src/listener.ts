@@ -27,10 +27,12 @@ import { activeEffect, batchDepth, flushing, setActiveEffect } from "./watch-eff
 const MAX_LISTENER_WRITE_DEPTH = 100;
 const MAX_LISTENER_WRITE_ROUNDS = 100_000;
 
-/** The generation of the event the running listener received; -1 outside listeners. */
-export let listenerGeneration = -1;
-/** Has the running listener call used its round? */
-let listenerWrote = false;
+/**
+ * The running listener call: -1 outside listeners, otherwise the generation
+ * of the event it received times 2, plus 1 once it used its round. One
+ * number, so a delivery saves and restores one variable.
+ */
+let listening = -1;
 /** Tracking is paused, but writes still belong to the effect that called the listener. */
 export let emittingEffect: typeof activeEffect = null;
 /** Async delivery microtasks running: they end their operation themselves. */
@@ -39,20 +41,31 @@ let asyncDeliveries = 0;
 let rounds = 0;
 let refusal: RangeError | undefined;
 
+/** The generation of the events a write made now sends. */
+export function writeGeneration(): number {
+  return (listening >> 1) + 1;
+}
+
+/** The generation of the event the running listener received. */
+export function listenerGeneration(): number {
+  return listening >> 1;
+}
+
 /** A listener call uses its round with its first write, before mutation. */
 export function checkListenerWrite(): void {
-  if (listenerGeneration < 0 || listenerWrote) return;
+  if (listening < 0 || (listening & 1) !== 0) return;
+  const generation = listening >> 1;
   if (
     refusal === undefined &&
-    listenerGeneration < MAX_LISTENER_WRITE_DEPTH &&
-    (listenerGeneration === 0 || ++rounds <= MAX_LISTENER_WRITE_ROUNDS)
+    generation < MAX_LISTENER_WRITE_DEPTH &&
+    (generation === 0 || ++rounds <= MAX_LISTENER_WRITE_ROUNDS)
   ) {
-    listenerWrote = true;
+    listening |= 1;
     return;
   }
   refusal ??= new RangeError(
-    listenerGeneration >= MAX_LISTENER_WRITE_DEPTH
-      ? `reactive-proxy-state: refused a listener write nested ${listenerGeneration + 1} deep ` +
+    generation >= MAX_LISTENER_WRITE_DEPTH
+      ? `reactive-proxy-state: refused a listener write nested ${generation + 1} deep ` +
         `(at most ${MAX_LISTENER_WRITE_DEPTH}). Filter event paths to stop listener writes from repeating`
       : `reactive-proxy-state: refused a listener write after ${MAX_LISTENER_WRITE_ROUNDS} nested rounds ` +
         `in one operation. Filter event paths to stop listener writes from repeating`
@@ -67,7 +80,7 @@ export function checkListenerWrite(): void {
  * @internal
  */
 export function endOperation(): void {
-  if (listenerGeneration >= 0 || asyncDeliveries > 0) return;
+  if ((rounds === 0 && refusal === undefined) || listening >= 0 || asyncDeliveries > 0) return;
   rounds = 0;
   const error = refusal;
   if (error === undefined) return;
@@ -103,32 +116,34 @@ export function endAsyncDelivery(): void {
  * Effects called inside a listener track their own reads.
  */
 export function emitListener(emit: EmitFunction, event: StateEvent, generation: number): void {
-  const previousGeneration = listenerGeneration;
-  const previousWrote = listenerWrote;
-  const previousEffect = activeEffect;
-  listenerGeneration = generation;
-  listenerWrote = false;
-  // Ordinary synchronous delivery needs no tracking switch.
-  if (previousEffect === null) {
-    try {
-      emit(event);
-    } finally {
-      listenerGeneration = previousGeneration;
-      listenerWrote = previousWrote;
-      if (previousGeneration < 0 && batchDepth === 0 && !flushing) endOperation();
-    }
+  if (activeEffect !== null) {
+    emitUntracked(emit, event, generation);
     return;
   }
+  const previous = listening;
+  listening = generation << 1;
+  try {
+    emit(event);
+  } finally {
+    listening = previous;
+    if (previous < 0 && batchDepth === 0 && !flushing) endOperation();
+  }
+}
+
+/** `emitListener` while an effect runs: its tracking pauses for the listener. */
+function emitUntracked(emit: EmitFunction, event: StateEvent, generation: number): void {
+  const previous = listening;
+  const previousEffect = activeEffect;
   const previousEmittingEffect = emittingEffect;
   emittingEffect = previousEffect;
   setActiveEffect(null);
+  listening = generation << 1;
   try {
     emit(event);
   } finally {
     setActiveEffect(previousEffect);
     emittingEffect = previousEmittingEffect;
-    listenerGeneration = previousGeneration;
-    listenerWrote = previousWrote;
-    if (previousGeneration < 0 && batchDepth === 0 && !flushing) endOperation();
+    listening = previous;
+    if (previous < 0 && batchDepth === 0 && !flushing) endOperation();
   }
 }

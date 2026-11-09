@@ -318,6 +318,9 @@ function flushEffects(): void {
     queue.length = 0;
     if (triggerNotifications.length > 0) triggerNotifications.length = 0;
     flushing = false;
+    // a flush runs only from the outermost batch: the operation ends with it,
+    // and the listener bound's error replaces an effect's
+    if (batchDepth === 0) endOperation();
   }
   if (failed) throw failure;
 }
@@ -333,11 +336,9 @@ function startBatch(): void {
  */
 function endBatch(): void {
   if (--batchDepth !== 0 || flushing) return;
-  try {
-    if (queue.length > 0 || triggerNotifications.length > 0) flushEffects();
-  } finally {
-    endOperation();
-  }
+  // the flush ends the operation in its own `finally`
+  if (queue.length > 0 || triggerNotifications.length > 0) flushEffects();
+  else endOperation();
 }
 
 /**
