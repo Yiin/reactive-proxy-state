@@ -239,8 +239,11 @@ export function wrapArray<T extends any[]>(arr: T, node: LocationNode): T {
   if (cachedProxy) return cachedProxy as T;
   if (globalSeen.has(arr)) return globalSeen.get(arr);
 
-  // cache for wrapped methods to avoid re-creating them on each call
-  const methodCache: { [key: string | symbol]: Function } = {};
+  // cache for wrapped methods to avoid re-creating them on each call. It has
+  // no prototype: `toString`, `toLocaleString`, `constructor` and
+  // `__proto__` were found on Object.prototype in it until 3.0.1, so
+  // `${list}` gave "[object Array]" and `list.constructor` gave Object.
+  const methodCache: { [key: string | symbol]: Function } = Object.create(null);
 
   const proxy: T = new Proxy(arr, {
     get(target: T, prop: string | symbol, receiver: any): any {
@@ -538,8 +541,10 @@ export function wrapArray<T extends any[]>(arr: T, node: LocationNode): T {
 
       // ensure functions accessed directly are bound to the original target.
       // The methods left (`map`, `filter`, `slice`, `join`, `keys`, `with`
-      // and the rest) read the whole array.
+      // and the rest) read the whole array. `constructor` is a class, and
+      // `valueOf` gives its receiver: both keep the proxy.
       if (typeof value === "function") {
+        if (prop === "constructor" || prop === "valueOf") return value;
         trackIteration(target);
         return value.bind(target);
       }
