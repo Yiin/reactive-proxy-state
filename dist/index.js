@@ -533,6 +533,11 @@ MethodCacheObject.prototype = Object.create(null);
 function newMethodCache() {
   return new MethodCacheObject;
 }
+function collectionMember(target, prop, value) {
+  if (typeof value !== "function" || prop === "valueOf")
+    return value;
+  return value.bind(target);
+}
 function enterPath(identity, copy, depth) {
   cloneAncestors.push(identity);
   cloneCopies.push(copy);
@@ -3042,7 +3047,7 @@ function wrapArray(arr, node) {
   if (globalSeen.has(arr))
     return globalSeen.get(arr);
   const methodCache = newMethodCache();
-  const proxy = new Proxy(arr, {
+  const handler = {
     get(target, prop, receiver) {
       if (prop === "__v_raw" /* RAW */)
         return target;
@@ -3383,25 +3388,24 @@ function wrapArray(arr, node) {
         if (prop === "constructor" || prop === "valueOf")
           return value;
         const method = readerOf(target, value);
-        if (Array.prototype[prop] === value)
+        if (hasOwn.call(Array.prototype, prop) && Array.prototype[prop] === value)
           methodCache[prop] = method;
         return method;
       }
       return value;
     },
-    set(target, prop, value, receiver) {
+    set(target, prop, value, receiver, descriptor) {
       if (isObject3(value))
         value = unwrapForStore(value);
       const oldValue = target[prop];
-      if (oldValue === value && Reflect.has(target, prop))
-        return true;
+      if (oldValue === value && Reflect.has(target, prop) || isObject3(oldValue) && isObject3(value) && deepEqual(oldValue, value))
+        return descriptor === undefined || Reflect.defineProperty(target, prop, { ...descriptor, value: oldValue });
       const sameNaN = oldValue !== oldValue && value !== value && Reflect.has(target, prop);
-      if (isObject3(oldValue) && isObject3(value) && deepEqual(oldValue, value))
-        return true;
       const truncated = prop === "length" && Number(value) < target.length ? target.slice(Number(value)) : undefined;
       const index = arrayIndex(prop);
       const isNumericIndex = typeof prop === "number" || index >= 0 || typeof prop === "string" && !isNaN(parseInt(prop));
-      const emits = isNumericIndex || prop === "length" || !writesThroughSetter(target, prop, node);
+      const throughSetter = !isNumericIndex && prop !== "length" && writesThroughSetter(target, prop, node);
+      const emits = descriptor !== undefined || !throughSetter;
       const grows = prop === "length" && Number(value) > Number(oldValue);
       const located = emits ? grows ? locate(node) : locate(node, prop) : undefined;
       const event = located === undefined || grows ? undefined : { action: "set", path: located.paths[0], oldValue, newValue: value };
@@ -3413,7 +3417,7 @@ function wrapArray(arr, node) {
         copyPayloadReaching(event, located, target, after);
       }
       const oldLength = target.length;
-      const result = Reflect.set(target, prop, value, receiver);
+      const result = descriptor !== undefined ? Reflect.defineProperty(target, prop, { ...descriptor, value }) : receiver === proxy && !throughSetter ? Reflect.set(target, prop, value) : Reflect.set(target, prop, value, receiver);
       if (result && emits) {
         if (truncated !== undefined) {
           relinkArray(node, target, target.length, truncated);
@@ -3504,8 +3508,32 @@ function wrapArray(arr, node) {
         }
       }
       return result;
+    },
+    defineProperty(target, prop, descriptor) {
+      if ("value" in descriptor)
+        return handler.set(target, prop, descriptor.value, proxy, descriptor);
+      const oldLength = target.length;
+      const result = Reflect.defineProperty(target, prop, descriptor);
+      if (result) {
+        node.dataOnly = undefined;
+        beginWrite();
+        try {
+          const index = arrayIndex(prop);
+          if (index >= 0)
+            triggerArray(target, index, index + 1, target.length !== oldLength);
+          else {
+            if (methodCache[prop] !== undefined)
+              methodCache[prop] = undefined;
+            trigger(target, prop);
+          }
+        } finally {
+          endWrite();
+        }
+      }
+      return result;
     }
-  });
+  };
+  const proxy = new Proxy(arr, handler);
   globalSeen.set(arr, proxy);
   wrapperCache.set(arr, proxy);
   proxyStats.created++;
@@ -3570,16 +3598,22 @@ function wrapMap(map, node) {
       const cached = methodCache[prop];
       if (cached !== undefined)
         return cached;
+      if (prop === "size") {
+        track(target, "size");
+        return target.size;
+      }
+      if (hasOwn.call(target, prop))
+        return collectionMember(target, prop, Reflect.get(target, prop, receiver));
       if (prop === "set") {
-        methodCache[prop] = function(key, value2) {
-          if (value2 != null && typeof value2 === "object")
-            value2 = unwrapForStore(value2);
+        methodCache[prop] = function(key, value) {
+          if (value != null && typeof value === "object")
+            value = unwrapForStore(value);
           const existed = target.has(key);
           const oldValue = target.get(key);
           const oldSize = target.size;
-          if (oldValue === value2 && existed)
+          if (oldValue === value && existed)
             return receiver;
-          if (oldValue && typeof oldValue === "object" && value2 && typeof value2 === "object" && deepEqual(oldValue, value2))
+          if (oldValue && typeof oldValue === "object" && value && typeof value === "object" && deepEqual(oldValue, value))
             return receiver;
           const located = locate(node);
           const event = located && {
@@ -3587,26 +3621,26 @@ function wrapMap(map, node) {
             path: located.paths[0],
             key,
             oldValue,
-            newValue: value2
+            newValue: value
           };
-          const held = located && heldItems(value2, oldValue);
+          const held = located && heldItems(value, oldValue);
           if (event !== undefined && isObject4(key))
             nameKey(event, key, target, !existed);
           const copied = copyPayload(event, located, target, held);
           if (copied === 0 /* Reaches */) {
-            copyPayloadReaching(event, located, target, shallowCopy(target).set(key, value2));
+            copyPayloadReaching(event, located, target, shallowCopy(target).set(key, value));
           }
-          target.set(key, value2);
+          target.set(key, value);
           const newSize = target.size;
           if (!existed && watch.indexed)
             indexAdded(target, key);
           if (isObject4(oldValue))
             detachPlace(oldValue, node, key);
-          if (isObject4(value2))
-            attachValue(value2, node, key, copied === 2 /* Fresh */, located && oldValue, held);
+          if (isObject4(value))
+            attachValue(value, node, key, copied === 2 /* Fresh */, located && oldValue, held);
           beginWrite();
           try {
-            if (!existed || oldValue === oldValue || value2 === value2)
+            if (!existed || oldValue === oldValue || value === value)
               triggerCollection(target, key, oldSize !== newSize);
             if (event !== undefined)
               dispatch(located, event);
@@ -3622,16 +3656,16 @@ function wrapMap(map, node) {
         };
         return methodCache[prop];
       }
-      if ((prop === "getOrInsert" || prop === "getOrInsertComputed") && typeof target[prop] === "function") {
-        methodCache[prop] = function(key, value2) {
-          if (prop === "getOrInsertComputed" && typeof value2 !== "function") {
+      if ((prop === "getOrInsert" || prop === "getOrInsertComputed") && hasOwn.call(Map.prototype, prop)) {
+        methodCache[prop] = function(key, value) {
+          if (prop === "getOrInsertComputed" && typeof value !== "function") {
             throw new TypeError("Map.getOrInsertComputed callback must be a function");
           }
           if (Object.is(key, -0))
             key = 0;
           if (proxy.has(key))
             return proxy.get(key);
-          const inserted = prop === "getOrInsertComputed" ? value2(key) : value2;
+          const inserted = prop === "getOrInsertComputed" ? value(key) : value;
           const stored = isObject4(inserted) ? unwrapForStore(inserted) : inserted;
           proxy.set(key, stored);
           if (!isObject4(stored))
@@ -3696,9 +3730,9 @@ function wrapMap(map, node) {
           target.clear();
           if (watch.indexed)
             forgetReplicaIndex(target);
-          for (const [key, value2] of removed) {
-            if (isObject4(value2))
-              detachPlace(value2, node, key);
+          for (const [key, value] of removed) {
+            if (isObject4(value))
+              detachPlace(value, node, key);
           }
           beginWrite();
           try {
@@ -3712,9 +3746,9 @@ function wrapMap(map, node) {
             }
           } finally {
             try {
-              for (const [, value2] of removed) {
-                if (isObject4(value2))
-                  evictDeep(value2);
+              for (const [, value] of removed) {
+                if (isObject4(value))
+                  evictDeep(value);
               }
             } finally {
               endWrite();
@@ -3726,10 +3760,10 @@ function wrapMap(map, node) {
       if (prop === "get") {
         methodCache[prop] = function(key) {
           trackEntry(target, key);
-          const value2 = target.get(key);
-          if (!value2 || typeof value2 !== "object")
-            return value2;
-          return wrapChild(value2, node, key);
+          const value = target.get(key);
+          if (!value || typeof value !== "object")
+            return value;
+          return wrapChild(value, node, key);
         };
         return methodCache[prop];
       }
@@ -3744,8 +3778,8 @@ function wrapMap(map, node) {
         if (prop === "forEach") {
           methodCache[prop] = (callbackfn, thisArg) => {
             const entriesIterator = proxy.entries();
-            for (const [key, value2] of entriesIterator) {
-              callbackfn.call(thisArg, value2, key, proxy);
+            for (const [key, value] of entriesIterator) {
+              callbackfn.call(thisArg, value, key, proxy);
             }
           };
           return methodCache[prop];
@@ -3755,20 +3789,16 @@ function wrapMap(map, node) {
         };
         return methodCache[prop];
       }
-      if (prop === "size") {
-        track(target, "size");
-        return target.size;
-      }
       if (prop === "constructor") {
         return Map;
       }
-      const value = Reflect.get(target, prop, receiver);
-      if (typeof value === "function") {
-        if (prop === "valueOf")
-          return value;
-        return value.bind(target);
-      }
-      return value;
+      return collectionMember(target, prop, Reflect.get(target, prop, receiver));
+    },
+    defineProperty(target, prop, descriptor) {
+      const result = Reflect.defineProperty(target, prop, descriptor);
+      if (result && methodCache[prop] !== undefined)
+        methodCache[prop] = undefined;
+      return result;
     }
   });
   globalSeen.set(map, proxy);
@@ -3841,6 +3871,12 @@ function wrapSet(set, node) {
       const cached = methodCache[prop];
       if (cached !== undefined)
         return cached;
+      if (prop === "size") {
+        track(target, "size");
+        return target.size;
+      }
+      if (hasOwn.call(target, prop))
+        return collectionMember(target, prop, Reflect.get(target, prop, receiver));
       if (prop === "add") {
         methodCache[prop] = function(value2) {
           if (value2 != null && typeof value2 === "object")
@@ -3981,27 +4017,24 @@ function wrapSet(set, node) {
         };
         return methodCache[prop];
       }
-      if (prop === "size") {
-        track(target, "size");
-        return target.size;
-      }
       if (prop === "constructor") {
         return Set;
       }
       const value = Reflect.get(target, prop, receiver);
-      if (typeof value === "function") {
-        if (prop === "valueOf")
-          return value;
-        if (setReaders.has(prop)) {
-          methodCache[prop] = function() {
-            track(target, Symbol.iterator);
-            return value.apply(target, arguments);
-          };
-          return methodCache[prop];
-        }
-        return value.bind(target);
+      if (typeof value === "function" && setReaders.has(prop) && hasOwn.call(Set.prototype, prop) && Set.prototype[prop] === value) {
+        methodCache[prop] = function() {
+          track(target, Symbol.iterator);
+          return value.apply(target, arguments);
+        };
+        return methodCache[prop];
       }
-      return value;
+      return collectionMember(target, prop, value);
+    },
+    defineProperty(target, prop, descriptor) {
+      const result = Reflect.defineProperty(target, prop, descriptor);
+      if (result && methodCache[prop] !== undefined)
+        methodCache[prop] = undefined;
+      return result;
     }
   });
   globalSeen.set(set, proxy);
