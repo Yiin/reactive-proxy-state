@@ -268,18 +268,20 @@ function flushEffects(): void {
   let notifications = 0;
   try {
     for (; index < queue.length || triggerNotifications.length > 0; index++) {
-      for (let next = 0; next < triggerNotifications.length; next++) {
-        try {
-          if (++notifications > MAX_FLUSH_RUNS) {
-            throw new RangeError("reactive-proxy-state: trigger hooks keep writing new values in one flush");
+      if (triggerNotifications.length > 0) {
+        for (let next = 0; next < triggerNotifications.length; next++) {
+          try {
+            if (++notifications > MAX_FLUSH_RUNS) {
+              throw new RangeError("reactive-proxy-state: trigger hooks keep writing new values in one flush");
+            }
+            triggerNotifications[next]();
+          } catch (error) {
+            if (!failed) { failed = true; failure = error; }
           }
-          triggerNotifications[next]();
-        } catch (error) {
-          if (!failed) { failed = true; failure = error; }
+          if (notifications > MAX_FLUSH_RUNS) break;
         }
-        if (notifications > MAX_FLUSH_RUNS) break;
+        triggerNotifications.length = 0;
       }
-      triggerNotifications.length = 0;
       if (index >= queue.length) break;
       const effect = queue[index];
       effect.queued = false;
@@ -313,7 +315,7 @@ function flushEffects(): void {
     // effects a loop left in the queue are no longer waiting
     for (; index < queue.length; index++) queue[index].queued = false;
     queue.length = 0;
-    triggerNotifications.length = 0;
+    if (triggerNotifications.length > 0) triggerNotifications.length = 0;
     flushing = false;
   }
   if (failed) throw failure;
