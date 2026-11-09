@@ -3,13 +3,14 @@
  * bundles, over many seeds, with counts.
  * Run with: node tests/replica-property.run.mjs <bundle> <3.0.6 bundle> [seeds] [runs per seed]
  * Fails when the replica of `bundle` differs from its source after a
- * write, or when a case 3.0.6's order applies to (see `comparable`) sends
- * other events than 3.0.6.
+ * write, or when a case 3.0.6's order applies to (see `comparable`, and
+ * `comparableWhenFinite` for listener writes 3.0.6 ends) sends other
+ * events than 3.0.6.
  */
 import fc from "fast-check";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
-import { caseArbitrary, classify, comparable, runCase } from "./replica-property.model.mjs";
+import { caseArbitrary, classify, comparable, comparableWhenFinite, runCase } from "./replica-property.model.mjs";
 
 const [bundle, baselineBundle, seedArg, runArg] = process.argv.slice(2);
 if (bundle === undefined || baselineBundle === undefined) {
@@ -32,6 +33,8 @@ const counts = {
   events: 0,
   errors: 0,
   boundReports: 0,
+  finiteListenerWrites: 0,
+  baselineLooped: 0,
   sameAsBaseline: 0,
   baselineReplicaDiffers: 0,
 };
@@ -41,20 +44,23 @@ for (let seed = 1; seed <= seeds; seed++) {
   const result = fc.check(
     fc.property(caseArbitrary(), (spec) => {
       const ours = runCase(lib, spec);
-      const theirs = comparable(spec) ? runCase(baseline, spec) : undefined;
+      const strict = comparable(spec);
+      const finite = !strict && comparableWhenFinite(spec) ? runCase(baseline, spec, { stopLoops: true }) : undefined;
+      const theirs = strict ? runCase(baseline, spec) : finite !== undefined && !finite.looped ? finite : undefined;
       const kinds = classify(spec);
       const same = theirs !== undefined && ours.log.join("\n") === theirs.log.join("\n");
       counts.cases++;
       counts.writes += spec.writes.length;
       counts.events += ours.log.filter((line) => !line.startsWith("threw ") && !line.startsWith("skipped ")).length;
       counts.errors += ours.log.filter((line) => line.startsWith("threw ")).length;
-      counts.boundReports += ours.log.filter(line => line.includes("100 nested write rounds")).length;
-      if (comparable(spec)) counts.comparable++;
+      counts.boundReports += ours.log.filter(line => line.includes("refused a listener write")).length;
+      if (strict) counts.comparable++;
+      if (finite !== undefined) counts[finite.looped ? "baselineLooped" : "finiteListenerWrites"]++;
       for (const kind of ["srjbj9", "hooks", "listenerReads", "queued"]) if (kinds[kind]) counts[kind]++;
       if (same) counts.sameAsBaseline++;
       if (theirs?.mismatch !== undefined) counts.baselineReplicaDiffers++;
       if (ours.mismatch !== undefined) return false;
-      return !comparable(spec) || same;
+      return theirs === undefined || same;
     }),
     { seed, numRuns: runs }
   );
@@ -64,7 +70,7 @@ for (let seed = 1; seed <= seeds; seed++) {
       seed,
       spec,
       ours: runCase(lib, spec),
-      baseline: comparable(spec) ? runCase(baseline, spec) : "excluded: bound or listener tracking",
+      baseline: comparable(spec) ? runCase(baseline, spec) : comparableWhenFinite(spec) ? runCase(baseline, spec, { stopLoops: true }) : "excluded: listener tracking",
       kinds: classify(spec),
     });
     if (failures.length >= 3) break;

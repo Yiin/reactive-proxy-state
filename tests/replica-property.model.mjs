@@ -176,6 +176,22 @@ export function classify(spec) {
   };
 }
 
+/**
+ * Cases whose effects never read what the listener writes, so 3.0.6's
+ * listener-read dependencies cannot change them. 3.0.6 has no bound: run
+ * it with `stopLoops`, and compare only when it ended without a loop.
+ */
+export function comparableWhenFinite(spec) {
+  const written = new Set(spec.rules.map(rule => rule.write === "bump" ? "version" : rule.write.split(".")[0]));
+  return spec.effects.every(effect => effect.kind === "read" ||
+    (!spec.rules.some(rule => rule.write === "bump") &&
+     [...effectHeads(effect)].every(head => !written.has(head))));
+}
+
+/** Listener calls nested this deep, or this many in one case, are a loop on a build without a bound. */
+const LOOP_DEPTH = 120;
+const LOOP_CALLS = 20_000;
+
 /** Cases outside the new bound and untracked listener reads, safe to run on 3.0.6. */
 export function comparable(spec) {
   const written = new Set(spec.rules.map(rule => rule.write === "bump" ? "version" : rule.write.split(".")[0]));
@@ -310,13 +326,19 @@ function applyWrite(state, write, lib) {
 /**
  * Run `spec` on `lib`. Returns `log`, every event the replica received and
  * every error a write threw, in order, and `mismatch`, the first point
- * where the replica differed from the source, if any.
+ * where the replica differed from the source, if any. With `stopLoops`
+ * (for a build without a listener bound), the listener throws instead of
+ * writing once calls nest `LOOP_DEPTH` deep or number `LOOP_CALLS`, and
+ * `looped` says so: the case is a loop, and its log is cut.
  */
-export function runCase(lib, spec) {
+export function runCase(lib, spec, { stopLoops = false } = {}) {
   const log = [];
   let remote;
   let stamp = 100;
   let state;
+  let depth = 0;
+  let calls = 0;
+  let looped = false;
   const fire = (event, when) => {
     const head = event.path[0];
     for (const rule of spec.rules) {
@@ -324,11 +346,7 @@ export function runCase(lib, spec) {
       applyRule(state, rule, head, ++stamp);
     }
   };
-  state = lib.reactive(makeState(spec.init), (event) => {
-    if (event.path.length === 0) {
-      remote = event.newValue;
-      return;
-    }
+  const deliver = (event) => {
     try {
       fire(event, "before");
     } finally {
@@ -336,6 +354,23 @@ export function runCase(lib, spec) {
       lib.updateState(remote, event);
     }
     fire(event, "after");
+  };
+  state = lib.reactive(makeState(spec.init), (event) => {
+    if (event.path.length === 0) {
+      remote = event.newValue;
+      return;
+    }
+    if (!stopLoops) return deliver(event);
+    if (looped || depth >= LOOP_DEPTH || ++calls > LOOP_CALLS) {
+      looped = true;
+      throw new Error("baseline loop");
+    }
+    depth++;
+    try {
+      deliver(event);
+    } finally {
+      depth--;
+    }
   });
   let mismatch;
   const check = (step) => {
@@ -372,5 +407,5 @@ export function runCase(lib, spec) {
   spec.writes.forEach((write, index) => attempt(`write ${index} ${write.op}`, () => applyWrite(state, write, lib)));
   for (const stop of stops) stop();
   computed.stop?.();
-  return { log, mismatch };
+  return { log, mismatch, looped };
 }

@@ -3,7 +3,7 @@ import fc from "fast-check";
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import type * as Library from "../src/index";
-import { caseArbitrary, comparable, runCase } from "./replica-property.model.mjs";
+import { caseArbitrary, comparable, comparableWhenFinite, runCase } from "./replica-property.model.mjs";
 
 const lib = await import(process.env.RPS_TEST_BUNDLE ?? "../src/index") as typeof Library;
 // The dist/index.js of the npm tarball of 3.0.6, checked against
@@ -29,6 +29,10 @@ test("a replica of a listener that writes state equals the source after every wr
       expect(ours.mismatch).toBeUndefined();
       // Only finite cases without listener-read dependencies can run on 3.0.6.
       if (comparable(spec)) expect(ours.log).toEqual(runCase(baseline, spec).log);
+      else if (comparableWhenFinite(spec)) {
+        const theirs = runCase(baseline, spec, { stopLoops: true });
+        if (!theirs.looped) expect(ours.log).toEqual(theirs.log);
+      }
     }),
     { seed, numRuns }
   );
