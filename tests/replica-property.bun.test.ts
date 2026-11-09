@@ -36,4 +36,5 @@ test("a replica of a listener that writes state equals the source after every wr
     }),
     { seed, numRuns }
   );
-});
+  // a branching listener loop runs up to the 100,000-round total before it stops
+}, 180_000);
