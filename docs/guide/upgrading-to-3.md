@@ -37,3 +37,21 @@ What to check when you upgrade:
 
 - **Iterated objects, and the objects you read from them, are now proxies.** `structuredClone` throws on a proxy: pass it through `deepToRaw` first, as you would for an index read. A raw item from a callback or `slice` is not `===` to the proxy of the same object: `job.history[0]` of an iterated `job` is not one of the entries that `jobs.flatMap((job) => job.history)` gives. Compare `toRaw()` of both, or compare by a field such as an id.
 - **Iteration costs what an index read costs.** Measured on an idle arm64 host with Node 26, 400 objects: a `for...of` that reads one property of each item takes 18.4 µs (2.6 µs in 3.0.0, which skipped the proxies); an index loop over the same proxy takes 81 µs. A first loop makes each item's proxy, as a first index read does, and keeps about 800 bytes per item while the item stays in the state. A loop that only reads a long list can iterate `toRaw(list)` to skip the proxies; writes through those items send nothing.
+
+## 3.0.2: effects rerun after every array, Map and Set write
+
+In 3.0.1 and earlier, many writes did not rerun the effects that read what they changed. From 3.0.2 an effect reruns once after each write that changes what it read:
+
+- **Readers of all items of an array rerun after an index write, an index delete and a length change.** That covers `map`, `filter`, `forEach`, `some`, `every`, `reduce`, `join`, `indexOf`, `includes`, `find`, `at` and loops. In 3.0.1, `watchEffect(() => ids = state.list.map((item) => item.id))` stayed stale after `state.list[0] = { id: 9 }`.
+- **`slice`, `concat`, `flat`, `flatMap`, `findLastIndex`, `toReversed`, `toSorted`, `toSpliced`, `with`, `keys()` and `toString` are tracked.** In 3.0.1 an effect that used them never reran.
+- **Index reads rerun when a method moves their index.** `shift`, `unshift`, `splice`, `pop`, `sort`, `reverse`, `fill` and `copyWithin` rerun an effect that read `list[0]` when they change what `list[0]` holds, and only then. A shorter `length` reruns readers of the indexes it removed. A write past the end reruns readers of `length`.
+- **An effect that reads an array's items and its length runs once per write.** In 3.0.1, `push`, `pop`, `shift`, `unshift` and `splice` ran it twice. The same goes for a Map or Set effect that reads entries and `size`.
+- **Map and Set readers rerun on every entry write.** A `set` of a key the map holds reruns `values()`, `entries()`, `forEach` and loops. A `set` of a new key reruns `get` and `has` of that key. `clear()` reruns `get` and `has`. `has` tracks its entry on every call; in 3.0.1 only the first read of `has` from the proxy tracked anything.
+- **`map.set(key, undefined)` of a new key adds the key and sends a `map-set` event.** 3.0.1 took it for a no-op.
+- **Array, Map and Set proxies answer like their targets.** `` `${list}` `` and `list.toString()` give the items (3.0.1 gave `"[object Array]"`), `list.constructor` is `Array`, and `map.constructor` is `Map`. 3.0.1 found these names on `Object.prototype`.
+
+What to check when you upgrade:
+
+- **Effects over arrays, Maps and Sets rerun more often**, each time what they read changed.
+- **`onTrigger` fires once per key that changed.** An effect that read both `list[0]` and `list.map(...)` gets two `onTrigger` calls for `list[0] = x`, and runs once.
+- **Still not tracked:** `in`, `Object.keys`, `Object.entries` and `for...in` on arrays and plain objects, and reads inside array callbacks of the raw items they receive. See the README section "Collections".

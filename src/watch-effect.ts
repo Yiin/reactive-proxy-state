@@ -197,11 +197,10 @@ function queueEffects(
 }
 
 /**
- * triggers all active effects associated with a specific object property,
- * and with `otherKey` when given. An effect that read both runs once.
+ * triggers all active effects associated with a specific object property.
  * called by proxy setters/deleters or ref setters.
  */
-export function trigger(target: object, key: string | symbol, otherKey?: string | symbol): void {
+export function trigger(target: object, key: string | symbol): void {
   const depsMap = targetMap.get(target);
   if (!depsMap) return; // no effects tracked for this target
 
@@ -211,7 +210,6 @@ export function trigger(target: object, key: string | symbol, otherKey?: string 
 
   try {
     queueEffects(depsMap.get(key), target, key, triggerLevel);
-    if (otherKey !== undefined) queueEffects(depsMap.get(otherKey), target, otherKey, triggerLevel);
 
     // If we have queued effects, run them immediately
     if (queuedEffects.size > 0) {
@@ -231,6 +229,7 @@ export function trigger(target: object, key: string | symbol, otherKey?: string 
  * and the rest), so it also runs on every length change. With `before`,
  * the array as it was, an index that holds what it held is skipped. Each
  * effect runs once.
+ * @internal
  */
 export function triggerArray(
   target: unknown[],
@@ -280,7 +279,10 @@ function entryKey(entry: unknown): string {
   return (typeof entry === 'object' && entry !== null) || typeof entry === 'function' ? '[object]' : String(entry);
 }
 
-/** Tracks a read of one entry of the Map or Set `target`: `get` or `has`. */
+/**
+ * Tracks a read of one entry of the Map or Set `target`: `get` or `has`.
+ * @internal
+ */
 export function trackEntry(target: object, entry: unknown): void {
   if (activeEffect !== null) track(target, entryKey(entry));
 }
@@ -290,6 +292,7 @@ export function trackEntry(target: object, entry: unknown): void {
  * `target`: the entry `entry` (a Map key or a Set value), the collection as
  * a whole (`Symbol.iterator`), and `size` when `sizeChanged`. Each effect
  * runs once.
+ * @internal
  */
 export function triggerCollection(target: object, entry: unknown, sizeChanged: boolean): void {
   const depsMap = targetMap.get(target);
@@ -315,6 +318,7 @@ export function triggerCollection(target: object, entry: unknown, sizeChanged: b
  * Triggers the effects that read what `clear()` removed from the Map or Set
  * `target`: each entry of `removed` (its key: a Map key, or a Set value),
  * the collection as a whole and its size. Each effect runs once.
+ * @internal
  */
 export function triggerCleared(target: object, removed: readonly unknown[]): void {
   const depsMap = targetMap.get(target);

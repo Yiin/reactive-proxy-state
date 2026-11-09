@@ -273,6 +273,14 @@ state.data.delete("foo"); // Output: Data has "foo": false
 state.tags.add("urgent"); // Output: Tags: important, urgent
 ```
 
+An effect reruns once after each write that changes what it read. An effect that reads all items of an array, with a method (`map`, `filter`, `forEach`, `reduce`, `join`, `indexOf`, `includes`, `find`, `slice`, `concat`, `flatMap`, `toSorted` and the rest) or a loop (`for...of`, spread, `Array.from`), reruns after an index write, an index delete, a length change and every method that changes the array. An effect that reads one index or `length` reruns only when that index or the length changes. On a Map or Set, `get` and `has` rerun when their entry changes, and loops rerun on every change. Object keys share one tracking key, so `get` of one object key also reruns when another object key changes. In 3.0.1 and earlier, an index write, an index delete or a length change did not rerun readers of all items.
+
+Some reads are not tracked:
+
+- `in`, `Object.keys`, `Object.entries` and `for...in` on an array. Traps for them made `Object.keys(list)` 70% slower for every caller. Read `length` or loop over the array instead.
+- Reads inside array callbacks of the raw items they receive. `state.rows.map((row) => row.join())` reruns when `state.rows` changes, not when a row changes. Loop with `for (const row of state.rows)` to track the rows too.
+- `in`, `Object.keys` and `for...in` on a plain object. A new key reruns only effects that read that key by name.
+
 ## Synchronization Limits
 
 ### Supported inputs
