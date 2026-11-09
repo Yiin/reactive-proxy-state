@@ -84,6 +84,8 @@ function releaseEmptied(from: number): void {
     emptiedDeps[i] = undefined;
   }
   emptiedCount = from;
+  // a run that read very many keys does not keep its slots
+  if (from === 0 && emptiedDeps.length > 4096) emptiedDeps.length = 0;
 }
 
 /** The dependencies of `target`, or undefined when no effect reads it. */
