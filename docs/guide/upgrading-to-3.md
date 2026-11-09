@@ -190,3 +190,16 @@ What to check when you upgrade:
 - **The bound's error wins.** When an effect or a listener also threw in the same operation, the caller gets the `RangeError`.
 - **A temporary reentry guard around a listener write** stops at a depth of 100 per queued chain, not after 100 writes in total. Use event-path filters, as shown above.
 - **Removed values on async roots show the state before the write.** Since 3.0.7, a queued event copies its `oldValue` and `oldValues` before the write. A removed object that reaches the written container, through a cycle, holds that container as it was before the write. 3.0.6 copied it with the write applied on async roots. A synchronous root that queues the event (an alias, a write during a delivery) copies it the same way. An immediate synchronous event still sends the removed object itself.
+
+## 3.0.9: refused writes stay refused, and Map effects track their reads
+
+After the listener bound refuses a write, every later listener write in that operation is refused.
+This includes an active parent listener that catches the error from a nested write.
+In 3.0.8, that parent could still write while the nested calls returned.
+The next operation starts with a fresh bound.
+
+Map `has(key)` tracks membership only, and `keys()` tracks the ordered keys.
+Changing the value at an existing key reruns neither reader.
+Map `get(key)`, `values()`, `entries()`, `forEach` and default iteration still track values.
+Adding or deleting a key, or clearing a nonempty Map, reruns the affected readers once.
+In 3.0.8, value updates also reran `has` and `keys()` readers.

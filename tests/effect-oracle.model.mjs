@@ -4,7 +4,7 @@ import fc from "fast-check";
 import { stateText } from "./replica-property.model.mjs";
 
 const small = fc.integer({ min: 0, max: 5 });
-const names = ["a", "b", "sum", "list.0", "list.length", "list.sum", "map.k0", "map.k1", "map.size", "map.values", "set.has1", "set.size"];
+const names = ["a", "b", "sum", "list.0", "list.length", "list.sum", "map.k0", "map.k1", "map.size", "map.values", "map.has0", "map.has1", "map.keys", "set.has1", "set.size"];
 export const oracleArbitrary = fc.record({
   reads: fc.array(fc.uniqueArray(fc.constantFrom(...names), { minLength: 1, maxLength: 4 }), { minLength: 1, maxLength: 5 }),
   writes: fc.array(fc.record({ op: fc.constantFrom("a", "b", "list.push", "list.pop", "list.0", "map.k0", "map.k1", "map.delete", "map.clear", "set.add", "set.delete", "set.clear"), value: small }), { minLength: 1, maxLength: 25 }),
@@ -40,6 +40,9 @@ function read(state, name, sum) {
     case "list.sum": return state.list.reduce((a, b) => a + b, 0);
     case "map.k0": return state.map.get("k0") ?? 0;
     case "map.k1": return state.map.get("k1") ?? 0;
+    case "map.has0": return Number(state.map.has("k0"));
+    case "map.has1": return Number(state.map.has("k1"));
+    case "map.keys": return [...state.map.keys()].reduce((sum, key, index) => sum + (key === "k0" ? 1 : 2) * (index + 1), 0);
     case "map.size": return state.map.size;
     case "map.values": return [...state.map.values()].reduce((a, b) => a + b, 0);
     case "set.has1": return Number(state.set.has(1));
@@ -72,6 +75,10 @@ function affected(before, after, command) {
   if (before.list[0] !== after.list[0]) changed.add("list.0");
   if (JSON.stringify(before.list) !== JSON.stringify(after.list)) changed.add("list.sum");
   for (const key of ["k0", "k1"]) if (before.map.get(key) !== after.map.get(key) || before.map.has(key) !== after.map.has(key)) { changed.add("map." + key); changed.add("map.values"); }
+  for (const [key, name] of [["k0", "map.has0"], ["k1", "map.has1"]]) {
+    if (before.map.has(key) !== after.map.has(key)) changed.add(name);
+  }
+  if (JSON.stringify([...before.map.keys()]) !== JSON.stringify([...after.map.keys()])) changed.add("map.keys");
   if (before.map.size !== after.map.size) changed.add("map.size");
   if (before.set.has(1) !== after.set.has(1)) changed.add("set.has1");
   if (before.set.size !== after.set.size) changed.add("set.size");
