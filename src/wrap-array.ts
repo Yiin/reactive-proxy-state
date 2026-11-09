@@ -2,6 +2,7 @@ import { StateEvent } from "./types";
 import {
   arrayIndex,
   deepEqual,
+  hasOwn,
   unwrapForStore,
   wrapperCache,
   globalSeen,
@@ -239,11 +240,12 @@ export function wrapArray<T extends any[]>(arr: T, node: LocationNode): T {
   if (cachedProxy) return cachedProxy as T;
   if (globalSeen.has(arr)) return globalSeen.get(arr);
 
-  // cache for wrapped methods to avoid re-creating them on each call. It has
-  // no prototype: `toString`, `toLocaleString`, `constructor` and
-  // `__proto__` were found on Object.prototype in it until 3.0.1, so
-  // `${list}` gave "[object Array]" and `list.constructor` gave Object.
-  const methodCache: { [key: string | symbol]: Function } = Object.create(null);
+  // cache for wrapped methods to avoid re-creating them on each call. Only
+  // its own entries count: until 3.0.1 a read of `toString`, `constructor`
+  // or `__proto__` found Object.prototype's in it, so `${list}` gave
+  // "[object Array]". (V8 keeps an object without a prototype in slower
+  // dictionary mode.)
+  const methodCache: { [key: string | symbol]: Function } = {};
 
   const proxy: T = new Proxy(arr, {
     get(target: T, prop: string | symbol, receiver: any): any {
@@ -252,9 +254,8 @@ export function wrapArray<T extends any[]>(arr: T, node: LocationNode): T {
 
       track(target, prop);
 
-      if (methodCache[prop]) {
-        return methodCache[prop];
-      }
+      const cached = methodCache[prop];
+      if (cached !== undefined && hasOwn.call(methodCache, prop)) return cached;
 
       // handle specific array mutation methods that require custom logic and event emission
       switch (prop) {

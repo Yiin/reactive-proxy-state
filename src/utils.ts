@@ -803,7 +803,8 @@ const DEEP_PATH = 64;
 const cloneWork: any[] = [];
 /** Levels a copy fills with one call each; deeper levels wait in `cloneWork`. */
 const FILL_DEPTH = 256;
-const hasOwn = Object.prototype.hasOwnProperty;
+/** @internal */
+export const hasOwn = Object.prototype.hasOwnProperty;
 const isEnumerable = Object.prototype.propertyIsEnumerable;
 
 /** What a copy is filled with. */
