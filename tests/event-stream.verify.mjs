@@ -14,7 +14,7 @@ if (process.argv[3]) writeFileSync(process.argv[3], text);
 const unchanged = Object.keys(baseline).filter(name => JSON.stringify(baseline[name]) === JSON.stringify(events[name])).length;
 console.log(`${Object.keys(events).length} cases, ${Object.values(events).flat().length} events; ${unchanged} cases byte-equal to 3.0.3`);
 const listenerBaseline = JSON.parse(readFileSync(new URL("./fixtures/events-listener-writes-3.0.3.json", import.meta.url)));
-const listenerIntended = JSON.parse(readFileSync(new URL("./fixtures/events-listener-writes-3.0.5-intended.json", import.meta.url)));
+const listenerIntended = JSON.parse(readFileSync(new URL("./fixtures/events-listener-writes-3.0.6-intended.json", import.meta.url)));
 const listenerEvents = recordListenerWrites(lib);
 assert.equal(JSON.stringify(listenerEvents, null, 1), JSON.stringify({ ...listenerBaseline, ...listenerIntended }, null, 1));
 const listenerUnchanged = Object.keys(listenerBaseline).filter(name => JSON.stringify(listenerBaseline[name]) === JSON.stringify(listenerEvents[name])).length;

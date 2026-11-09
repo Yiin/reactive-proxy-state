@@ -100,7 +100,9 @@ Two writes now send events that older versions dropped:
 
 These events are intended changes for replicas. Other recorded write events match 3.0.3.
 
-## 3.0.5: replicas stay equal when a listener writes
+## 3.0.6: replicas stay equal when a listener writes
+
+3.0.5 was tagged, but its release stopped before it published anything. 3.0.6 is the same code with that release check fixed.
 
 A listener that writes state while it receives an event, for example a version stamp before it forwards the event, now keeps its replica equal to the source:
 

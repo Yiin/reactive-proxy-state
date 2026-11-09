@@ -3,7 +3,7 @@ import * as lib from "../src/index";
 import recorded from "./fixtures/events-3.0.3.json";
 import intended from "./fixtures/events-3.0.4-intended.json";
 import listenerRecorded from "./fixtures/events-listener-writes-3.0.3.json";
-import listenerIntended from "./fixtures/events-listener-writes-3.0.5-intended.json";
+import listenerIntended from "./fixtures/events-listener-writes-3.0.6-intended.json";
 // @ts-expect-error shared JavaScript recorder
 import { recordEvents, recordListenerWrites } from "./event-stream.ops.mjs";
 
