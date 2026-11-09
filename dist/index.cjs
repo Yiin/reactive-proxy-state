@@ -2678,6 +2678,41 @@ function evictRemoved(removed) {
       evictDeep(removed[i]);
   }
 }
+function trackIteration(target) {
+  if (activeEffect === null)
+    return;
+  track(target, Symbol.iterator);
+  track(target, "length");
+}
+
+class ArrayProxyIterator {
+  node;
+  entries;
+  target;
+  index = 0;
+  constructor(target, node, entries) {
+    this.node = node;
+    this.entries = entries;
+    this.target = target;
+  }
+  next() {
+    const target = this.target;
+    if (target !== undefined) {
+      const index = this.index;
+      if (index < target.length) {
+        this.index = index + 1;
+        if (activeEffect !== null)
+          track(target, String(index));
+        const value = target[index];
+        const item = isObject3(value) ? wrapChild(value, this.node, index) : value;
+        return { value: this.entries ? [index, item] : item, done: false };
+      }
+      this.target = undefined;
+    }
+    return { value: undefined, done: true };
+  }
+}
+Object.setPrototypeOf(ArrayProxyIterator.prototype, Object.getPrototypeOf(Object.getPrototypeOf([][Symbol.iterator]())));
 function wrapArray(arr, node) {
   const cachedProxy = wrapperCache.get(arr);
   if (cachedProxy)
@@ -2901,19 +2936,36 @@ function wrapArray(arr, node) {
             return deletedItems;
           };
           return methodCache[prop];
-        case "find": {
-          track(target, Symbol.iterator);
-          if (!methodCache[prop]) {
-            methodCache[prop] = function(predicate, thisArg) {
-              const idx = Array.prototype.findIndex.call(target, predicate, thisArg);
-              if (idx === -1)
-                return;
-              const value2 = target[idx];
-              if (!isObject3(value2))
-                return value2;
-              return wrapChild(value2, node, idx);
-            };
-          }
+        case "find":
+        case "findLast": {
+          const findIndex = prop === "find" ? Array.prototype.findIndex : Array.prototype.findLastIndex;
+          methodCache[prop] = function(predicate, thisArg) {
+            trackIteration(target);
+            const idx = findIndex.call(target, predicate, thisArg);
+            if (idx === -1)
+              return;
+            const value2 = target[idx];
+            if (!isObject3(value2))
+              return value2;
+            return wrapChild(value2, node, idx);
+          };
+          return methodCache[prop];
+        }
+        case "indexOf":
+        case "lastIndexOf":
+        case "includes": {
+          const method = Array.prototype[prop];
+          methodCache[prop] = function(searched, fromIndex) {
+            trackIteration(target);
+            const from = arguments.length > 1;
+            const result = from ? method.call(target, searched, fromIndex) : method.call(target, searched);
+            if (result !== -1 && result !== false)
+              return result;
+            if (!isObject3(searched) || !searched["__v_isReactive" /* IS_REACTIVE */])
+              return result;
+            const raw = toRaw(searched);
+            return from ? method.call(target, raw, fromIndex) : method.call(target, raw);
+          };
           return methodCache[prop];
         }
         case "at": {
@@ -2937,8 +2989,15 @@ function wrapArray(arr, node) {
         }
         case Symbol.iterator:
         case "values":
+        case "entries": {
+          const entries = prop === "entries";
+          methodCache[prop] = function() {
+            trackIteration(target);
+            return new ArrayProxyIterator(target, node, entries);
+          };
+          return methodCache[prop];
+        }
         case "keys":
-        case "entries":
         case "forEach":
         case "map":
         case "filter":
@@ -4785,10 +4844,12 @@ function deepToRaw(input, seen = new WeakMap) {
     return seen.get(input);
   }
   if (Array.isArray(input)) {
+    const source2 = toRaw(input);
     const result = [];
     seen.set(input, result);
-    for (const item of input) {
-      result.push(deepToRaw(item, seen));
+    seen.set(source2, result);
+    for (let i = 0;i < source2.length; i++) {
+      result.push(deepToRaw(source2[i], seen));
     }
     return result;
   }
