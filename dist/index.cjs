@@ -1556,31 +1556,33 @@ function copiesPerPath(event, paths, async) {
 }
 function deliver(root, events) {
   const emit = root.emit;
-  let queue = root.undelivered;
-  if (queue === undefined) {
-    if (events.length === 1) {
-      emit(events[0]);
-      return;
-    }
-    queue = root.undelivered = { events, next: 0 };
-  } else {
+  const waiting = root.undelivered;
+  if (waiting !== undefined) {
     for (let i = 0;i < events.length; i++)
-      queue.events.push(events[i]);
+      waiting.events.push(events[i]);
+    return;
   }
+  if (events.length === 1) {
+    emit(events[0]);
+    return;
+  }
+  const queue = root.undelivered = { events, next: 0 };
   let failed = false;
   let failure;
-  while (queue.next < queue.events.length) {
-    try {
-      emit(queue.events[queue.next++]);
-    } catch (error) {
-      if (!failed) {
-        failed = true;
-        failure = error;
+  try {
+    while (queue.next < queue.events.length) {
+      try {
+        emit(queue.events[queue.next++]);
+      } catch (error) {
+        if (!failed) {
+          failed = true;
+          failure = error;
+        }
       }
     }
-  }
-  if (root.undelivered === queue)
+  } finally {
     root.undelivered = undefined;
+  }
   if (failed)
     throw failure;
 }
@@ -2581,14 +2583,8 @@ function endBatch() {
   if (--batchDepth === 0 && !flushing && (queue.length > 0 || triggerNotifications.length > 0))
     flushEffects();
 }
-function beginWrite() {
-  startBatch();
-}
-function endWrite() {
-  batchDepth--;
-  if (!flushing && (queue.length > 0 || triggerNotifications.length > 0))
-    flushEffects();
-}
+var beginWrite = startBatch;
+var endWrite = endBatch;
 function queueEffects(dep, target, key) {
   if (dep === undefined)
     return;
@@ -3529,7 +3525,7 @@ function wrapMap(map, node) {
         };
         return methodCache[prop];
       }
-      if (prop === "getOrInsert" || prop === "getOrInsertComputed") {
+      if ((prop === "getOrInsert" || prop === "getOrInsertComputed") && typeof target[prop] === "function") {
         methodCache[prop] = function(key, value2) {
           if (prop === "getOrInsertComputed" && typeof value2 !== "function") {
             throw new TypeError("Map.getOrInsertComputed callback must be a function");
@@ -4045,7 +4041,7 @@ function wrapObject(obj, node, options) {
       const oldValue = target[prop];
       if (oldValue === value && hasOwn.call(target, prop))
         return true;
-      if (!options?.async && isObject6(oldValue) && isObject6(value) && deepEqual(oldValue, value))
+      if (!options?.async && isObject6(oldValue) && isObject6(value) && hasOwn.call(target, prop) && deepEqual(oldValue, value))
         return true;
       const emits = !writesThroughSetter(target, prop, node);
       const located = emits ? locate(node, prop) : undefined;

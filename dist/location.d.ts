@@ -156,17 +156,19 @@ export declare function dispatch(target: Target, event: StateEvent): void;
  * events earlier writes left undelivered under this root.
  *
  * A listener can write while it receives an event. That write changed the
- * state after the events still waiting (the other places of an alias), so
- * its own events go after them: it adds them to the root's queue, then
- * delivers the queue from the oldest event, before it returns. So events
- * reach `emit` in the order the state changed, every write is delivered
- * before it returns, and a write made while nothing waits is delivered at
- * once, inside the listener call that made it.
+ * state after the events still waiting (the other places of an alias, the
+ * other indexes of a longer `length`), so its own events go after them in
+ * the root's queue, and the delivery already running sends them in turn.
+ * So events reach `emit` in the order the state changed, and none reaches
+ * it while a listener has not yet forwarded an earlier one: 3.0.4 and
+ * earlier sent the queue from inside the listener's write, and a replica
+ * got a later write before the event that listener held. A write made
+ * while nothing waits is delivered at once, inside the listener call that
+ * made it.
  *
  * An `emit` that throws does not stop the others: every event in the queue
  * is delivered once, each for a write that already changed the state, then
- * the first error reaches the write that was delivering them. A listener
- * that called that write may catch it and go on.
+ * the first error reaches the write that started the delivery.
  */
 export declare function deliver(root: LocationRoot, events: StateEvent[]): void;
 /** What `copyPayload` did. */
