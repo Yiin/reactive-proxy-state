@@ -43,7 +43,7 @@ const clampTargets = ["a", "b", "c", "o.p", "o.q"];
 /** The listener's own keys. No rule fires on their events. */
 const listenerKeys = ["version", "log", "marks"];
 /** Top-level keys a rule fires on; "*" is any of them. */
-const ruleHeads = ["a", "b", "c", "o", "list", "map", "set", "d", "*"];
+const ruleHeads = ["objectMap", "objectSet", "objects", "a", "b", "c", "o", "list", "map", "set", "d", "*"];
 
 const small = fc.integer({ min: 0, max: 9 });
 
@@ -70,6 +70,7 @@ const ruleArbitrary = fc.oneof(
 
 /** A write a caller makes. `srjbj9` marks the writes 3.0.3 dropped (no event); they are rare. */
 const writeArbitrary = fc.oneof(
+  { arbitrary: fc.record({ op: fc.constantFrom("objectMap.set", "objectMap.delete", "objectSet.add", "objectSet.delete", "objects.splice"), value: small }), weight: 8 },
   { arbitrary: fc.record({ op: fc.constant("set"), key: fc.constantFrom("a", "b", "c", "d0"), value: small }), weight: 8 },
   { arbitrary: fc.record({ op: fc.constant("o.set"), key: fc.constantFrom("p", "q", "r"), value: small }), weight: 8 },
   { arbitrary: fc.record({ op: fc.constant("o.delete"), key: fc.constantFrom("p", "q", "r") }), weight: 8 },
@@ -92,6 +93,7 @@ const writeArbitrary = fc.oneof(
 const initArbitrary = fc.record({
   // `o2` is `o` itself: a write into it sends one event per place
   alias: fc.boolean(),
+  objects: fc.array(fc.record({ n: small }), { minLength: 1, maxLength: 3 }),
   a: small,
   b: small,
   c: small,
@@ -174,10 +176,13 @@ export function classify(spec) {
   };
 }
 
-/** Does 3.0.3's event order apply to this case? */
+/** Cases outside the new bound and untracked listener reads, safe to run on 3.0.6. */
 export function comparable(spec) {
-  const { srjbj9, hooks, listenerReads, queued } = classify(spec);
-  return !srjbj9 && !hooks && !listenerReads && !queued;
+  const written = new Set(spec.rules.map(rule => rule.write === "bump" ? "version" : rule.write.split(".")[0]));
+  return spec.rules.every(rule => listenerKeys.includes(rule.write) || rule.write === "bump") &&
+    spec.effects.every(effect => effect.kind === "read" ||
+      (!spec.rules.some(rule => rule.write === "bump") &&
+       [...effectHeads(effect)].every(head => !written.has(head))));
 }
 
 /**
@@ -201,6 +206,9 @@ export function stateText(lib, value) {
 function makeState(init) {
   const o = { p: init.p, q: init.q };
   return {
+    objectMap: new Map((init.objects ?? []).map((value, index) => ["k" + index, { ...value }])),
+    objectSet: new Set((init.objects ?? []).map(value => ({ ...value }))),
+    objects: (init.objects ?? []).map(value => ({ ...value })),
     a: init.a,
     b: init.b,
     c: init.c,
@@ -255,9 +263,14 @@ function clampTo(state, target, limit) {
   } else if (state[target] > limit) state[target] = limit;
 }
 
-function applyWrite(state, write) {
+function applyWrite(state, write, lib) {
   const { list, map, set, o } = state;
   switch (write.op) {
+    case "objectMap.set": state.objectMap.set("k0", { n: write.value }); break;
+    case "objectMap.delete": state.objectMap.delete("k0"); break;
+    case "objectSet.add": state.objectSet.add({ n: write.value }); break;
+    case "objectSet.delete": state.objectSet.delete(lib.toRaw(state.objectSet.values().next().value)); break;
+    case "objects.splice": state.objects.splice(0, 1, { n: write.value }); break;
     case "set": state[write.key] = write.value; break;
     case "o.set": o[write.key] = write.value; break;
     case "o.delete": delete o[write.key]; break;
@@ -291,9 +304,6 @@ function applyWrite(state, write) {
   }
 }
 
-/** Listener writes in one caller write, so rules that set each other off end. */
-const LISTENER_BUDGET = 8;
-
 /**
  * Run `spec` on `lib`. Returns `log`, every event the replica received and
  * every error a write threw, in order, and `mismatch`, the first point
@@ -302,15 +312,12 @@ const LISTENER_BUDGET = 8;
 export function runCase(lib, spec) {
   const log = [];
   let remote;
-  let budget = LISTENER_BUDGET;
   let stamp = 100;
   let state;
   const fire = (event, when) => {
     const head = event.path[0];
     for (const rule of spec.rules) {
       if (rule.when !== when || !headMatches(rule.on, head)) continue;
-      if (budget <= 0) return;
-      budget--;
       applyRule(state, rule, head, ++stamp);
     }
   };
@@ -319,9 +326,12 @@ export function runCase(lib, spec) {
       remote = event.newValue;
       return;
     }
-    fire(event, "before");
-    log.push(eventText(lib, event));
-    lib.updateState(remote, event);
+    try {
+      fire(event, "before");
+    } finally {
+      log.push(eventText(lib, event));
+      lib.updateState(remote, event);
+    }
     fire(event, "after");
   });
   let mismatch;
@@ -332,7 +342,6 @@ export function runCase(lib, spec) {
     if (source !== replica) mismatch = { step, source, replica };
   };
   const attempt = (step, run) => {
-    budget = LISTENER_BUDGET;
     try {
       if (run() === "skipped") log.push(`skipped ${step}`);
     } catch (error) {
@@ -357,7 +366,7 @@ export function runCase(lib, spec) {
       }, options));
     });
   });
-  spec.writes.forEach((write, index) => attempt(`write ${index} ${write.op}`, () => applyWrite(state, write)));
+  spec.writes.forEach((write, index) => attempt(`write ${index} ${write.op}`, () => applyWrite(state, write, lib)));
   for (const stop of stops) stop();
   computed.stop?.();
   return { log, mismatch };

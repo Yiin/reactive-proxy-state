@@ -1,10 +1,10 @@
 /**
  * The replica property of tests/replica-property.bun.test.ts on built
  * bundles, over many seeds, with counts.
- * Run with: node tests/replica-property.run.mjs <bundle> <3.0.3 bundle> [seeds] [runs per seed]
+ * Run with: node tests/replica-property.run.mjs <bundle> <3.0.6 bundle> [seeds] [runs per seed]
  * Fails when the replica of `bundle` differs from its source after a
- * write, or when a case 3.0.3's order applies to (see `comparable`) sends
- * other events than 3.0.3.
+ * write, or when a case 3.0.6's order applies to (see `comparable`) sends
+ * other events than 3.0.6.
  */
 import fc from "fast-check";
 import { resolve } from "node:path";
@@ -13,7 +13,7 @@ import { caseArbitrary, classify, comparable, runCase } from "./replica-property
 
 const [bundle, baselineBundle, seedArg, runArg] = process.argv.slice(2);
 if (bundle === undefined || baselineBundle === undefined) {
-  console.error("usage: node tests/replica-property.run.mjs <bundle> <3.0.3 bundle> [seeds] [runs per seed]");
+  console.error("usage: node tests/replica-property.run.mjs <bundle> <3.0.6 bundle> [seeds] [runs per seed]");
   process.exit(2);
 }
 const lib = await import(pathToFileURL(resolve(bundle)).href);
@@ -39,9 +39,9 @@ for (let seed = 1; seed <= seeds; seed++) {
   const result = fc.check(
     fc.property(caseArbitrary(), (spec) => {
       const ours = runCase(lib, spec);
-      const theirs = runCase(baseline, spec);
+      const theirs = comparable(spec) ? runCase(baseline, spec) : undefined;
       const kinds = classify(spec);
-      const same = ours.log.join("\n") === theirs.log.join("\n");
+      const same = theirs !== undefined && ours.log.join("\n") === theirs.log.join("\n");
       counts.cases++;
       counts.writes += spec.writes.length;
       counts.events += ours.log.filter((line) => !line.startsWith("threw ") && !line.startsWith("skipped ")).length;
@@ -49,7 +49,7 @@ for (let seed = 1; seed <= seeds; seed++) {
       if (comparable(spec)) counts.comparable++;
       for (const kind of ["srjbj9", "hooks", "listenerReads", "queued"]) if (kinds[kind]) counts[kind]++;
       if (same) counts.sameAsBaseline++;
-      if (theirs.mismatch !== undefined) counts.baselineReplicaDiffers++;
+      if (theirs?.mismatch !== undefined) counts.baselineReplicaDiffers++;
       if (ours.mismatch !== undefined) return false;
       return !comparable(spec) || same;
     }),
@@ -61,7 +61,7 @@ for (let seed = 1; seed <= seeds; seed++) {
       seed,
       spec,
       ours: runCase(lib, spec),
-      baseline: runCase(baseline, spec),
+      baseline: comparable(spec) ? runCase(baseline, spec) : "excluded: bound or listener tracking",
       kinds: classify(spec),
     });
     if (failures.length >= 3) break;

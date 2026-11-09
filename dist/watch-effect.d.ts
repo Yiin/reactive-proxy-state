@@ -30,6 +30,7 @@ export declare function runCleanupFunctions(effect: TrackedEffect<any>): void;
  * called by proxy getters or ref getters.
  */
 export declare function track(target: object, key: string | symbol): void;
+export declare let writeDepth: number;
 /**
  * triggers all active effects associated with a specific object property.
  * called by proxy setters/deleters or ref setters.

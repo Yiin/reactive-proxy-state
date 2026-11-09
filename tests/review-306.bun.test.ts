@@ -177,3 +177,26 @@ describe("listener reads do not belong to the writing effect", () => {
     double.stop();
   });
 });
+
+test("async branching writes share the bound and recover after the error", async () => {
+  const child = Bun.spawn([process.execPath, new URL("./fixtures/async-listener-bound.ts", import.meta.url).pathname], { stdout: "pipe", stderr: "pipe" });
+  const output = await new Response(child.stdout).text();
+  expect(await child.exited).toBe(0);
+  const result = JSON.parse(output);
+  expect(result.errors).toHaveLength(1);
+  expect(result.errors[0]).toContain("100 nested write rounds");
+  expect(result.state).toEqual({ n: 51, other: 200 });
+  expect(result.remote).toEqual(result.state);
+});
+
+test("initial listener reads stay outside the effect that creates the root", () => {
+  const source = reactive({ unrelated: 0 });
+  let runs = 0;
+  const stop = watchEffect(() => {
+    runs++;
+    reactive({ value: 0 }, () => { source.unrelated; });
+  });
+  source.unrelated++;
+  expect(runs).toBe(1);
+  stop();
+});

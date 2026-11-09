@@ -1,5 +1,5 @@
 import type { EmitFunction, StateEvent } from "./types";
-import { activeEffect, setActiveEffect } from "./watch-effect";
+import { activeEffect, setActiveEffect, writeDepth } from "./watch-effect";
 
 /** Shared by every event descended from one caller write, including async events. */
 export interface Delivery {
@@ -19,8 +19,8 @@ export function beginDelivery(): boolean {
 }
 
 export function endDelivery(ownsDelivery: boolean): void {
-  if (!ownsDelivery) return;
-  const error = delivery!.error;
+  if (!ownsDelivery || writeDepth > 0 || inListener) return;
+  const error = delivery?.error;
   delivery = undefined;
   if (error !== undefined) throw error;
 }
@@ -54,7 +54,7 @@ export function emitListener(emit: EmitFunction, event: StateEvent, queuedDelive
   } finally {
     if (previousEffect !== null) setActiveEffect(previousEffect);
     inListener = previousListener;
-    delivery = previousDelivery;
-    if (previousDelivery !== current && current.error !== undefined) throw current.error;
+    delivery = previousDelivery ?? (writeDepth > 0 ? current : undefined);
+    if (previousDelivery !== current && writeDepth === 0 && current.error !== undefined) throw current.error;
   }
 }

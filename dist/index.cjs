@@ -29,6 +29,7 @@ var __export = (target, all) => {
 // src/index.ts
 var exports_src = {};
 __export(exports_src, {
+  writeDepth: () => writeDepth,
   watchEffect: () => watchEffect,
   watch: () => watch,
   updateState: () => updateState,
@@ -1246,6 +1247,492 @@ function deepClone(value, seen = new WeakMap) {
   }
   return newObject;
 }
+// src/watch-effect.ts
+var activeEffect = null;
+var trackingVersion = 0;
+function setActiveEffect(effect) {
+  activeEffect = effect;
+  trackingVersion++;
+}
+
+class Dep extends Set {
+  owner;
+  key;
+  constructor(owner, key) {
+    super();
+    this.owner = owner;
+    this.key = key;
+  }
+}
+var ownerRefs = new WeakMap;
+var targetMap = new WeakMap;
+var entryMap = new WeakMap;
+var emptiedDeps = [];
+var emptiedCount = 0;
+function releaseDep(dep) {
+  if (dep.size !== 0)
+    return;
+  const owner = dep.owner instanceof WeakRef ? dep.owner.deref() : dep.owner;
+  if (owner?.get(dep.key) === dep)
+    owner.delete(dep.key);
+}
+function releaseEmptied(from) {
+  for (let i = from;i < emptiedCount; i++) {
+    releaseDep(emptiedDeps[i]);
+    emptiedDeps[i] = undefined;
+  }
+  emptiedCount = from;
+  if (from === 0 && emptiedDeps.length > 4096)
+    emptiedDeps.length = 0;
+}
+function depsOf(maps, target) {
+  const deps = maps.get(target);
+  if (deps === undefined || deps.size > 0)
+    return deps;
+  maps.delete(target);
+  return;
+}
+function dependencyCounts(target) {
+  return { properties: targetMap.get(target)?.size, entries: entryMap.get(target)?.size };
+}
+function detachEffect(effect, defer) {
+  const dependencies = effect.dependencies;
+  if (dependencies === undefined || dependencies.size === 0)
+    return;
+  dependencies.forEach((dep) => {
+    dep.delete(effect);
+    if (dep.size > 0)
+      return;
+    if (defer)
+      emptiedDeps[emptiedCount++] = dep;
+    else
+      releaseDep(dep);
+  });
+  dependencies.clear();
+}
+function cleanupEffect(effect) {
+  trackingVersion++;
+  detachEffect(effect, false);
+}
+function runCleanupFunctions(effect) {
+  if (effect.cleanupFns && effect.cleanupFns.length > 0) {
+    effect.cleanupFns.forEach((cleanupFn) => {
+      try {
+        cleanupFn();
+      } catch (error) {
+        console.error("Error in effect cleanup function:", error);
+      }
+    });
+    effect.cleanupFns = [];
+  }
+}
+function depFor(maps, target, key) {
+  let deps = maps.get(target);
+  if (deps === undefined) {
+    deps = new Map;
+    maps.set(target, deps);
+  }
+  let dep = deps.get(key);
+  if (dep === undefined) {
+    let owner = deps;
+    if (deps.size > 0) {
+      let ref = ownerRefs.get(deps);
+      if (ref === undefined) {
+        ref = new WeakRef(deps);
+        ownerRefs.set(deps, ref);
+      }
+      if (deps.size === 1)
+        deps.forEach((existing) => {
+          existing.owner = ref;
+        });
+      owner = ref;
+    }
+    dep = new Dep(owner, key);
+    deps.set(key, dep);
+  }
+  return dep;
+}
+function addDep(dep, target, key) {
+  const effect = activeEffect;
+  if (dep.has(effect))
+    return;
+  dep.add(effect);
+  if (!effect.dependencies) {
+    effect.dependencies = new Set;
+  }
+  effect.dependencies.add(dep);
+  if (effect.options?.onTrack) {
+    effect.options.onTrack({ effect: effect._rawCallback, target, key, type: "track" });
+  }
+}
+function track(target, key) {
+  if (!activeEffect || !activeEffect.active)
+    return;
+  addDep(depFor(targetMap, target, key), target, key);
+}
+function trackEntry(target, entry) {
+  if (!activeEffect || !activeEffect.active)
+    return;
+  addDep(depFor(entryMap, target, entry), target, entry);
+}
+var keysKey = Symbol("keys");
+function trackKeys(target) {
+  track(target, keysKey);
+}
+var queue = [];
+var triggerNotifications = [];
+var flushing = false;
+var batchDepth = 0;
+var writeDepth = 0;
+var flushCount = 0;
+var MAX_FLUSH_RUNS = 1e5;
+function flushEffects() {
+  flushing = true;
+  const flushId = ++flushCount;
+  let failed = false;
+  let failure;
+  let index = 0;
+  let notifications = 0;
+  try {
+    for (;index < queue.length || triggerNotifications.length > 0; index++) {
+      if (triggerNotifications.length > 0) {
+        for (let next = 0;next < triggerNotifications.length; next++) {
+          try {
+            if (++notifications > MAX_FLUSH_RUNS) {
+              throw new RangeError("reactive-proxy-state: trigger hooks keep writing new values in one flush");
+            }
+            triggerNotifications[next]();
+          } catch (error) {
+            if (!failed) {
+              failed = true;
+              failure = error;
+            }
+          }
+          if (notifications > MAX_FLUSH_RUNS)
+            break;
+        }
+        triggerNotifications.length = 0;
+      }
+      if (index >= queue.length)
+        break;
+      const effect = queue[index];
+      effect.queued = false;
+      if (!effect.active)
+        continue;
+      const runs = effect.flushId === flushId ? effect.flushRuns + 1 : 1;
+      effect.flushId = flushId;
+      effect.flushRuns = runs;
+      if (runs > MAX_FLUSH_RUNS) {
+        if (!failed) {
+          failed = true;
+          failure = new RangeError(`reactive-proxy-state: an effect ran ${MAX_FLUSH_RUNS} times in one flush. ` + `Effects that write what other effects read loop when each write is new`);
+        }
+        index++;
+        break;
+      }
+      try {
+        const scheduler = effect.options?.scheduler;
+        if (scheduler)
+          scheduler(effect.run);
+        else
+          effect.run();
+      } catch (error) {
+        if (!failed) {
+          failed = true;
+          failure = error;
+        }
+      }
+    }
+  } finally {
+    for (;index < queue.length; index++)
+      queue[index].queued = false;
+    queue.length = 0;
+    if (triggerNotifications.length > 0)
+      triggerNotifications.length = 0;
+    flushing = false;
+  }
+  if (failed)
+    throw failure;
+}
+function startBatch() {
+  batchDepth++;
+}
+function endBatch() {
+  if (--batchDepth === 0 && !flushing && (queue.length > 0 || triggerNotifications.length > 0))
+    flushEffects();
+}
+function beginWrite() {
+  writeDepth++;
+  startBatch();
+}
+function endWrite() {
+  try {
+    endBatch();
+  } finally {
+    if (--writeDepth === 0)
+      endDelivery(true);
+  }
+}
+function queueEffects(dep, target, key) {
+  if (dep === undefined)
+    return;
+  dep.forEach((effect) => {
+    if (effect === activeEffect || !effect.active)
+      return;
+    const onTrigger = effect.options?.onTrigger;
+    if (onTrigger) {
+      triggerNotifications.push(() => {
+        if (effect.active)
+          onTrigger({ effect: effect._rawCallback, target, key, type: "trigger" });
+      });
+    }
+    if (effect.invalidate !== undefined) {
+      effect.invalidate();
+    } else if (!effect.queued) {
+      effect.queued = true;
+      queue.push(effect);
+    }
+  });
+}
+function trigger(target, key) {
+  const depsMap = depsOf(targetMap, target);
+  if (!depsMap)
+    return;
+  startBatch();
+  try {
+    queueEffects(depsMap.get(key), target, key);
+  } finally {
+    endBatch();
+  }
+}
+function triggerKeyChange(target) {
+  const depsMap = depsOf(targetMap, target);
+  if (!depsMap)
+    return;
+  startBatch();
+  try {
+    depsMap.forEach((dep, key) => queueEffects(dep, target, key));
+  } finally {
+    endBatch();
+  }
+}
+function queueIndexes(depsMap, target, from, to, same) {
+  if (to - from <= depsMap.size) {
+    for (let index = from;index < to; index++) {
+      const key = String(index);
+      const dep = depsMap.get(key);
+      if (dep === undefined || same !== undefined && same(index))
+        continue;
+      queueEffects(dep, target, key);
+    }
+  } else {
+    depsMap.forEach((dep, key) => {
+      const index = arrayIndex(key);
+      if (index < from || index >= to)
+        return;
+      if (same !== undefined && same(index))
+        return;
+      queueEffects(dep, target, key);
+    });
+  }
+}
+function queueWhole(depsMap, target, lengthChanged) {
+  if (lengthChanged)
+    queueEffects(depsMap.get("length"), target, "length");
+  queueEffects(depsMap.get(Symbol.iterator), target, Symbol.iterator);
+}
+function triggerArray(target, from, to, lengthChanged, before) {
+  const depsMap = depsOf(targetMap, target);
+  if (!depsMap)
+    return;
+  startBatch();
+  try {
+    queueIndexes(depsMap, target, from, to, before === undefined ? undefined : (index) => sameAt(before, target, index));
+    queueWhole(depsMap, target, lengthChanged);
+  } finally {
+    endBatch();
+  }
+}
+function triggerSplice(target, start, removed, inserted, oldLength) {
+  const depsMap = depsOf(targetMap, target);
+  if (!depsMap)
+    return;
+  const newLength = target.length;
+  const removedEnd = start + removed.length;
+  const moved = removed.length - inserted;
+  const end = moved === 0 ? removedEnd : Math.max(oldLength, newLength);
+  const same = (index) => {
+    let had;
+    let held;
+    if (index < removedEnd) {
+      had = index - start in removed;
+      held = removed[index - start];
+    } else if (index < oldLength) {
+      const now = index - moved;
+      had = now in target;
+      held = target[now];
+    } else {
+      had = false;
+      held = undefined;
+    }
+    return Object.is(held, target[index]) && had === index in target;
+  };
+  if (moved === 0 && unchanged(start, end, same))
+    return;
+  startBatch();
+  try {
+    queueIndexes(depsMap, target, start, end, same);
+    queueWhole(depsMap, target, oldLength !== newLength);
+  } finally {
+    endBatch();
+  }
+}
+function unchanged(from, to, same) {
+  for (let index = from;index < to; index++) {
+    if (!same(index))
+      return false;
+  }
+  return true;
+}
+function triggerCollection(target, entry, sizeChanged) {
+  const depsMap = depsOf(targetMap, target);
+  const entryDeps = depsOf(entryMap, target);
+  if (!depsMap && !entryDeps)
+    return;
+  startBatch();
+  try {
+    if (entryDeps)
+      queueEffects(entryDeps.get(entry), target, entry);
+    if (depsMap) {
+      if (sizeChanged)
+        queueEffects(depsMap.get("size"), target, "size");
+      queueEffects(depsMap.get(Symbol.iterator), target, Symbol.iterator);
+    }
+  } finally {
+    endBatch();
+  }
+}
+function triggerCleared(target, removed) {
+  const depsMap = depsOf(targetMap, target);
+  const entryDeps = depsOf(entryMap, target);
+  if (!depsMap && !entryDeps)
+    return;
+  startBatch();
+  try {
+    if (entryDeps) {
+      for (let i = 0;i < removed.length; i++)
+        queueEffects(entryDeps.get(removed[i]), target, removed[i]);
+    }
+    if (depsMap) {
+      queueEffects(depsMap.get("size"), target, "size");
+      queueEffects(depsMap.get(Symbol.iterator), target, Symbol.iterator);
+    }
+  } finally {
+    endBatch();
+  }
+}
+function sameAt(before, after, index) {
+  return Object.is(before[index], after[index]) && index in before === index in after;
+}
+function watchEffect(effectCallback, options = {}) {
+  const run = () => {
+    if (!effectFn.active) {
+      throw new Error("Trying to run a stopped effect");
+    }
+    const previousEffect = activeEffect;
+    const emptiedFrom = emptiedCount;
+    try {
+      runCleanupFunctions(effectFn);
+      detachEffect(effectFn, true);
+      setActiveEffect(effectFn);
+      const onCleanup = (cleanupFn) => {
+        if (!effectFn.cleanupFns) {
+          effectFn.cleanupFns = [];
+        }
+        effectFn.cleanupFns.push(cleanupFn);
+      };
+      return effectCallback(onCleanup);
+    } finally {
+      setActiveEffect(previousEffect);
+      releaseEmptied(emptiedFrom);
+    }
+  };
+  const effectFn = {
+    run,
+    dependencies: new Set,
+    options,
+    active: true,
+    _rawCallback: effectCallback,
+    cleanupFns: [],
+    invalidate: undefined,
+    queued: false,
+    flushId: 0,
+    flushRuns: 0
+  };
+  if (!options.lazy) {
+    effectFn.run();
+  }
+  const stopHandle = () => {
+    if (effectFn.active) {
+      runCleanupFunctions(effectFn);
+      cleanupEffect(effectFn);
+      effectFn.active = false;
+    }
+  };
+  stopHandle.effect = effectFn;
+  return stopHandle;
+}
+
+// src/listener.ts
+var delivery;
+var inListener = false;
+var MAX_LISTENER_WRITE_ROUNDS = 100;
+function beginDelivery() {
+  if (delivery !== undefined)
+    return false;
+  delivery = { writes: 0, error: undefined };
+  return true;
+}
+function endDelivery(ownsDelivery) {
+  if (!ownsDelivery || writeDepth > 0 || inListener)
+    return;
+  const error = delivery?.error;
+  delivery = undefined;
+  if (error !== undefined)
+    throw error;
+}
+function checkListenerWrite() {
+  if (!inListener)
+    return;
+  const current = delivery;
+  if (current.writes < MAX_LISTENER_WRITE_ROUNDS) {
+    current.writes++;
+    return;
+  }
+  current.error ??= new RangeError(`reactive-proxy-state: listeners exceeded ${MAX_LISTENER_WRITE_ROUNDS} nested write rounds. ` + `Filter event paths to stop listener writes from repeating`);
+  throw current.error;
+}
+function emitListener(emit, event, queuedDelivery = delivery) {
+  const previousDelivery = delivery;
+  const previousListener = inListener;
+  const previousEffect = activeEffect;
+  const current = queuedDelivery ?? { writes: 0, error: undefined };
+  delivery = current;
+  inListener = true;
+  if (previousEffect !== null)
+    setActiveEffect(null);
+  try {
+    emit(event);
+  } finally {
+    if (previousEffect !== null)
+      setActiveEffect(previousEffect);
+    inListener = previousListener;
+    delivery = previousDelivery ?? (writeDepth > 0 ? current : undefined);
+    if (previousDelivery !== current && writeDepth === 0 && current.error !== undefined)
+      throw current.error;
+  }
+}
+
 // src/location.ts
 class Place {
   parentRef;
@@ -1436,6 +1923,7 @@ function buildPath(base, reversed, tail) {
   return path;
 }
 function locate(node, tail) {
+  checkListenerWrite();
   const single = chain(node, tail);
   if (single !== undefined) {
     if (single === null) {
@@ -1520,12 +2008,12 @@ function dispatch(target, event) {
   const { root, paths } = target;
   if (paths.length === 1) {
     if (root.undelivered === undefined)
-      root.emit(event);
+      emitListener(root.emit, event);
     else
       deliver(root, [event]);
     return;
   }
-  deliver(root, copyingPayloads(() => copiesPerPath(event, paths, root.async)));
+  deliver(root, copyingPayloads(() => copiesPerPath(event, paths, copiesRemoved(target))));
 }
 function copiesPerPath(event, paths, async) {
   const removesValue = event.action === "set-delete";
@@ -1558,21 +2046,24 @@ function deliver(root, events) {
   const emit = root.emit;
   const waiting = root.undelivered;
   if (waiting !== undefined) {
-    for (let i = 0;i < events.length; i++)
+    for (let i = 0;i < events.length; i++) {
       waiting.events.push(events[i]);
+    }
     return;
   }
   if (events.length === 1) {
-    emit(events[0]);
+    emitListener(emit, events[0]);
     return;
   }
-  const queue = root.undelivered = { events, next: 0 };
+  const queue2 = root.undelivered = { events, next: 0 };
+  const ownsDelivery = beginDelivery();
   let failed = false;
   let failure;
   try {
-    while (queue.next < queue.events.length) {
+    while (queue2.next < queue2.events.length) {
       try {
-        emit(queue.events[queue.next++]);
+        const index = queue2.next++;
+        emitListener(emit, queue2.events[index]);
       } catch (error) {
         if (!failed) {
           failed = true;
@@ -1582,14 +2073,18 @@ function deliver(root, events) {
     }
   } finally {
     root.undelivered = undefined;
+    endDelivery(ownsDelivery);
   }
   if (failed)
     throw failure;
 }
+function copiesRemoved(target) {
+  return target.root.async || target.root.undelivered !== undefined || target.paths.length > 1;
+}
 function copyPayload(event, target, container, held) {
   if (event === undefined)
     return 1 /* Done */;
-  const removed = target.root.async;
+  const removed = copiesRemoved(target);
   const { newValue, oldValue, value, items, oldValues } = event;
   const stored = event.action !== "set-delete";
   let fresh = true;
@@ -1615,12 +2110,8 @@ function copyPayload(event, target, container, held) {
     fresh &&= copiedFresh;
   }
   if (removed) {
-    const oldCopy = isObject2(oldValue) ? cloneTreeUnless(oldValue, container, 2 /* All */) : oldValue;
-    if (oldCopy === REACHES)
-      return 0 /* Reaches */;
-    const oldValuesCopy = oldValues !== undefined && holdsObject(oldValues) ? cloneTreeUnless(oldValues, container, 1 /* Below */) : oldValues;
-    if (oldValuesCopy === REACHES)
-      return 0 /* Reaches */;
+    const oldCopy = isObject2(oldValue) ? cloneTree(oldValue, 2 /* All */) : oldValue;
+    const oldValuesCopy = oldValues !== undefined && holdsObject(oldValues) ? cloneTree(oldValues, 1 /* Below */) : oldValues;
     if (isObject2(oldValue))
       event.oldValue = oldCopy;
     if (oldValues !== undefined)
@@ -1637,18 +2128,18 @@ function copyPayload(event, target, container, held) {
   return fresh ? 2 /* Fresh */ : 1 /* Done */;
 }
 function copyPayloadReaching(event, target, container, after) {
-  refuseAccessors(event, target.root.async, container, after);
+  refuseAccessors(event, copiesRemoved(target), container, after);
   copyPayloadAfter(event, target, container, after);
 }
 function copyPayloadAfter(event, target, container, after) {
   const { newValue, oldValue, value, items, oldValues } = event;
-  const removed = target.root.async;
+  const removed = copiesRemoved(target);
   const stored = event.action !== "set-delete";
   const newCopy = isObject2(newValue) ? cloneTreeAfter(newValue, container, after, event.action === "replace" ? 1 /* Below */ : 0 /* None */) : newValue;
-  const oldCopy = removed && isObject2(oldValue) ? cloneTreeAfter(oldValue, container, after, 2 /* All */) : oldValue;
+  const oldCopy = removed && isObject2(oldValue) ? cloneTree(oldValue, 2 /* All */) : oldValue;
   const valueCopy = !isObject2(value) ? value : stored ? cloneTreeAfter(value, container, after, 2 /* All */) : oldCopy;
   const itemsCopy = items !== undefined && holdsObject(items) ? cloneTreeAfter(items, container, after, 1 /* Below */) : items;
-  const oldValuesCopy = removed && oldValues !== undefined && holdsObject(oldValues) ? cloneTreeAfter(oldValues, container, after, 1 /* Below */) : oldValues;
+  const oldValuesCopy = removed && oldValues !== undefined && holdsObject(oldValues) ? cloneTree(oldValues, 1 /* Below */) : oldValues;
   if (isObject2(newValue))
     event.newValue = newCopy;
   if (isObject2(oldValue))
@@ -2368,435 +2859,6 @@ function restoreEvicted(node) {
   wrapperCache.set(node.raw, proxy);
   proxyStats.staleEvicted--;
   return proxy;
-}
-
-// src/watch-effect.ts
-var activeEffect = null;
-var trackingVersion = 0;
-function setActiveEffect(effect) {
-  activeEffect = effect;
-  trackingVersion++;
-}
-
-class Dep extends Set {
-  owner;
-  key;
-  constructor(owner, key) {
-    super();
-    this.owner = owner;
-    this.key = key;
-  }
-}
-var ownerRefs = new WeakMap;
-var targetMap = new WeakMap;
-var entryMap = new WeakMap;
-var emptiedDeps = [];
-var emptiedCount = 0;
-function releaseDep(dep) {
-  if (dep.size !== 0)
-    return;
-  const owner = dep.owner instanceof WeakRef ? dep.owner.deref() : dep.owner;
-  if (owner?.get(dep.key) === dep)
-    owner.delete(dep.key);
-}
-function releaseEmptied(from) {
-  for (let i = from;i < emptiedCount; i++) {
-    releaseDep(emptiedDeps[i]);
-    emptiedDeps[i] = undefined;
-  }
-  emptiedCount = from;
-  if (from === 0 && emptiedDeps.length > 4096)
-    emptiedDeps.length = 0;
-}
-function depsOf(maps, target) {
-  const deps = maps.get(target);
-  if (deps === undefined || deps.size > 0)
-    return deps;
-  maps.delete(target);
-  return;
-}
-function dependencyCounts(target) {
-  return { properties: targetMap.get(target)?.size, entries: entryMap.get(target)?.size };
-}
-function detachEffect(effect, defer) {
-  const dependencies = effect.dependencies;
-  if (dependencies === undefined || dependencies.size === 0)
-    return;
-  dependencies.forEach((dep) => {
-    dep.delete(effect);
-    if (dep.size > 0)
-      return;
-    if (defer)
-      emptiedDeps[emptiedCount++] = dep;
-    else
-      releaseDep(dep);
-  });
-  dependencies.clear();
-}
-function cleanupEffect(effect) {
-  trackingVersion++;
-  detachEffect(effect, false);
-}
-function runCleanupFunctions(effect) {
-  if (effect.cleanupFns && effect.cleanupFns.length > 0) {
-    effect.cleanupFns.forEach((cleanupFn) => {
-      try {
-        cleanupFn();
-      } catch (error) {
-        console.error("Error in effect cleanup function:", error);
-      }
-    });
-    effect.cleanupFns = [];
-  }
-}
-function depFor(maps, target, key) {
-  let deps = maps.get(target);
-  if (deps === undefined) {
-    deps = new Map;
-    maps.set(target, deps);
-  }
-  let dep = deps.get(key);
-  if (dep === undefined) {
-    let owner = deps;
-    if (deps.size > 0) {
-      let ref = ownerRefs.get(deps);
-      if (ref === undefined) {
-        ref = new WeakRef(deps);
-        ownerRefs.set(deps, ref);
-      }
-      if (deps.size === 1)
-        deps.forEach((existing) => {
-          existing.owner = ref;
-        });
-      owner = ref;
-    }
-    dep = new Dep(owner, key);
-    deps.set(key, dep);
-  }
-  return dep;
-}
-function addDep(dep, target, key) {
-  const effect = activeEffect;
-  if (dep.has(effect))
-    return;
-  dep.add(effect);
-  if (!effect.dependencies) {
-    effect.dependencies = new Set;
-  }
-  effect.dependencies.add(dep);
-  if (effect.options?.onTrack) {
-    effect.options.onTrack({ effect: effect._rawCallback, target, key, type: "track" });
-  }
-}
-function track(target, key) {
-  if (!activeEffect || !activeEffect.active)
-    return;
-  addDep(depFor(targetMap, target, key), target, key);
-}
-function trackEntry(target, entry) {
-  if (!activeEffect || !activeEffect.active)
-    return;
-  addDep(depFor(entryMap, target, entry), target, entry);
-}
-var keysKey = Symbol("keys");
-function trackKeys(target) {
-  track(target, keysKey);
-}
-var queue = [];
-var triggerNotifications = [];
-var flushing = false;
-var batchDepth = 0;
-var flushCount = 0;
-var MAX_FLUSH_RUNS = 1e5;
-function flushEffects() {
-  flushing = true;
-  const flushId = ++flushCount;
-  let failed = false;
-  let failure;
-  let index = 0;
-  let notifications = 0;
-  try {
-    for (;index < queue.length || triggerNotifications.length > 0; index++) {
-      if (triggerNotifications.length > 0) {
-        for (let next = 0;next < triggerNotifications.length; next++) {
-          try {
-            if (++notifications > MAX_FLUSH_RUNS) {
-              throw new RangeError("reactive-proxy-state: trigger hooks keep writing new values in one flush");
-            }
-            triggerNotifications[next]();
-          } catch (error) {
-            if (!failed) {
-              failed = true;
-              failure = error;
-            }
-          }
-          if (notifications > MAX_FLUSH_RUNS)
-            break;
-        }
-        triggerNotifications.length = 0;
-      }
-      if (index >= queue.length)
-        break;
-      const effect = queue[index];
-      effect.queued = false;
-      if (!effect.active)
-        continue;
-      const runs = effect.flushId === flushId ? effect.flushRuns + 1 : 1;
-      effect.flushId = flushId;
-      effect.flushRuns = runs;
-      if (runs > MAX_FLUSH_RUNS) {
-        if (!failed) {
-          failed = true;
-          failure = new RangeError(`reactive-proxy-state: an effect ran ${MAX_FLUSH_RUNS} times in one flush. ` + `Effects that write what other effects read loop when each write is new`);
-        }
-        index++;
-        break;
-      }
-      try {
-        const scheduler = effect.options?.scheduler;
-        if (scheduler)
-          scheduler(effect.run);
-        else
-          effect.run();
-      } catch (error) {
-        if (!failed) {
-          failed = true;
-          failure = error;
-        }
-      }
-    }
-  } finally {
-    for (;index < queue.length; index++)
-      queue[index].queued = false;
-    queue.length = 0;
-    if (triggerNotifications.length > 0)
-      triggerNotifications.length = 0;
-    flushing = false;
-  }
-  if (failed)
-    throw failure;
-}
-function startBatch() {
-  batchDepth++;
-}
-function endBatch() {
-  if (--batchDepth === 0 && !flushing && (queue.length > 0 || triggerNotifications.length > 0))
-    flushEffects();
-}
-function beginWrite() {
-  startBatch();
-}
-function endWrite() {
-  endBatch();
-}
-function queueEffects(dep, target, key) {
-  if (dep === undefined)
-    return;
-  dep.forEach((effect) => {
-    if (effect === activeEffect || !effect.active)
-      return;
-    const onTrigger = effect.options?.onTrigger;
-    if (onTrigger) {
-      triggerNotifications.push(() => {
-        if (effect.active)
-          onTrigger({ effect: effect._rawCallback, target, key, type: "trigger" });
-      });
-    }
-    if (effect.invalidate !== undefined) {
-      effect.invalidate();
-    } else if (!effect.queued) {
-      effect.queued = true;
-      queue.push(effect);
-    }
-  });
-}
-function trigger(target, key) {
-  const depsMap = depsOf(targetMap, target);
-  if (!depsMap)
-    return;
-  startBatch();
-  try {
-    queueEffects(depsMap.get(key), target, key);
-  } finally {
-    endBatch();
-  }
-}
-function triggerKeyChange(target) {
-  const depsMap = depsOf(targetMap, target);
-  if (!depsMap)
-    return;
-  startBatch();
-  try {
-    depsMap.forEach((dep, key) => queueEffects(dep, target, key));
-  } finally {
-    endBatch();
-  }
-}
-function queueIndexes(depsMap, target, from, to, same) {
-  if (to - from <= depsMap.size) {
-    for (let index = from;index < to; index++) {
-      const key = String(index);
-      const dep = depsMap.get(key);
-      if (dep === undefined || same !== undefined && same(index))
-        continue;
-      queueEffects(dep, target, key);
-    }
-  } else {
-    depsMap.forEach((dep, key) => {
-      const index = arrayIndex(key);
-      if (index < from || index >= to)
-        return;
-      if (same !== undefined && same(index))
-        return;
-      queueEffects(dep, target, key);
-    });
-  }
-}
-function queueWhole(depsMap, target, lengthChanged) {
-  if (lengthChanged)
-    queueEffects(depsMap.get("length"), target, "length");
-  queueEffects(depsMap.get(Symbol.iterator), target, Symbol.iterator);
-}
-function triggerArray(target, from, to, lengthChanged, before) {
-  const depsMap = depsOf(targetMap, target);
-  if (!depsMap)
-    return;
-  startBatch();
-  try {
-    queueIndexes(depsMap, target, from, to, before === undefined ? undefined : (index) => sameAt(before, target, index));
-    queueWhole(depsMap, target, lengthChanged);
-  } finally {
-    endBatch();
-  }
-}
-function triggerSplice(target, start, removed, inserted, oldLength) {
-  const depsMap = depsOf(targetMap, target);
-  if (!depsMap)
-    return;
-  const newLength = target.length;
-  const removedEnd = start + removed.length;
-  const moved = removed.length - inserted;
-  const end = moved === 0 ? removedEnd : Math.max(oldLength, newLength);
-  const same = (index) => {
-    let had;
-    let held;
-    if (index < removedEnd) {
-      had = index - start in removed;
-      held = removed[index - start];
-    } else if (index < oldLength) {
-      const now = index - moved;
-      had = now in target;
-      held = target[now];
-    } else {
-      had = false;
-      held = undefined;
-    }
-    return Object.is(held, target[index]) && had === index in target;
-  };
-  if (moved === 0 && unchanged(start, end, same))
-    return;
-  startBatch();
-  try {
-    queueIndexes(depsMap, target, start, end, same);
-    queueWhole(depsMap, target, oldLength !== newLength);
-  } finally {
-    endBatch();
-  }
-}
-function unchanged(from, to, same) {
-  for (let index = from;index < to; index++) {
-    if (!same(index))
-      return false;
-  }
-  return true;
-}
-function triggerCollection(target, entry, sizeChanged) {
-  const depsMap = depsOf(targetMap, target);
-  const entryDeps = depsOf(entryMap, target);
-  if (!depsMap && !entryDeps)
-    return;
-  startBatch();
-  try {
-    if (entryDeps)
-      queueEffects(entryDeps.get(entry), target, entry);
-    if (depsMap) {
-      if (sizeChanged)
-        queueEffects(depsMap.get("size"), target, "size");
-      queueEffects(depsMap.get(Symbol.iterator), target, Symbol.iterator);
-    }
-  } finally {
-    endBatch();
-  }
-}
-function triggerCleared(target, removed) {
-  const depsMap = depsOf(targetMap, target);
-  const entryDeps = depsOf(entryMap, target);
-  if (!depsMap && !entryDeps)
-    return;
-  startBatch();
-  try {
-    if (entryDeps) {
-      for (let i = 0;i < removed.length; i++)
-        queueEffects(entryDeps.get(removed[i]), target, removed[i]);
-    }
-    if (depsMap) {
-      queueEffects(depsMap.get("size"), target, "size");
-      queueEffects(depsMap.get(Symbol.iterator), target, Symbol.iterator);
-    }
-  } finally {
-    endBatch();
-  }
-}
-function sameAt(before, after, index) {
-  return Object.is(before[index], after[index]) && index in before === index in after;
-}
-function watchEffect(effectCallback, options = {}) {
-  const run = () => {
-    if (!effectFn.active) {
-      throw new Error("Trying to run a stopped effect");
-    }
-    const previousEffect = activeEffect;
-    const emptiedFrom = emptiedCount;
-    try {
-      runCleanupFunctions(effectFn);
-      detachEffect(effectFn, true);
-      setActiveEffect(effectFn);
-      const onCleanup = (cleanupFn) => {
-        if (!effectFn.cleanupFns) {
-          effectFn.cleanupFns = [];
-        }
-        effectFn.cleanupFns.push(cleanupFn);
-      };
-      return effectCallback(onCleanup);
-    } finally {
-      setActiveEffect(previousEffect);
-      releaseEmptied(emptiedFrom);
-    }
-  };
-  const effectFn = {
-    run,
-    dependencies: new Set,
-    options,
-    active: true,
-    _rawCallback: effectCallback,
-    cleanupFns: [],
-    invalidate: undefined,
-    queued: false,
-    flushId: 0,
-    flushRuns: 0
-  };
-  if (!options.lazy) {
-    effectFn.run();
-  }
-  const stopHandle = () => {
-    if (effectFn.active) {
-      runCleanupFunctions(effectFn);
-      cleanupEffect(effectFn);
-      effectFn.active = false;
-    }
-  };
-  stopHandle.effect = effectFn;
-  return stopHandle;
 }
 
 // src/wrap-array.ts
@@ -3598,6 +3660,7 @@ function wrapMap(map, node) {
           const oldSize = target.size;
           if (oldSize === 0)
             return;
+          const located = locate(node);
           const removed = [...target];
           target.clear();
           if (watch.indexed)
@@ -3606,7 +3669,6 @@ function wrapMap(map, node) {
             if (isObject4(value2))
               detachPlace(value2, node, key);
           }
-          const located = locate(node);
           beginWrite();
           try {
             triggerCleared(target, removed.map(([key]) => key));
@@ -3834,6 +3896,7 @@ function wrapSet(set, node) {
           const oldSize = target.size;
           if (oldSize === 0)
             return;
+          const located = locate(node);
           const removed = [...target];
           target.clear();
           if (watch.indexed)
@@ -3842,7 +3905,6 @@ function wrapSet(set, node) {
             if (isObject5(member))
               detachPlace(member, node, undefined);
           }
-          const located = locate(node);
           beginWrite();
           try {
             triggerCleared(target, removed);
@@ -3927,31 +3989,39 @@ function isReactive(value) {
 }
 function createAsyncEmit(emit) {
   const queue2 = [];
+  const deliveries = [];
   let flushScheduled = false;
   return (event) => {
     queue2.push(event);
+    deliveries.push(delivery);
     if (!flushScheduled) {
       flushScheduled = true;
       queueMicrotask(() => {
         let failed = false;
         let failure;
         let next = 0;
-        while (next < queue2.length) {
-          try {
-            emit(queue2[next++]);
-          } catch (error) {
-            if (!failed) {
-              failed = true;
-              failure = error;
+        try {
+          while (next < queue2.length) {
+            try {
+              const index = next++;
+              emitListener(emit, queue2[index], deliveries[index]);
+            } catch (error) {
+              if (!failed) {
+                failed = true;
+                failure = error;
+              }
+            }
+            if (next === FLUSH_CHUNK) {
+              queue2.splice(0, next);
+              deliveries.splice(0, next);
+              next = 0;
             }
           }
-          if (next === FLUSH_CHUNK) {
-            queue2.splice(0, next);
-            next = 0;
-          }
+        } finally {
+          queue2.length = 0;
+          deliveries.length = 0;
+          flushScheduled = false;
         }
-        queue2.length = 0;
-        flushScheduled = false;
         if (failed)
           throw failure;
       });
@@ -3976,7 +4046,7 @@ function reactive(obj, emit, path = [], options) {
     try {
       const newValue = cloneStored(obj, undefined, 2 /* All */);
       fresh = copiedFresh;
-      emit({ action: "replace", path: [], newValue });
+      emitListener(emit, { action: "replace", path: [], newValue });
     } catch (error) {
       if (error instanceof SnapshotLimitError)
         throw error;

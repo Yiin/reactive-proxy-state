@@ -1,3 +1,4 @@
+import { endDelivery } from "./listener";
 import { arrayIndex } from './utils';
 
 type EffectCallback<T = any> = (onCleanup: (cleanupFn: () => void) => void) => T;
@@ -244,6 +245,7 @@ const triggerNotifications: (() => void)[] = [];
 let flushing = false;
 // open writes and trigger calls: effects run when the outermost one ends
 let batchDepth = 0;
+export let writeDepth = 0;
 let flushCount = 0;
 
 /**
@@ -339,12 +341,17 @@ function endBatch(): void {
  * event before the event that set it off. @internal
  */
 export function beginWrite(): void {
+  writeDepth++;
   startBatch();
 }
 
 /** Finish a write; the outermost one runs the effects and hooks it queued. @internal */
 export function endWrite(): void {
-  endBatch();
+  try {
+    endBatch();
+  } finally {
+    if (--writeDepth === 0) endDelivery(true);
+  }
 }
 
 /**
