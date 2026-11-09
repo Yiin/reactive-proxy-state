@@ -20,6 +20,17 @@ function isObject(value: unknown): value is object {
   return value !== null && typeof value === "object";
 }
 
+/** The set methods that read every value of their set. */
+const setReaders = new Set<string | symbol>([
+  "union",
+  "intersection",
+  "difference",
+  "symmetricDifference",
+  "isSubsetOf",
+  "isSupersetOf",
+  "isDisjointFrom",
+]);
+
 export function wrapSet<T>(set: Set<T>, node: LocationNode): Set<T> {
   const cachedProxy = wrapperCache.get(set);
   if (cachedProxy) return cachedProxy as Set<T>;
@@ -35,18 +46,9 @@ export function wrapSet<T>(set: Set<T>, node: LocationNode): Set<T> {
       if (prop === ReactiveFlags.RAW) return target;
       if (prop === ReactiveFlags.IS_REACTIVE) return true;
 
-      track(target, prop);
-
-      if (
-        prop === Symbol.iterator ||
-        prop === "entries" ||
-        prop === "values" ||
-        prop === "keys" ||
-        prop === "forEach"
-      ) {
-        track(target, Symbol.iterator);
-      }
-
+      // methods track what they read when they run, not when they are read:
+      // until 3.0.2 `const values = set.values` before an effect gave values
+      // that tracked nothing
       const cached = methodCache[prop];
       if (cached !== undefined && hasOwn.call(methodCache, prop)) return cached;
 
@@ -74,8 +76,12 @@ export function wrapSet<T>(set: Set<T>, node: LocationNode): Set<T> {
             if (watch.indexed) indexAdded(target, value);
 
             if (isObject(value)) attachValue(value, node, undefined, copied === Copied.Fresh);
-            if (event !== undefined) dispatch(located!, event);
-            triggerCollection(target, value, oldSize !== newSize);
+            try {
+              if (event !== undefined) dispatch(located!, event);
+            } finally {
+              // also when a listener threw
+              triggerCollection(target, value, oldSize !== newSize);
+            }
           }
           return receiver;
         };
@@ -106,9 +112,12 @@ export function wrapSet<T>(set: Set<T>, node: LocationNode): Set<T> {
             if (result) {
               if (watch.indexed) indexRemoved(target, value);
               if (isObject(value)) detachPlace(value, node, undefined);
-              if (event !== undefined) dispatch(located!, event);
-              triggerCollection(target, value, oldSize !== newSize);
-              if (isObject(value)) evictDeep(value);
+              try {
+                if (event !== undefined) dispatch(located!, event);
+              } finally {
+                triggerCollection(target, value, oldSize !== newSize);
+                if (isObject(value)) evictDeep(value);
+              }
             }
             return result;
           }
@@ -129,16 +138,19 @@ export function wrapSet<T>(set: Set<T>, node: LocationNode): Set<T> {
             if (isObject(member)) detachPlace(member, node, undefined);
           }
           const located = locate(node);
-          if (located !== undefined) {
-            dispatch(located, {
-              action: "set-clear",
-              path: located.paths[0],
-              value: null,
-            });
-          }
-          triggerCleared(target, removed);
-          for (const member of removed) {
-            if (isObject(member)) evictDeep(member);
+          try {
+            if (located !== undefined) {
+              dispatch(located, {
+                action: "set-clear",
+                path: located.paths[0],
+                value: null,
+              });
+            }
+          } finally {
+            triggerCleared(target, removed);
+            for (const member of removed) {
+              if (isObject(member)) evictDeep(member);
+            }
           }
         };
         return methodCache[prop];
@@ -157,7 +169,6 @@ export function wrapSet<T>(set: Set<T>, node: LocationNode): Set<T> {
         prop === "keys" ||
         prop === "forEach"
       ) {
-        track(target, Symbol.iterator);
         const originalMethod = Reflect.get(target, prop, receiver);
 
         if (prop === "forEach") {
@@ -172,8 +183,10 @@ export function wrapSet<T>(set: Set<T>, node: LocationNode): Set<T> {
           };
           return methodCache[prop];
         }
+        // the body runs at the first `next()`: an iterator made before an
+        // effect and stepped in it tracks there
         methodCache[prop] = function* (...args: any[]) {
-          let index = 0;
+          track(target, Symbol.iterator);
           const iterator = originalMethod.apply(target, args);
 
           for (const entry of iterator) {
@@ -181,8 +194,6 @@ export function wrapSet<T>(set: Set<T>, node: LocationNode): Set<T> {
             if (prop === "entries") {
               valueToWrap = entry[1];
             }
-
-            track(target, String(index));
 
             const wrappedValue = isObject(valueToWrap)
               ? wrapChild(valueToWrap, node, undefined)
@@ -193,7 +204,6 @@ export function wrapSet<T>(set: Set<T>, node: LocationNode): Set<T> {
             } else {
               yield wrappedValue;
             }
-            index++;
           }
         };
         return methodCache[prop];
@@ -212,6 +222,14 @@ export function wrapSet<T>(set: Set<T>, node: LocationNode): Set<T> {
       if (typeof value === "function") {
         // `valueOf` gives its receiver: the proxy
         if (prop === "valueOf") return value;
+        // `union`, `isSubsetOf` and the other set methods read every value
+        if (setReaders.has(prop)) {
+          methodCache[prop] = function (this: unknown) {
+            track(target, Symbol.iterator);
+            return value.apply(target, arguments);
+          };
+          return methodCache[prop];
+        }
         return value.bind(target);
       }
       return value;

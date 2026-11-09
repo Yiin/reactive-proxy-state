@@ -48,18 +48,9 @@ export function wrapMap<K, V>(map: Map<K, V>, node: LocationNode): Map<K, V> {
       if (prop === ReactiveFlags.RAW) return target;
       if (prop === ReactiveFlags.IS_REACTIVE) return true;
 
-      track(target, prop);
-
-      if (
-        prop === Symbol.iterator ||
-        prop === "entries" ||
-        prop === "values" ||
-        prop === "keys" ||
-        prop === "forEach"
-      ) {
-        track(target, Symbol.iterator);
-      }
-
+      // methods track what they read when they run, not when they are read:
+      // until 3.0.2 `const values = map.values` before an effect gave values
+      // that tracked nothing
       const cached = methodCache[prop];
       if (cached !== undefined && hasOwn.call(methodCache, prop)) return cached;
 
@@ -106,12 +97,15 @@ export function wrapMap<K, V>(map: Map<K, V>, node: LocationNode): Map<K, V> {
           if (isObject(oldValue)) detachPlace(oldValue, node, key);
           if (isObject(value)) attachValue(value, node, key, copied === Copied.Fresh, located && oldValue, held);
 
-          if (event !== undefined) dispatch(located!, event);
+          try {
+            if (event !== undefined) dispatch(located!, event);
+          } finally {
+            // the entry and every reader of all entries; a new key changes
+            // the size. Also when a listener threw
+            triggerCollection(target, key, oldSize !== newSize);
 
-          // the entry and every reader of all entries; a new key changes the size
-          triggerCollection(target, key, oldSize !== newSize);
-
-          if (isObject(oldValue)) evictDeep(oldValue);
+            if (isObject(oldValue)) evictDeep(oldValue);
+          }
           return receiver;
         };
         return methodCache[prop];
@@ -144,10 +138,12 @@ export function wrapMap<K, V>(map: Map<K, V>, node: LocationNode): Map<K, V> {
             if (watch.indexed) indexRemoved(target, key);
             if (isObject(oldValue)) detachPlace(oldValue, node, key);
 
-            if (event !== undefined) dispatch(located!, event);
-
-            triggerCollection(target, key, oldSize !== newSize);
-            if (isObject(oldValue)) evictDeep(oldValue);
+            try {
+              if (event !== undefined) dispatch(located!, event);
+            } finally {
+              triggerCollection(target, key, oldSize !== newSize);
+              if (isObject(oldValue)) evictDeep(oldValue);
+            }
           }
 
           return result;
@@ -168,17 +164,19 @@ export function wrapMap<K, V>(map: Map<K, V>, node: LocationNode): Map<K, V> {
           }
 
           const located = locate(node);
-          if (located !== undefined) {
-            dispatch(located, {
-              action: "map-clear",
-              path: located.paths[0],
-              key: null,
-            });
-          }
-
-          triggerCleared(target, removed.map(([key]) => key));
-          for (const [, value] of removed) {
-            if (isObject(value)) evictDeep(value);
+          try {
+            if (located !== undefined) {
+              dispatch(located, {
+                action: "map-clear",
+                path: located.paths[0],
+                key: null,
+              });
+            }
+          } finally {
+            triggerCleared(target, removed.map(([key]) => key));
+            for (const [, value] of removed) {
+              if (isObject(value)) evictDeep(value);
+            }
           }
         };
         return methodCache[prop];
@@ -208,8 +206,6 @@ export function wrapMap<K, V>(map: Map<K, V>, node: LocationNode): Map<K, V> {
         prop === "keys" ||
         prop === "forEach"
       ) {
-        track(target, Symbol.iterator);
-
         if (prop === "forEach") {
           methodCache[prop] = (
             callbackfn: (value: V, key: K, map: Map<K, V>) => void,
@@ -223,7 +219,10 @@ export function wrapMap<K, V>(map: Map<K, V>, node: LocationNode): Map<K, V> {
           return methodCache[prop];
         }
 
+        // the body runs at the first `next()`: an iterator made before an
+        // effect and stepped in it tracks there
         methodCache[prop] = function* () {
+          track(target, Symbol.iterator);
           for (const [key, value] of target.entries()) {
             if (prop === "keys") {
               yield key;

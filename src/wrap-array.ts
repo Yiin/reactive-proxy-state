@@ -27,7 +27,7 @@ import {
   copyPayloadAfter,
   copyPayloadReaching,
 } from "./location";
-import { activeEffect, track, trigger, triggerArray } from "./watch-effect";
+import { activeEffect, track, trigger, triggerArray, triggerSplice } from "./watch-effect";
 import { ReactiveFlags } from "./constants";
 
 // avoid repeated typeof checks
@@ -179,6 +179,20 @@ function writeReorder(target: unknown[], reorder: Reorder): void {
   }
 }
 
+/** What a splice that removes nothing removed. */
+const noItems: readonly unknown[] = [];
+
+/**
+ * `method` run on `target`, an array method that reads all items: it
+ * tracks them when it runs, also when it was read before an effect.
+ */
+function readerOf(target: unknown[], method: Function): Function {
+  return function (this: unknown) {
+    trackIteration(target);
+    return method.apply(target, arguments);
+  };
+}
+
 function evictRemoved(removed: readonly unknown[]): void {
   for (let i = 0; i < removed.length; i++) {
     if (isObject(removed[i])) evictDeep(removed[i]);
@@ -245,7 +259,7 @@ export function wrapArray<T extends any[]>(arr: T, node: LocationNode): T {
   // or `__proto__` found Object.prototype's in it, so `${list}` gave
   // "[object Array]". (V8 keeps an object without a prototype in slower
   // dictionary mode.)
-  const methodCache: { [key: string | symbol]: Function } = {};
+  const methodCache: { [key: string | symbol]: Function | undefined } = {};
 
   const proxy: T = new Proxy(arr, {
     get(target: T, prop: string | symbol, receiver: any): any {
@@ -263,7 +277,6 @@ export function wrapArray<T extends any[]>(arr: T, node: LocationNode): T {
         case "reverse":
         case "fill":
         case "copyWithin": {
-          track(target, "length");
           const method = (Array.prototype as any)[prop] as Function;
           methodCache[prop] = function (...args: any[]): T {
             if (prop === "fill" && isObject(args[0])) args[0] = unwrapForStore(args[0]);
@@ -286,15 +299,17 @@ export function wrapArray<T extends any[]>(arr: T, node: LocationNode): T {
             if (event !== undefined) copyPayloadAfter(event, located!, target, after);
             writeReorder(target, reorder);
             relinkReorder(node, target, before, prop === "fill" ? [args[0]] : undefined);
-            if (event !== undefined) dispatch(located!, event);
-            triggerArray(target, reorder.first, reorder.last, false, before);
-            evictRemoved(before);
+            try {
+              if (event !== undefined) dispatch(located!, event);
+            } finally {
+              triggerArray(target, reorder.first, reorder.last, false, before);
+              evictRemoved(before);
+            }
             return proxy;
           };
           return methodCache[prop];
         }
         case "push":
-          track(target, "length");
           methodCache[prop] = function (...items: any[]): number {
             unwrapItems(items);
             const oldLength = target.length;
@@ -316,14 +331,16 @@ export function wrapArray<T extends any[]>(arr: T, node: LocationNode): T {
             const newLength = target.length;
             if (items.length > 0) {
               relinkArray(node, target, oldLength, undefined, items, copied === Copied.Fresh);
-              if (event !== undefined) dispatch(located!, event);
-              triggerArray(target, oldLength, newLength, oldLength !== newLength);
+              try {
+                if (event !== undefined) dispatch(located!, event);
+              } finally {
+                triggerArray(target, oldLength, newLength, oldLength !== newLength);
+              }
             }
             return result;
           };
           return methodCache[prop];
         case "pop":
-          track(target, "length");
           methodCache[prop] = function (): any {
             if (target.length === 0) return undefined;
             const oldLength = target.length;
@@ -344,18 +361,22 @@ export function wrapArray<T extends any[]>(arr: T, node: LocationNode): T {
             const result = target.pop();
             const newLength = target.length;
             if (isObject(oldValue)) detachPlace(oldValue, node, poppedIndex);
-            if (event !== undefined) dispatch(located!, event);
-            if (isObject(oldValue)) evictDeep(oldValue);
-            triggerArray(target, newLength, oldLength, oldLength !== newLength);
+            try {
+              if (event !== undefined) dispatch(located!, event);
+            } finally {
+              if (isObject(oldValue)) evictDeep(oldValue);
+              triggerArray(target, newLength, oldLength, oldLength !== newLength);
+            }
             return result;
           };
           return methodCache[prop];
         case "shift":
-          track(target, "length");
           methodCache[prop] = function (): any {
             if (target.length === 0) return undefined;
             const oldLength = target.length;
             const oldValue = target[0];
+            // what left index 0: the item, or a hole
+            const removed = 0 in target ? [oldValue] : new Array(1);
             const located = locate(node);
             const event: StateEvent | undefined = located && {
               action: "array-shift",
@@ -369,17 +390,18 @@ export function wrapArray<T extends any[]>(arr: T, node: LocationNode): T {
               copyPayloadReaching(event!, located!, target, after);
             }
             const result = target.shift();
-            const newLength = target.length;
-            relinkArray(node, target, 0, [oldValue]);
-            if (event !== undefined) dispatch(located!, event);
-            if (isObject(oldValue)) evictDeep(oldValue);
-            // every index moved
-            triggerArray(target, 0, oldLength, oldLength !== newLength);
+            relinkArray(node, target, 0, removed);
+            try {
+              if (event !== undefined) dispatch(located!, event);
+            } finally {
+              if (isObject(oldValue)) evictDeep(oldValue);
+              // every index moved: the ones that hold what they held are skipped
+              triggerSplice(target, 0, removed, 0, oldLength);
+            }
             return result;
           };
           return methodCache[prop];
         case "unshift":
-          track(target, "length");
           methodCache[prop] = function (...items: any[]): number {
             unwrapItems(items);
             const oldLength = target.length;
@@ -397,18 +419,19 @@ export function wrapArray<T extends any[]>(arr: T, node: LocationNode): T {
               copyPayloadReaching(event!, located!, target, after);
             }
             const result = target.unshift(...items);
-            const newLength = target.length;
             if (items.length > 0) {
               relinkArray(node, target, 0, undefined, items, copied === Copied.Fresh);
-              if (event !== undefined) dispatch(located!, event);
-              // every index moved
-              triggerArray(target, 0, newLength, oldLength !== newLength);
+              try {
+                if (event !== undefined) dispatch(located!, event);
+              } finally {
+                // every index moved: the ones that hold what they held are skipped
+                triggerSplice(target, 0, noItems, items.length, oldLength);
+              }
             }
             return result;
           };
           return methodCache[prop];
         case "splice":
-          track(target, "length");
           methodCache[prop] = function (...args: any[]): any[] {
             // normalize once, like the spec: the change, the removed items,
             // the new places and the event all use these numbers
@@ -440,17 +463,18 @@ export function wrapArray<T extends any[]>(arr: T, node: LocationNode): T {
               after.splice(actualStart, actualDeleteCount, ...items);
               copyPayloadReaching(event!, located!, target, after);
             }
+            // keeps the holes it removed
             const deletedItems = target.splice(actualStart, actualDeleteCount, ...items);
-            const newLength = target.length;
 
             if (changes) {
               relinkArray(node, target, actualStart, deletedItems, items, copied === Copied.Fresh);
-              if (event !== undefined) dispatch(located!, event);
-              evictRemoved(deletedItems);
-              // the items after a change of count moved
-              const end =
-                actualDeleteCount === items.length ? actualStart + actualDeleteCount : Math.max(oldLength, newLength);
-              triggerArray(target, actualStart, end, oldLength !== newLength);
+              try {
+                if (event !== undefined) dispatch(located!, event);
+              } finally {
+                evictRemoved(deletedItems);
+                // the items after a change of count moved: the indexes that hold what they held are skipped
+                triggerSplice(target, actualStart, deletedItems, items.length, oldLength);
+              }
             }
             return deletedItems;
           };
@@ -516,7 +540,6 @@ export function wrapArray<T extends any[]>(arr: T, node: LocationNode): T {
           return methodCache[prop];
         }
         case "length":
-          track(target, "length");
           return Reflect.get(target, prop, receiver);
       }
 
@@ -525,7 +548,6 @@ export function wrapArray<T extends any[]>(arr: T, node: LocationNode): T {
       // an array index ("0", "17"), parsed once
       const index = arrayIndex(prop);
       if (index >= 0) {
-        track(target, prop);
         if (!isObject(value)) return value;
         // recursively wrap nested structures
         return wrapChild(value, node, index);
@@ -535,19 +557,22 @@ export function wrapArray<T extends any[]>(arr: T, node: LocationNode): T {
       const isNumericIndex = typeof prop === "string" && !isNaN(parseInt(prop, 10));
 
       if (isNumericIndex) {
-        track(target, prop);
         if (!isObject(value)) return value;
         return wrapChild(value, node, placeKey(prop));
       }
 
-      // ensure functions accessed directly are bound to the original target.
-      // The methods left (`map`, `filter`, `slice`, `join`, `keys`, `with`
-      // and the rest) read the whole array. `constructor` is a class, and
-      // `valueOf` gives its receiver: both keep the proxy.
+      // functions run on the raw target. The methods left (`map`, `filter`,
+      // `slice`, `join`, `keys`, `with` and the rest) read the whole array,
+      // and track it when they run, not when they are read: until 3.0.2
+      // `const slice = list.slice` before an effect gave a slice that tracked
+      // nothing. `constructor` is a class, and `valueOf` gives its receiver:
+      // both keep the proxy.
       if (typeof value === "function") {
         if (prop === "constructor" || prop === "valueOf") return value;
-        trackIteration(target);
-        return value.bind(target);
+        const method = readerOf(target, value);
+        // the array's own method, or Array.prototype's: one per proxy
+        if ((Array.prototype as any)[prop] === value) methodCache[prop] = method;
+        return method;
       }
       return value;
     },
@@ -614,37 +639,42 @@ export function wrapArray<T extends any[]>(arr: T, node: LocationNode): T {
           if (isObject(value)) attachValue(value, node, key, copied === Copied.Fresh, located && oldValue, held);
         }
 
-        if (grows) {
-          if (located !== undefined) {
-            // one event per new index and place, delivered as one write
-            const oldLength = Number(oldValue);
-            const newLength = Number(value);
-            const events: StateEvent[] = [];
-            for (let i = oldLength; i < newLength; i++) {
-              const index = String(i);
-              for (let j = 0; j < located.paths.length; j++) {
-                events.push({ action: "set", path: [...located.paths[j], index], newValue: undefined });
+        try {
+          if (grows) {
+            if (located !== undefined) {
+              // one event per new index and place, delivered as one write
+              const oldLength = Number(oldValue);
+              const newLength = Number(value);
+              const events: StateEvent[] = [];
+              for (let i = oldLength; i < newLength; i++) {
+                const index = String(i);
+                for (let j = 0; j < located.paths.length; j++) {
+                  events.push({ action: "set", path: [...located.paths[j], index], newValue: undefined });
+                }
               }
+              if (events.length > 0) deliver(located.root, events);
             }
-            if (events.length > 0) deliver(located.root, events);
+          } else if (event !== undefined) {
+            dispatch(located!, event);
           }
-        } else if (event !== undefined) {
-          dispatch(located!, event);
-        }
-
-        if (isObject(oldValue) && oldValue !== value) {
-          evictDeep(oldValue);
-        }
-        if (truncated !== undefined) evictRemoved(truncated);
-        const newLength = target.length;
-        if (index >= 0) {
-          // a write past the end makes the array longer
-          triggerArray(target, index, index + 1, newLength !== oldLength);
-        } else if (prop === "length") {
-          // a shorter length removes the indexes past it
-          if (newLength !== oldLength) triggerArray(target, newLength, oldLength, true);
-        } else {
-          trigger(target, prop);
+        } finally {
+          // effects rerun also when a listener threw
+          if (isObject(oldValue) && oldValue !== value) {
+            evictDeep(oldValue);
+          }
+          if (truncated !== undefined) evictRemoved(truncated);
+          const newLength = target.length;
+          if (index >= 0) {
+            // a write past the end makes the array longer
+            triggerArray(target, index, index + 1, newLength !== oldLength);
+          } else if (prop === "length") {
+            // a shorter length removes the indexes past it
+            if (newLength !== oldLength) triggerArray(target, newLength, oldLength, true);
+          } else {
+            // an own function in place of an array method is read from now on
+            if (methodCache[prop] !== undefined) methodCache[prop] = undefined;
+            trigger(target, prop);
+          }
         }
       }
       return result;
@@ -663,11 +693,17 @@ export function wrapArray<T extends any[]>(arr: T, node: LocationNode): T {
 
       if (hadProperty && result) {
         if (isObject(oldValue)) detachPlace(oldValue, node, placeKey(prop));
-        if (event !== undefined) dispatch(located!, event);
-        const index = arrayIndex(prop);
-        if (index >= 0) triggerArray(target, index, index + 1, false);
-        else trigger(target, prop);
-        if (isObject(oldValue)) evictDeep(oldValue);
+        try {
+          if (event !== undefined) dispatch(located!, event);
+        } finally {
+          const index = arrayIndex(prop);
+          if (index >= 0) triggerArray(target, index, index + 1, false);
+          else {
+            if (methodCache[prop] !== undefined) methodCache[prop] = undefined;
+            trigger(target, prop);
+          }
+          if (isObject(oldValue)) evictDeep(oldValue);
+        }
       }
       return result;
     },
