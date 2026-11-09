@@ -42,6 +42,7 @@ __export(exports_src, {
   trigger: () => trigger,
   trackingVersion: () => trackingVersion,
   trackVueReactiveEvents: () => trackVueReactiveEvents,
+  trackMembership: () => trackMembership,
   trackKeys: () => trackKeys,
   trackEntry: () => trackEntry,
   track: () => track,
@@ -1268,6 +1269,7 @@ class Dep extends Set {
 var ownerRefs = new WeakMap;
 var targetMap = new WeakMap;
 var entryMap = new WeakMap;
+var membershipMap = new WeakMap;
 var emptiedDeps = [];
 var emptiedCount = 0;
 function releaseDep(dep) {
@@ -1294,7 +1296,7 @@ function depsOf(maps, target) {
   return;
 }
 function dependencyCounts(target) {
-  return { properties: targetMap.get(target)?.size, entries: entryMap.get(target)?.size };
+  return { properties: targetMap.get(target)?.size, entries: entryMap.get(target)?.size, membership: membershipMap.get(target)?.size };
 }
 function detachEffect(effect, defer) {
   const dependencies = effect.dependencies;
@@ -1375,6 +1377,11 @@ function trackEntry(target, entry) {
   if (!activeEffect || !activeEffect.active)
     return;
   addDep(depFor(entryMap, target, entry), target, entry);
+}
+function trackMembership(target, entry) {
+  if (!activeEffect || !activeEffect.active)
+    return;
+  addDep(depFor(membershipMap, target, entry), target, entry);
 }
 var keysKey = Symbol("keys");
 function trackKeys(target) {
@@ -1597,15 +1604,20 @@ function unchanged(from, to, same) {
 function triggerCollection(target, entry, sizeChanged) {
   const depsMap = depsOf(targetMap, target);
   const entryDeps = depsOf(entryMap, target);
-  if (!depsMap && !entryDeps)
+  const membershipDeps = sizeChanged ? depsOf(membershipMap, target) : undefined;
+  if (!depsMap && !entryDeps && !membershipDeps)
     return;
   startBatch();
   try {
     if (entryDeps)
       queueEffects(entryDeps.get(entry), target, entry);
+    if (membershipDeps)
+      queueEffects(membershipDeps.get(entry), target, entry);
     if (depsMap) {
-      if (sizeChanged)
+      if (sizeChanged) {
         queueEffects(depsMap.get("size"), target, "size");
+        queueEffects(depsMap.get(keysKey), target, keysKey);
+      }
       queueEffects(depsMap.get(Symbol.iterator), target, Symbol.iterator);
     }
   } finally {
@@ -1615,7 +1627,8 @@ function triggerCollection(target, entry, sizeChanged) {
 function triggerCleared(target, removed) {
   const depsMap = depsOf(targetMap, target);
   const entryDeps = depsOf(entryMap, target);
-  if (!depsMap && !entryDeps)
+  const membershipDeps = depsOf(membershipMap, target);
+  if (!depsMap && !entryDeps && !membershipDeps)
     return;
   startBatch();
   try {
@@ -1623,7 +1636,12 @@ function triggerCleared(target, removed) {
       for (let i = 0;i < removed.length; i++)
         queueEffects(entryDeps.get(removed[i]), target, removed[i]);
     }
+    if (membershipDeps) {
+      for (let i = 0;i < removed.length; i++)
+        queueEffects(membershipDeps.get(removed[i]), target, removed[i]);
+    }
     if (depsMap) {
+      queueEffects(depsMap.get(keysKey), target, keysKey);
       queueEffects(depsMap.get("size"), target, "size");
       queueEffects(depsMap.get(Symbol.iterator), target, Symbol.iterator);
     }
@@ -1698,10 +1716,14 @@ function listenerGeneration() {
   return listening >> 1;
 }
 function checkListenerWrite() {
-  if (listening < 0 || (listening & 1) !== 0)
+  if (listening < 0)
+    return;
+  if (refusal !== undefined)
+    throw refusal;
+  if ((listening & 1) !== 0)
     return;
   const generation = listening >> 1;
-  if (refusal === undefined && generation < MAX_LISTENER_WRITE_DEPTH && (generation === 0 || ++rounds <= MAX_LISTENER_WRITE_ROUNDS)) {
+  if (generation < MAX_LISTENER_WRITE_DEPTH && (generation === 0 || ++rounds <= MAX_LISTENER_WRITE_ROUNDS)) {
     listening |= 1;
     return;
   }
@@ -3570,7 +3592,10 @@ class MapProxyIterator {
     if (this.target === undefined)
       return { value: undefined, done: true };
     if (activeEffect !== null && this.trackedAt !== trackingVersion) {
-      track(this.target, Symbol.iterator);
+      if (this.kind === "keys")
+        trackKeys(this.target);
+      else
+        track(this.target, Symbol.iterator);
       this.trackedAt = trackingVersion;
     }
     const step = this.iterator.next();
@@ -3768,7 +3793,7 @@ function wrapMap(map, node) {
       }
       if (prop === "has") {
         methodCache[prop] = function(key) {
-          trackEntry(target, key);
+          trackMembership(target, key);
           return target.has(key);
         }.bind(target);
         return methodCache[prop];
