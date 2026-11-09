@@ -424,13 +424,25 @@ export function runCase(lib, spec, { stopLoops = false } = {}) {
  * other error must still match; the effect oracle checks the run counts.
  */
 export function sameEventLog(spec, current, baseline) {
-  const fewerErrors = new Set();
+  const errorEffects = new Map();
+  const remaining = new Map();
   spec.effects.forEach((effect, index) => {
     if (effect.kind === "trim" && effect.target === "map" && current.effectRuns[index] < baseline.effectRuns[index]) {
-      fewerErrors.add(`threw hook ${index}`);
-      fewerErrors.add(`threw effect ${index}`);
+      errorEffects.set(`threw hook ${index}`, index);
+      errorEffects.set(`threw effect ${index}`, index);
+      remaining.set(index, baseline.effectRuns[index] - current.effectRuns[index]);
     }
   });
-  const comparableLog = result => result.log.filter(line => !fewerErrors.has(line)).join("\n");
-  return comparableLog(current) === comparableLog(baseline);
+  let position = 0;
+  for (const line of baseline.log) {
+    if (position < current.log.length && line === current.log[position]) {
+      position++;
+      continue;
+    }
+    const effect = errorEffects.get(line);
+    const budget = remaining.get(effect) ?? 0;
+    if (budget === 0) return false;
+    remaining.set(effect, budget - 1);
+  }
+  return position === current.log.length;
 }

@@ -194,8 +194,10 @@ What to check when you upgrade:
 ## 3.0.9: refused writes stay refused, and Map effects track their reads
 
 After the listener bound refuses a write, every later listener write in that operation is refused.
-This includes an active parent listener that catches the error from a nested write.
-In 3.0.8, that parent could still write while the nested calls returned.
+This includes every listener still running, even one that did not see the error.
+An inner listener can catch the error before a parent receives it.
+That parent still loses its later writes.
+In 3.0.8, active parents could still write while the nested calls returned.
 The next operation starts with a fresh bound.
 
 Map `has(key)` tracks membership only, and `keys()` tracks the ordered keys.
@@ -203,3 +205,6 @@ Changing the value at an existing key reruns neither reader.
 Map `get(key)`, `values()`, `entries()`, `forEach` and default iteration still track values.
 Adding or deleting a key, or clearing a nonempty Map, reruns the affected readers once.
 In 3.0.8, value updates also reran `has` and `keys()` readers.
+Value updates also leave their `onTrigger` hooks idle.
+Reader order follows trigger order in nested writes.
+A value update followed by a key deletion queues value readers before membership and keys readers.

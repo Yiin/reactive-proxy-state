@@ -8,11 +8,12 @@
  * events than 3.0.6.
  */
 import fc from "fast-check";
+import { listenerCatchArbitrary, runListenerCatchCase } from "./listener-catch.model.mjs";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { caseArbitrary, classify, comparable, comparableWhenFinite, runCase, sameEventLog } from "./replica-property.model.mjs";
 
-const [bundle, baselineBundle, seedArg, runArg] = process.argv.slice(2);
+const [bundle, baselineBundle, seedArg, runArg, mode] = process.argv.slice(2);
 if (bundle === undefined || baselineBundle === undefined) {
   console.error("usage: node tests/replica-property.run.mjs <bundle> <3.0.6 bundle> [seeds] [runs per seed]");
   process.exit(2);
@@ -21,6 +22,30 @@ const lib = await import(pathToFileURL(resolve(bundle)).href);
 const baseline = await import(pathToFileURL(resolve(baselineBundle)).href);
 const seeds = Number(seedArg ?? 20);
 const runs = Number(runArg ?? 500);
+
+if (mode === "catch") {
+  const counts = { cases: 0, events: 0, retries: 0, rejected: 0, caught: 0, refusals: 0, swallowed: 0 };
+  for (let seed = 1; seed <= seeds; seed++) {
+    console.error(`listener catch seed ${seed}/${seeds}`);
+    fc.assert(fc.property(listenerCatchArbitrary, spec => {
+      const ours = runListenerCatchCase(lib, spec);
+      const theirs = runListenerCatchCase(baseline, spec);
+      counts.cases++;
+      counts.events += ours.log.filter(line => !line.startsWith("retry threw ") && !line.startsWith("caught ") && !line.startsWith("caller threw ")).length;
+      counts.retries += ours.attempts;
+      counts.rejected += ours.rejected;
+      counts.caught += ours.caught;
+      if (spec.refusal) counts.refusals++;
+      if (spec.swallow) counts.swallowed++;
+      if (ours.mismatch !== undefined || theirs.mismatch !== undefined || JSON.stringify(ours) !== JSON.stringify(theirs)) {
+        throw new Error(JSON.stringify({ spec, ours, theirs }));
+      }
+    }), { seed, numRuns: runs });
+    await new Promise(resolve => setTimeout(resolve, 0));
+  }
+  console.log(JSON.stringify({ runtime: typeof Bun === "undefined" ? `node ${process.version}` : `bun ${Bun.version}`, mode, seeds, runs, counts }));
+  process.exit(0);
+}
 
 const counts = {
   cases: 0,

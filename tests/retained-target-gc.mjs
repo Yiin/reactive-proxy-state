@@ -5,12 +5,19 @@ const { reactive, watchEffect, toRaw } = await import(pathToFileURL(resolve(proc
 assert.equal(typeof globalThis.gc, "function", "run with --expose-gc");
 function read(state, key) {
   if (state == null) return;
-  if (state instanceof Map) return process.argv[3] === "membership" ? state.has(key) : state.get(key);
+  if (state instanceof Map) {
+    if (process.argv[3] === "membership") return state.has(key);
+    if (process.argv[3] === "keys") return [...state.keys()];
+    return state.get(key);
+  }
   if (state instanceof Set) return state.has(key);
   return state[key];
 }
 function captureSibling(state) {
-  watchEffect(() => read(state, "y"));
+  // Two keys() readers share one dependency. Size supplies a distinct sibling
+  // dependency whose callback captures the same Map.
+  if (process.argv[3] === "keys" && state instanceof Map) watchEffect(() => state.size);
+  else watchEffect(() => read(state, "y"));
 }
 function sample(kind) {
   const holder = { value: reactive(kind === 0 ? { x: 1, y: 2 } : kind === 1 ? new Map([["x", 1], ["y", 2]]) : new Set(["x", "y"])) };

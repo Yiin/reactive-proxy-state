@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import { fileURLToPath } from "node:url";
 
-for (const mode of ["values", "membership"]) {
+for (const mode of ["objects", "values", "membership", "keys"]) {
 test(`a retained effect handle does not retain a discarded target through sibling effects (${mode})`, () => {
   const script = fileURLToPath(new URL("./retained-target-gc.mjs", import.meta.url));
   const source = process.env.RPS_TEST_BUNDLE ?? fileURLToPath(new URL("../src/index.ts", import.meta.url));

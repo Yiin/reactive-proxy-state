@@ -153,3 +153,108 @@ for (const iteration of [false, true]) {
     stop();
   });
 }
+
+for (const readers of [["has", "get"], ["get", "has"], ["keys", "values"], ["values", "keys"]] as const) {
+  test(`nested Map writes queue readers in trigger order: ${readers.join(", ")}`, () => {
+    const events: StateEvent[] = [];
+    const order: string[] = [];
+    let remote = { go: 0, map: new Map([["a", 1]]), stamp: "" };
+    let stamp = "";
+    const state = reactive({ go: 0, map: new Map([["a", 1]]), stamp: "" }, event => {
+      if (event.path.length === 0) { remote = event.newValue; return; }
+      events.push(event);
+      updateState(remote, event);
+      if (event.path[0] === "go") {
+        state.map.set("a", 2);
+        state.map.delete("a");
+      }
+    });
+    const stops = readers.map(reader => watchEffect(() => {
+      if (reader === "has") state.map.has("a");
+      else if (reader === "keys") [...state.map.keys()];
+      else if (reader === "get") state.map.get("a");
+      else [...state.map.values()];
+      order.push(reader);
+      stamp += reader + ";";
+      state.stamp = stamp;
+    }));
+    order.length = 0;
+    events.length = 0;
+    stamp = "";
+    state.go = 1;
+    const valueReader = readers.some(reader => reader === "get") ? "get" : "values";
+    const membershipReader = readers.some(reader => reader === "has") ? "has" : "keys";
+    expect(order).toEqual([valueReader, membershipReader]);
+    expect(events.filter(event => event.path[0] === "stamp").map(event => event.newValue)).toEqual([
+      valueReader + ";", valueReader + ";" + membershipReader + ";",
+    ]);
+    expect(remote).toEqual(toRaw(state));
+    stops.forEach(stop => stop());
+  });
+}
+
+for (const tracked of [false, true]) {
+  test(`a parent loses its later write when a child swallows every refusal (effect=${tracked})`, () => {
+    const childErrors: unknown[] = [];
+    const parentErrors: unknown[] = [];
+    const paths: unknown[] = [];
+    let remote = { x: 0, a: 0, loop: 0, b: 0 };
+    let armed = true;
+    const state = reactive({ ...remote }, event => {
+      if (event.path.length === 0) { remote = event.newValue; return; }
+      paths.push(event.path[0]);
+      updateState(remote, event);
+      if (!armed) return;
+      if (event.path[0] === "x") {
+        state.a = 1;
+        expect(parentErrors).toHaveLength(0);
+        try { state.b = 1; } catch (error) { parentErrors.push(error); }
+      } else if (event.path[0] === "a" || event.path[0] === "loop") {
+        try { state.loop++; } catch (error) { childErrors.push(error); }
+      }
+    });
+    const write = () => { state.x = 1; };
+    expect(() => tracked ? watchEffect(write) : write()).toThrow("nested 101 deep");
+    expect(toRaw(state)).toEqual({ x: 1, a: 1, loop: 99, b: 0 });
+    expect(remote).toEqual(toRaw(state));
+    expect(parentErrors).toHaveLength(1);
+    expect(childErrors).toHaveLength(1);
+    expect(parentErrors[0]).toBe(childErrors[0]);
+    expect(paths).not.toContain("b");
+    armed = false;
+    state.b = 1;
+    expect(remote).toEqual({ x: 1, a: 1, loop: 99, b: 1 });
+  });
+}
+
+for (const reader of ["has", "keys"] as const) {
+  test(`Map ${reader} onTrigger hooks ignore value updates and report key changes`, () => {
+    const map = reactive(new Map([["a", 1]]));
+    let runs = 0;
+    const triggers: unknown[] = [];
+    const stop = watchEffect(() => {
+      runs++;
+      if (reader === "has") map.has("a");
+      else [...map.keys()];
+    }, { onTrigger: event => { triggers.push(event.key); } });
+    map.set("a", 2);
+    expect(runs).toBe(1);
+    expect(triggers).toEqual([]);
+    map.delete("a");
+    expect(runs).toBe(2);
+    expect(triggers).toHaveLength(1);
+    map.set("a", 3);
+    expect(runs).toBe(3);
+    expect(triggers).toHaveLength(2);
+    map.set("a", 4);
+    expect(runs).toBe(3);
+    expect(triggers).toHaveLength(2);
+    map.clear();
+    expect(runs).toBe(4);
+    expect(triggers).toHaveLength(3);
+    map.clear();
+    stop();
+    map.set("a", 5);
+    expect(triggers).toHaveLength(3);
+  });
+}

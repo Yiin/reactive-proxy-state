@@ -55,3 +55,26 @@ test("Map key readers skip value-update hook errors without changing event bytes
   const differentValue = runCase(lib, { ...spec, writes: [{ op: "map.set", key: "k1", value: 2 }] });
   expect(sameEventLog(spec, differentValue, previous)).toBe(false);
 });
+
+test("Map error allowances remove only a bounded subsequence of baseline lines", () => {
+  const spec = { effects: [
+    { kind: "trim", target: "map" },
+    { kind: "trim", target: "map" },
+    { kind: "read" },
+  ] };
+  const previous = { effectRuns: [4, 3, 3], log: [
+    "event a", "threw hook 0", "event b", "threw effect 0", "threw hook 1", "threw effect 2", "event c",
+  ] };
+  const compare = (log: string[], effectRuns = [3, 3, 3]) => sameEventLog(spec, { effectRuns, log }, previous);
+  expect(compare(previous.log)).toBe(true);
+  expect(compare(previous.log.filter((_, index) => index !== 1))).toBe(true);
+  expect(compare(previous.log.filter((_, index) => index !== 1 && index !== 3))).toBe(false);
+  expect(compare(previous.log.filter((_, index) => index !== 1 && index !== 3), [2, 3, 3])).toBe(true);
+  expect(compare(previous.log.filter(line => line !== "threw hook 1"), [2, 3, 3])).toBe(false);
+  expect(compare(previous.log.filter(line => line !== "threw effect 2"), [2, 2, 2])).toBe(false);
+  expect(compare(previous.log.filter(line => line !== "event b"), [2, 2, 2])).toBe(false);
+  expect(compare([...previous.log, "threw hook 0"])).toBe(false);
+  expect(compare(["threw hook 0", ...previous.log.filter(line => line !== "threw hook 0")])).toBe(false);
+  expect(compare(previous.log.map(line => line === "threw effect 0" ? "threw hook 0" : line))).toBe(false);
+  expect(compare(previous.log.filter(line => line !== "threw hook 0"), [4, 3, 3])).toBe(false);
+});

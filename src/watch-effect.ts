@@ -62,7 +62,8 @@ const ownerRefs = new WeakMap<Deps, WeakRef<Deps>>();
 
 const targetMap = new WeakMap<object, Deps>();
 // the same for the entries of Maps and Sets: collection -> Map key or Set value -> the
-// effects that read it with get or has. Apart from `targetMap`, so an entry never
+// effects that read its value with get or its membership with trackMembership.
+// Apart from `targetMap`, so an entry never
 // shares a dependency with a property ("get", "size"), and keyed by the entry itself,
 // as the collection keys it (1 and "1" are two entries, NaN is one)
 const entryMap = new WeakMap<object, Deps>();
