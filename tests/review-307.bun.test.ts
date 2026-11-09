@@ -247,6 +247,27 @@ describe("async roots never throw the bound's error out of the microtask", () =>
     expect(result.after).toEqual({ n: 5, version: 1 });
   });
 
+  test("an async loop through an effect stops at the depth: the effect's write keeps the listener's generation", async () => {
+    const logged: string[] = [];
+    const log = console.error;
+    console.error = (error: Error) => { logged.push(error.message); };
+    let armed = false;
+    const state: any = reactive({ a: 0, b: 0 }, event => { if (armed && event.path[0] === "a") state.b++; }, [], { async: true });
+    const stop = watchEffect(() => { state.a = state.b + 1; });
+    try {
+      await new Promise(resolve => setTimeout(resolve, 0));
+      armed = true;
+      state.a = 50;
+      await new Promise(resolve => setTimeout(resolve, 0));
+    } finally {
+      console.error = log;
+      stop();
+    }
+    expect(toRaw(state)).toEqual({ a: 101, b: 100 });
+    expect(logged).toHaveLength(1);
+    expect(logged[0]).toContain(DEPTH);
+  });
+
   test.skipIf(process.env.RPS_TEST_BUNDLE === undefined)("node: the same process exits 0 without an uncaughtException handler", async () => {
     const child = Bun.spawn(["node", new URL("./fixtures/async-bound-no-crash.ts", import.meta.url).pathname], { stdout: "pipe", stderr: "pipe", env: process.env });
     const output = await new Response(child.stdout).text();
