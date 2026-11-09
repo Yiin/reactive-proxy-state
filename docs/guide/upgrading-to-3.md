@@ -208,3 +208,19 @@ In 3.0.8, value updates also reran `has` and `keys()` readers.
 Value updates also leave their `onTrigger` hooks idle.
 Reader order follows trigger order in nested writes.
 A value update followed by a key deletion queues value readers before membership and keys readers.
+
+## 3.0.12: methods follow defineProperty
+
+An array proxy now handles `Object.defineProperty`.
+A define with a value works like the same write with `=`: it sends the same event and reruns the same effects.
+In 3.0.11 it sent nothing, and a method read before the define hid the defined one: `list.map()` still ran `Array.prototype.map`.
+A define of an accessor or of new flags reruns the effects that read the key, and sends no event.
+
+A Map or Set proxy reads an own property in place of its method, also when the property was defined after the proxy read the method.
+In 3.0.11, `set.add = fn` left `set.add()` adding values.
+
+The proxies cache only the methods of `Array.prototype`, `Map.prototype` and `Set.prototype`.
+A function added to `Object.prototype` is read again each time, so its removal is seen.
+A proxy that read a built-in method keeps it: a later replacement on the prototype does not change what that proxy gives.
+
+Every other write sends the same events as in 3.0.11.
