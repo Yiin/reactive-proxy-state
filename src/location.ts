@@ -1,4 +1,4 @@
-import { beginDelivery, checkListenerWrite, emitListener, endDelivery } from "./listener";
+import { checkListenerWrite, emitListener } from "./listener";
 import { ReactiveFlags } from "./constants";
 import type { EmitFunction, Path, StateEvent } from "./types";
 import {
@@ -566,7 +566,7 @@ export function deliver(root: LocationRoot, events: StateEvent[]): void {
     return;
   }
   const queue: Undelivered = (root.undelivered = { events, next: 0 });
-  const ownsDelivery = beginDelivery();
+  // The enclosing write retains the budget, allocated by the first listener write.
   let failed = false;
   let failure: unknown;
   try {
@@ -583,7 +583,6 @@ export function deliver(root: LocationRoot, events: StateEvent[]): void {
     }
   } finally {
     root.undelivered = undefined;
-    endDelivery(ownsDelivery);
   }
   if (failed) throw failure;
 }

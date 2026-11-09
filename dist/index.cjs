@@ -2073,7 +2073,6 @@ function deliver(root, events) {
     return;
   }
   const queue2 = root.undelivered = { events, next: 0 };
-  const ownsDelivery = beginDelivery();
   let failed = false;
   let failure;
   try {
@@ -2090,7 +2089,6 @@ function deliver(root, events) {
     }
   } finally {
     root.undelivered = undefined;
-    endDelivery(ownsDelivery);
   }
   if (failed)
     throw failure;
