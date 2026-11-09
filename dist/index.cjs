@@ -3133,6 +3133,15 @@ function wrapArray(arr, node) {
       if (prop === "__v_isReactive" /* IS_REACTIVE */)
         return true;
       track(target, prop);
+      const index = arrayIndex(prop);
+      if (index >= 0) {
+        const value2 = Reflect.get(target, prop, receiver);
+        if (!isObject3(value2))
+          return value2;
+        return wrapChild(value2, node, index);
+      }
+      if (prop === "length")
+        return Reflect.get(target, prop, receiver);
       const cached = methodCache[prop];
       if (cached !== undefined)
         return cached;
@@ -3441,16 +3450,8 @@ function wrapArray(arr, node) {
           };
           return methodCache[prop];
         }
-        case "length":
-          return Reflect.get(target, prop, receiver);
       }
       const value = Reflect.get(target, prop, receiver);
-      const index = arrayIndex(prop);
-      if (index >= 0) {
-        if (!isObject3(value))
-          return value;
-        return wrapChild(value, node, index);
-      }
       const isNumericIndex = typeof prop === "string" && !isNaN(parseInt(prop, 10));
       if (isNumericIndex) {
         if (!isObject3(value))

@@ -275,6 +275,17 @@ export function wrapArray<T extends any[]>(arr: T, node: LocationNode): T {
 
       track(target, prop);
 
+      // an array index ("0", "17"), parsed once. Index reads come first: they
+      // are the most frequent, and an index never names a cached method
+      const index = arrayIndex(prop);
+      if (index >= 0) {
+        const value = Reflect.get(target, prop, receiver);
+        if (!isObject(value)) return value;
+        // recursively wrap nested structures
+        return wrapChild(value, node, index);
+      }
+      if (prop === "length") return Reflect.get(target, prop, receiver);
+
       const cached = methodCache[prop];
       if (cached !== undefined) return cached;
 
@@ -578,19 +589,9 @@ export function wrapArray<T extends any[]>(arr: T, node: LocationNode): T {
           };
           return methodCache[prop];
         }
-        case "length":
-          return Reflect.get(target, prop, receiver);
       }
 
       const value = Reflect.get(target, prop, receiver);
-
-      // an array index ("0", "17"), parsed once
-      const index = arrayIndex(prop);
-      if (index >= 0) {
-        if (!isObject(value)) return value;
-        // recursively wrap nested structures
-        return wrapChild(value, node, index);
-      }
 
       // other numeric-looking keys ("1.5", "01") are tracked like indexes
       const isNumericIndex = typeof prop === "string" && !isNaN(parseInt(prop, 10));
