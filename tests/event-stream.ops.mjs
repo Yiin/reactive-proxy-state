@@ -50,7 +50,7 @@ function encode(lib, value, seen) {
 }
 
 /** Text of one event, its fields in a fixed order. */
-function eventText(lib, event) {
+export function eventText(lib, event) {
   const seen = new Map();
   const fields = Object.keys(event).sort().map((field) => `${field}=${encode(lib, event[field], seen)}`);
   return fields.join(" ");
