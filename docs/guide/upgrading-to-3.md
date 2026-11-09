@@ -214,7 +214,8 @@ A value update followed by a key deletion queues value readers before membership
 An array proxy now handles `Object.defineProperty`.
 A define with a value works like the same write with `=`: it sends the same event and reruns the same effects.
 In 3.0.11 it sent nothing, and a method read before the define hid the defined one: `list.map()` still ran `Array.prototype.map`.
-A define of an accessor or of new flags reruns the effects that read the key, and sends no event.
+A define of an accessor reruns the effects that read the key, and sends no event.
+A define of flags alone, as `Object.freeze` makes for each key, changes no value: it reruns nothing and sends nothing.
 
 A Map or Set proxy reads an own property in place of its method, also when the property was defined after the proxy read the method.
 In 3.0.11, `set.add = fn` left `set.add()` adding values.

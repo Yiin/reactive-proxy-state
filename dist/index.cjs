@@ -3604,6 +3604,8 @@ function wrapArray(arr, node) {
     defineProperty(target, prop, descriptor) {
       if ("value" in descriptor)
         return handler.set(target, prop, descriptor.value, proxy, descriptor);
+      if (!("get" in descriptor) && !("set" in descriptor))
+        return Reflect.defineProperty(target, prop, descriptor);
       const oldLength = target.length;
       const result = Reflect.defineProperty(target, prop, descriptor);
       if (result) {

@@ -793,7 +793,9 @@ export function wrapArray<T extends any[]>(arr: T, node: LocationNode): T {
     defineProperty(target: T, prop: string | symbol, descriptor: PropertyDescriptor): boolean {
       // a value is written as `set` writes it: the same event, and the same effects rerun
       if ("value" in descriptor) return handler.set(target, prop, descriptor.value, proxy, descriptor);
-      // an accessor, or new flags: effects rerun, and no event is sent
+      // new flags alone change no value (`Object.freeze` ends here for each key)
+      if (!("get" in descriptor) && !("set" in descriptor)) return Reflect.defineProperty(target, prop, descriptor);
+      // an accessor: effects rerun, and no event is sent
       // (an accessor added later is outside the supported input, see `writesThroughSetter`)
       const oldLength = target.length;
       const result = Reflect.defineProperty(target, prop, descriptor);

@@ -206,6 +206,23 @@ export function methodCacheCases(lib) {
     stop();
   };
 
+  cases["new flags alone through an array proxy, and Object.freeze, rerun nothing and send nothing"] = () => {
+    const { log, emit } = eventLog();
+    const state = reactive({ list: [{ n: 1 }, 2, 3] }, emit);
+    let runs = 0;
+    const stop = watchEffect(() => {
+      runs++;
+      for (const item of state.list) item;
+    });
+    log.length = 0;
+    Object.defineProperty(state.list, "1", { enumerable: false });
+    Object.freeze(state.list);
+    assert.equal(Object.isFrozen(toRaw(state.list)), true);
+    assert.equal(runs, 1);
+    assert.deepEqual(log, []);
+    stop();
+  };
+
   cases["defineProperty with the same value through an array proxy sets the flags and sends nothing"] = () => {
     const { log, emit } = eventLog();
     const state = reactive({ list: [{ n: 1 }, 2] }, emit);
