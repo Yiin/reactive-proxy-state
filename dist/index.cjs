@@ -40,6 +40,7 @@ __export(exports_src, {
   triggerCleared: () => triggerCleared,
   triggerArray: () => triggerArray,
   trigger: () => trigger,
+  trackingVersion: () => trackingVersion,
   trackVueReactiveEvents: () => trackVueReactiveEvents,
   trackKeys: () => trackKeys,
   trackEntry: () => trackEntry,
@@ -58,6 +59,7 @@ __export(exports_src, {
   isReactive: () => isReactive,
   isComputed: () => isComputed,
   getProxyStats: () => getProxyStats,
+  endWrite: () => endWrite,
   dependencyCounts: () => dependencyCounts,
   deepToRaw: () => deepToRaw,
   deepEqual: () => deepEqual,
@@ -67,6 +69,7 @@ __export(exports_src, {
   createBridgeEmitter: () => createBridgeEmitter,
   computed: () => computed,
   cleanupEffect: () => cleanupEffect,
+  beginWrite: () => beginWrite,
   activeEffect: () => activeEffect,
   UnsupportedStateError: () => UnsupportedStateError,
   SnapshotLimitError: () => SnapshotLimitError,
@@ -2367,8 +2370,10 @@ function restoreEvicted(node) {
 
 // src/watch-effect.ts
 var activeEffect = null;
+var trackingVersion = 0;
 function setActiveEffect(effect) {
   activeEffect = effect;
+  trackingVersion++;
 }
 
 class Dep extends Set {
@@ -2380,13 +2385,17 @@ class Dep extends Set {
     this.key = key;
   }
 }
+var ownerRefs = new WeakMap;
 var targetMap = new WeakMap;
 var entryMap = new WeakMap;
 var emptiedDeps = [];
 var emptiedCount = 0;
 function releaseDep(dep) {
-  if (dep.size === 0 && dep.owner.get(dep.key) === dep)
-    dep.owner.delete(dep.key);
+  if (dep.size !== 0)
+    return;
+  const owner = dep.owner instanceof WeakRef ? dep.owner.deref() : dep.owner;
+  if (owner?.get(dep.key) === dep)
+    owner.delete(dep.key);
 }
 function releaseEmptied(from) {
   for (let i = from;i < emptiedCount; i++) {
@@ -2423,6 +2432,7 @@ function detachEffect(effect, defer) {
   dependencies.clear();
 }
 function cleanupEffect(effect) {
+  trackingVersion++;
   detachEffect(effect, false);
 }
 function runCleanupFunctions(effect) {
@@ -2445,7 +2455,20 @@ function depFor(maps, target, key) {
   }
   let dep = deps.get(key);
   if (dep === undefined) {
-    dep = new Dep(deps, key);
+    let owner = deps;
+    if (deps.size > 0) {
+      let ref = ownerRefs.get(deps);
+      if (ref === undefined) {
+        ref = new WeakRef(deps);
+        ownerRefs.set(deps, ref);
+      }
+      if (deps.size === 1)
+        deps.forEach((existing) => {
+          existing.owner = ref;
+        });
+      owner = ref;
+    }
+    dep = new Dep(owner, key);
     deps.set(key, dep);
   }
   return dep;
@@ -2478,6 +2501,7 @@ function trackKeys(target) {
   track(target, keysKey);
 }
 var queue = [];
+var triggerNotifications = [];
 var flushing = false;
 var batchDepth = 0;
 var flushCount = 0;
@@ -2488,8 +2512,29 @@ function flushEffects() {
   let failed = false;
   let failure;
   let index = 0;
+  let notifications = 0;
   try {
-    for (;index < queue.length; index++) {
+    for (;index < queue.length || triggerNotifications.length > 0; index++) {
+      if (triggerNotifications.length > 0) {
+        for (let next = 0;next < triggerNotifications.length; next++) {
+          try {
+            if (++notifications > MAX_FLUSH_RUNS) {
+              throw new RangeError("reactive-proxy-state: trigger hooks keep writing new values in one flush");
+            }
+            triggerNotifications[next]();
+          } catch (error) {
+            if (!failed) {
+              failed = true;
+              failure = error;
+            }
+          }
+          if (notifications > MAX_FLUSH_RUNS)
+            break;
+        }
+        triggerNotifications.length = 0;
+      }
+      if (index >= queue.length)
+        break;
       const effect = queue[index];
       effect.queued = false;
       if (!effect.active)
@@ -2522,6 +2567,8 @@ function flushEffects() {
     for (;index < queue.length; index++)
       queue[index].queued = false;
     queue.length = 0;
+    if (triggerNotifications.length > 0)
+      triggerNotifications.length = 0;
     flushing = false;
   }
   if (failed)
@@ -2531,7 +2578,15 @@ function startBatch() {
   batchDepth++;
 }
 function endBatch() {
-  if (--batchDepth === 0 && !flushing && queue.length > 0)
+  if (--batchDepth === 0 && !flushing && (queue.length > 0 || triggerNotifications.length > 0))
+    flushEffects();
+}
+function beginWrite() {
+  startBatch();
+}
+function endWrite() {
+  batchDepth--;
+  if (!flushing && (queue.length > 0 || triggerNotifications.length > 0))
     flushEffects();
 }
 function queueEffects(dep, target, key) {
@@ -2540,8 +2595,12 @@ function queueEffects(dep, target, key) {
   dep.forEach((effect) => {
     if (effect === activeEffect || !effect.active)
       return;
-    if (effect.options?.onTrigger) {
-      effect.options.onTrigger({ effect: effect._rawCallback, target, key, type: "trigger" });
+    const onTrigger = effect.options?.onTrigger;
+    if (onTrigger) {
+      triggerNotifications.push(() => {
+        if (effect.active)
+          onTrigger({ effect: effect._rawCallback, target, key, type: "trigger" });
+      });
     }
     if (effect.invalidate !== undefined) {
       effect.invalidate();
@@ -2865,24 +2924,26 @@ function trackIteration(target) {
 
 class ArrayProxyIterator {
   node;
-  entries;
+  kind;
   target;
   index = 0;
-  constructor(target, node, entries) {
+  constructor(target, node, kind) {
     this.node = node;
-    this.entries = entries;
+    this.kind = kind;
     this.target = target;
   }
   next() {
     const target = this.target;
     if (target !== undefined) {
+      trackIteration(target);
       const index = this.index;
       if (index < target.length) {
         this.index = index + 1;
-        trackIteration(target);
+        if (this.kind === "keys")
+          return { value: index, done: false };
         const value = target[index];
         const item = isObject3(value) ? wrapChild(value, this.node, index) : value;
-        return { value: this.entries ? [index, item] : item, done: false };
+        return { value: this.kind === "entries" ? [index, item] : item, done: false };
       }
       this.target = undefined;
     }
@@ -2912,6 +2973,8 @@ function wrapArray(arr, node) {
         case "reverse":
         case "fill":
         case "copyWithin": {
+          if (hasOwn.call(target, prop))
+            break;
           const method = Array.prototype[prop];
           methodCache[prop] = function(...args) {
             if (prop === "fill" && isObject3(args[0]))
@@ -2933,18 +2996,25 @@ function wrapArray(arr, node) {
               copyPayloadAfter(event, located, target, after);
             writeReorder(target, reorder);
             relinkReorder(node, target, before, prop === "fill" ? [args[0]] : undefined);
+            beginWrite();
             try {
+              triggerArray(target, reorder.first, reorder.last, false, before);
               if (event !== undefined)
                 dispatch(located, event);
             } finally {
-              triggerArray(target, reorder.first, reorder.last, false, before);
-              evictRemoved(before);
+              try {
+                evictRemoved(before);
+              } finally {
+                endWrite();
+              }
             }
             return proxy;
           };
           return methodCache[prop];
         }
         case "push":
+          if (hasOwn.call(target, prop))
+            break;
           methodCache[prop] = function(...items) {
             unwrapItems(items);
             const oldLength = target.length;
@@ -2965,17 +3035,21 @@ function wrapArray(arr, node) {
             const newLength = target.length;
             if (items.length > 0) {
               relinkArray(node, target, oldLength, undefined, items, copied === 2 /* Fresh */);
+              beginWrite();
               try {
+                triggerArray(target, oldLength, newLength, oldLength !== newLength);
                 if (event !== undefined)
                   dispatch(located, event);
               } finally {
-                triggerArray(target, oldLength, newLength, oldLength !== newLength);
+                endWrite();
               }
             }
             return result;
           };
           return methodCache[prop];
         case "pop":
+          if (hasOwn.call(target, prop))
+            break;
           methodCache[prop] = function() {
             if (target.length === 0)
               return;
@@ -2998,18 +3072,25 @@ function wrapArray(arr, node) {
             const newLength = target.length;
             if (isObject3(oldValue))
               detachPlace(oldValue, node, poppedIndex);
+            beginWrite();
             try {
+              triggerArray(target, newLength, oldLength, oldLength !== newLength);
               if (event !== undefined)
                 dispatch(located, event);
             } finally {
-              if (isObject3(oldValue))
-                evictDeep(oldValue);
-              triggerArray(target, newLength, oldLength, oldLength !== newLength);
+              try {
+                if (isObject3(oldValue))
+                  evictDeep(oldValue);
+              } finally {
+                endWrite();
+              }
             }
             return result;
           };
           return methodCache[prop];
         case "shift":
+          if (hasOwn.call(target, prop))
+            break;
           methodCache[prop] = function() {
             if (target.length === 0)
               return;
@@ -3030,18 +3111,25 @@ function wrapArray(arr, node) {
             }
             const result = target.shift();
             relinkArray(node, target, 0, removed);
+            beginWrite();
             try {
+              triggerSplice(target, 0, removed, 0, oldLength);
               if (event !== undefined)
                 dispatch(located, event);
             } finally {
-              if (isObject3(oldValue))
-                evictDeep(oldValue);
-              triggerSplice(target, 0, removed, 0, oldLength);
+              try {
+                if (isObject3(oldValue))
+                  evictDeep(oldValue);
+              } finally {
+                endWrite();
+              }
             }
             return result;
           };
           return methodCache[prop];
         case "unshift":
+          if (hasOwn.call(target, prop))
+            break;
           methodCache[prop] = function(...items) {
             unwrapItems(items);
             const oldLength = target.length;
@@ -3061,17 +3149,21 @@ function wrapArray(arr, node) {
             const result = target.unshift(...items);
             if (items.length > 0) {
               relinkArray(node, target, 0, undefined, items, copied === 2 /* Fresh */);
+              beginWrite();
               try {
+                triggerSplice(target, 0, noItems, items.length, oldLength);
                 if (event !== undefined)
                   dispatch(located, event);
               } finally {
-                triggerSplice(target, 0, noItems, items.length, oldLength);
+                endWrite();
               }
             }
             return result;
           };
           return methodCache[prop];
         case "splice":
+          if (hasOwn.call(target, prop))
+            break;
           methodCache[prop] = function(...args) {
             const oldLength = target.length;
             const actualStart = args.length === 0 ? 0 : clampIndex(toIntegerOrInfinity(args[0]), oldLength);
@@ -3097,12 +3189,17 @@ function wrapArray(arr, node) {
             const deletedItems = target.splice(actualStart, actualDeleteCount, ...items);
             if (changes) {
               relinkArray(node, target, actualStart, deletedItems, items, copied === 2 /* Fresh */);
+              beginWrite();
               try {
+                triggerSplice(target, actualStart, deletedItems, items.length, oldLength);
                 if (event !== undefined)
                   dispatch(located, event);
               } finally {
-                evictRemoved(deletedItems);
-                triggerSplice(target, actualStart, deletedItems, items.length, oldLength);
+                try {
+                  evictRemoved(deletedItems);
+                } finally {
+                  endWrite();
+                }
               }
             }
             return deletedItems;
@@ -3110,6 +3207,8 @@ function wrapArray(arr, node) {
           return methodCache[prop];
         case "find":
         case "findLast": {
+          if (hasOwn.call(target, prop))
+            break;
           const findIndex = prop === "find" ? Array.prototype.findIndex : Array.prototype.findLastIndex;
           methodCache[prop] = function(predicate, thisArg) {
             trackIteration(target);
@@ -3126,6 +3225,8 @@ function wrapArray(arr, node) {
         case "indexOf":
         case "lastIndexOf":
         case "includes": {
+          if (hasOwn.call(target, prop))
+            break;
           const method = Array.prototype[prop];
           methodCache[prop] = function(searched, fromIndex) {
             trackIteration(target);
@@ -3141,6 +3242,8 @@ function wrapArray(arr, node) {
           return methodCache[prop];
         }
         case "at": {
+          if (hasOwn.call(target, prop))
+            break;
           methodCache[prop] = function(index2) {
             trackIteration(target);
             let idx = Number(index2);
@@ -3159,11 +3262,14 @@ function wrapArray(arr, node) {
         }
         case Symbol.iterator:
         case "values":
-        case "entries": {
-          const entries = prop === "entries";
+        case "entries":
+        case "keys": {
+          if (hasOwn.call(target, prop))
+            break;
+          const kind = prop === "entries" ? "entries" : prop === "keys" ? "keys" : "values";
           methodCache[prop] = function() {
             trackIteration(target);
-            return new ArrayProxyIterator(target, node, entries);
+            return new ArrayProxyIterator(target, node, kind);
           };
           return methodCache[prop];
         }
@@ -3228,13 +3334,25 @@ function wrapArray(arr, node) {
           if (isObject3(value))
             attachValue(value, node, key, copied === 2 /* Fresh */, located && oldValue, held);
         }
+        beginWrite();
         try {
+          const newLength = target.length;
+          if (sameNaN) {} else if (index >= 0) {
+            triggerArray(target, index, index + 1, newLength !== oldLength);
+          } else if (prop === "length") {
+            if (newLength !== oldLength)
+              triggerArray(target, newLength, oldLength, true);
+          } else {
+            if (methodCache[prop] !== undefined)
+              methodCache[prop] = undefined;
+            trigger(target, prop);
+          }
           if (grows) {
             if (located !== undefined) {
               const oldLength2 = Number(oldValue);
-              const newLength = Number(value);
+              const newLength2 = Number(value);
               const events = [];
-              for (let i = oldLength2;i < newLength; i++) {
+              for (let i = oldLength2;i < newLength2; i++) {
                 const index2 = String(i);
                 for (let j = 0;j < located.paths.length; j++) {
                   events.push({ action: "set", path: [...located.paths[j], index2], newValue: undefined });
@@ -3247,21 +3365,14 @@ function wrapArray(arr, node) {
             dispatch(located, event);
           }
         } finally {
-          if (isObject3(oldValue) && oldValue !== value) {
-            evictDeep(oldValue);
-          }
-          if (truncated !== undefined)
-            evictRemoved(truncated);
-          const newLength = target.length;
-          if (sameNaN) {} else if (index >= 0) {
-            triggerArray(target, index, index + 1, newLength !== oldLength);
-          } else if (prop === "length") {
-            if (newLength !== oldLength)
-              triggerArray(target, newLength, oldLength, true);
-          } else {
-            if (methodCache[prop] !== undefined)
-              methodCache[prop] = undefined;
-            trigger(target, prop);
+          try {
+            if (isObject3(oldValue) && oldValue !== value) {
+              evictDeep(oldValue);
+            }
+            if (truncated !== undefined)
+              evictRemoved(truncated);
+          } finally {
+            endWrite();
           }
         }
       }
@@ -3281,10 +3392,8 @@ function wrapArray(arr, node) {
       if (hadProperty && result) {
         if (isObject3(oldValue))
           detachPlace(oldValue, node, placeKey(prop));
+        beginWrite();
         try {
-          if (event !== undefined)
-            dispatch(located, event);
-        } finally {
           const index = arrayIndex(prop);
           if (index >= 0)
             triggerArray(target, index, index + 1, false);
@@ -3293,8 +3402,15 @@ function wrapArray(arr, node) {
               methodCache[prop] = undefined;
             trigger(target, prop);
           }
-          if (isObject3(oldValue))
-            evictDeep(oldValue);
+          if (event !== undefined)
+            dispatch(located, event);
+        } finally {
+          try {
+            if (isObject3(oldValue))
+              evictDeep(oldValue);
+          } finally {
+            endWrite();
+          }
         }
       }
       return result;
@@ -3311,6 +3427,39 @@ function wrapArray(arr, node) {
 function isObject4(value) {
   return value !== null && typeof value === "object";
 }
+
+class MapProxyIterator {
+  node;
+  kind;
+  target;
+  trackedAt = -1;
+  iterator;
+  constructor(target, node, kind) {
+    this.node = node;
+    this.kind = kind;
+    this.target = target;
+    this.iterator = target.entries();
+  }
+  next() {
+    if (this.target === undefined)
+      return { value: undefined, done: true };
+    if (activeEffect !== null && this.trackedAt !== trackingVersion) {
+      track(this.target, Symbol.iterator);
+      this.trackedAt = trackingVersion;
+    }
+    const step = this.iterator.next();
+    if (step.done) {
+      this.target = undefined;
+      return step;
+    }
+    const [key, value] = step.value;
+    if (this.kind === "keys")
+      return { value: key, done: false };
+    const wrapped = isObject4(value) ? wrapChild(value, this.node, key) : value;
+    return { value: this.kind === "values" ? wrapped : [isObject4(key) ? wrapUnplaced(key) : key, wrapped], done: false };
+  }
+}
+Object.setPrototypeOf(MapProxyIterator.prototype, Object.getPrototypeOf(Object.getPrototypeOf(new Map().entries())));
 function wrapMap(map, node) {
   const cachedProxy = wrapperCache.get(map);
   if (cachedProxy)
@@ -3362,16 +3511,39 @@ function wrapMap(map, node) {
             detachPlace(oldValue, node, key);
           if (isObject4(value2))
             attachValue(value2, node, key, copied === 2 /* Fresh */, located && oldValue, held);
+          beginWrite();
           try {
+            if (!existed || oldValue === oldValue || value2 === value2)
+              triggerCollection(target, key, oldSize !== newSize);
             if (event !== undefined)
               dispatch(located, event);
           } finally {
-            if (!existed || oldValue === oldValue || value2 === value2)
-              triggerCollection(target, key, oldSize !== newSize);
-            if (isObject4(oldValue))
-              evictDeep(oldValue);
+            try {
+              if (isObject4(oldValue))
+                evictDeep(oldValue);
+            } finally {
+              endWrite();
+            }
           }
           return receiver;
+        };
+        return methodCache[prop];
+      }
+      if (prop === "getOrInsert" || prop === "getOrInsertComputed") {
+        methodCache[prop] = function(key, value2) {
+          if (prop === "getOrInsertComputed" && typeof value2 !== "function") {
+            throw new TypeError("Map.getOrInsertComputed callback must be a function");
+          }
+          if (Object.is(key, -0))
+            key = 0;
+          if (proxy.has(key))
+            return proxy.get(key);
+          const inserted = prop === "getOrInsertComputed" ? value2(key) : value2;
+          const stored = isObject4(inserted) ? unwrapForStore(inserted) : inserted;
+          proxy.set(key, stored);
+          if (!isObject4(stored))
+            return stored;
+          return target.get(key) === stored ? wrapChild(stored, node, key) : wrapUnplaced(stored);
         };
         return methodCache[prop];
       }
@@ -3403,13 +3575,18 @@ function wrapMap(map, node) {
               indexRemoved(target, key);
             if (isObject4(oldValue))
               detachPlace(oldValue, node, key);
+            beginWrite();
             try {
+              triggerCollection(target, key, oldSize !== newSize);
               if (event !== undefined)
                 dispatch(located, event);
             } finally {
-              triggerCollection(target, key, oldSize !== newSize);
-              if (isObject4(oldValue))
-                evictDeep(oldValue);
+              try {
+                if (isObject4(oldValue))
+                  evictDeep(oldValue);
+              } finally {
+                endWrite();
+              }
             }
           }
           return result;
@@ -3430,7 +3607,9 @@ function wrapMap(map, node) {
               detachPlace(value2, node, key);
           }
           const located = locate(node);
+          beginWrite();
           try {
+            triggerCleared(target, removed.map(([key]) => key));
             if (located !== undefined) {
               dispatch(located, {
                 action: "map-clear",
@@ -3439,10 +3618,13 @@ function wrapMap(map, node) {
               });
             }
           } finally {
-            triggerCleared(target, removed.map(([key]) => key));
-            for (const [, value2] of removed) {
-              if (isObject4(value2))
-                evictDeep(value2);
+            try {
+              for (const [, value2] of removed) {
+                if (isObject4(value2))
+                  evictDeep(value2);
+              }
+            } finally {
+              endWrite();
             }
           }
         };
@@ -3475,20 +3657,8 @@ function wrapMap(map, node) {
           };
           return methodCache[prop];
         }
-        methodCache[prop] = function* () {
-          track(target, Symbol.iterator);
-          for (const [key, value2] of target.entries()) {
-            if (prop === "keys") {
-              yield key;
-              continue;
-            }
-            const wrappedValue = isObject4(value2) ? wrapChild(value2, node, key) : value2;
-            if (prop === "values") {
-              yield wrappedValue;
-              continue;
-            }
-            yield [isObject4(key) ? wrapUnplaced(key) : key, wrappedValue];
-          }
+        methodCache[prop] = function() {
+          return new MapProxyIterator(target, node, prop);
         };
         return methodCache[prop];
       }
@@ -3528,6 +3698,39 @@ var setReaders = new Set([
   "isSupersetOf",
   "isDisjointFrom"
 ]);
+
+class SetProxyIterator {
+  node;
+  entries;
+  target;
+  trackedAt = -1;
+  iterator;
+  constructor(target, node, entries) {
+    this.node = node;
+    this.entries = entries;
+    this.target = target;
+    this.iterator = target.values();
+  }
+  next() {
+    if (this.target === undefined)
+      return { value: undefined, done: true };
+    if (activeEffect !== null && this.trackedAt !== trackingVersion) {
+      track(this.target, Symbol.iterator);
+      this.trackedAt = trackingVersion;
+    }
+    const step = this.iterator.next();
+    if (step.done) {
+      this.target = undefined;
+      return step;
+    }
+    if (isObject5(step.value))
+      step.value = wrapChild(step.value, this.node, undefined);
+    if (this.entries)
+      return { value: [step.value, step.value], done: false };
+    return step;
+  }
+}
+Object.setPrototypeOf(SetProxyIterator.prototype, Object.getPrototypeOf(Object.getPrototypeOf(new Set().values())));
 function wrapSet(set, node) {
   const cachedProxy = wrapperCache.get(set);
   if (cachedProxy)
@@ -3568,11 +3771,13 @@ function wrapSet(set, node) {
               indexAdded(target, value2);
             if (isObject5(value2))
               attachValue(value2, node, undefined, copied === 2 /* Fresh */);
+            beginWrite();
             try {
+              triggerCollection(target, value2, oldSize !== newSize);
               if (event !== undefined)
                 dispatch(located, event);
             } finally {
-              triggerCollection(target, value2, oldSize !== newSize);
+              endWrite();
             }
           }
           return receiver;
@@ -3604,13 +3809,18 @@ function wrapSet(set, node) {
                 indexRemoved(target, value2);
               if (isObject5(value2))
                 detachPlace(value2, node, undefined);
+              beginWrite();
               try {
+                triggerCollection(target, value2, oldSize !== newSize);
                 if (event !== undefined)
                   dispatch(located, event);
               } finally {
-                triggerCollection(target, value2, oldSize !== newSize);
-                if (isObject5(value2))
-                  evictDeep(value2);
+                try {
+                  if (isObject5(value2))
+                    evictDeep(value2);
+                } finally {
+                  endWrite();
+                }
               }
             }
             return result;
@@ -3633,7 +3843,9 @@ function wrapSet(set, node) {
               detachPlace(member, node, undefined);
           }
           const located = locate(node);
+          beginWrite();
           try {
+            triggerCleared(target, removed);
             if (located !== undefined) {
               dispatch(located, {
                 action: "set-clear",
@@ -3642,10 +3854,13 @@ function wrapSet(set, node) {
               });
             }
           } finally {
-            triggerCleared(target, removed);
-            for (const member of removed) {
-              if (isObject5(member))
-                evictDeep(member);
+            try {
+              for (const member of removed) {
+                if (isObject5(member))
+                  evictDeep(member);
+              }
+            } finally {
+              endWrite();
             }
           }
         };
@@ -3659,7 +3874,6 @@ function wrapSet(set, node) {
         return methodCache[prop];
       }
       if (prop === "values" || prop === Symbol.iterator || prop === "entries" || prop === "keys" || prop === "forEach") {
-        const originalMethod = Reflect.get(target, prop, receiver);
         if (prop === "forEach") {
           methodCache[prop] = (callbackfn, thisArg) => {
             const valuesIterator = proxy.values();
@@ -3669,21 +3883,8 @@ function wrapSet(set, node) {
           };
           return methodCache[prop];
         }
-        methodCache[prop] = function* (...args) {
-          track(target, Symbol.iterator);
-          const iterator = originalMethod.apply(target, args);
-          for (const entry of iterator) {
-            let valueToWrap = entry;
-            if (prop === "entries") {
-              valueToWrap = entry[1];
-            }
-            const wrappedValue = isObject5(valueToWrap) ? wrapChild(valueToWrap, node, undefined) : valueToWrap;
-            if (prop === "entries") {
-              yield [wrappedValue, wrappedValue];
-            } else {
-              yield wrappedValue;
-            }
-          }
+        methodCache[prop] = function() {
+          return new SetProxyIterator(target, node, prop === "entries");
         };
         return methodCache[prop];
       }
@@ -3842,7 +4043,7 @@ function wrapObject(obj, node, options) {
       if (isObject6(value))
         value = unwrapForStore(value);
       const oldValue = target[prop];
-      if (oldValue === value)
+      if (oldValue === value && hasOwn.call(target, prop))
         return true;
       if (!options?.async && isObject6(oldValue) && isObject6(value) && deepEqual(oldValue, value))
         return true;
@@ -3870,16 +4071,21 @@ function wrapObject(obj, node, options) {
           detachPlace(oldValue, node, prop);
         if (isObject6(value))
           attachValue(value, node, prop, copied === 2 /* Fresh */, located && oldValue, held);
+        beginWrite();
         try {
-          if (event !== undefined)
-            dispatch(located, event);
-        } finally {
           if (!had && hasOwn.call(target, prop))
             triggerKeyChange(target);
           else if (oldValue === oldValue || value === value)
             trigger(target, prop);
-          if (isObject6(oldValue)) {
-            evictDeep(oldValue);
+          if (event !== undefined)
+            dispatch(located, event);
+        } finally {
+          try {
+            if (isObject6(oldValue)) {
+              evictDeep(oldValue);
+            }
+          } finally {
+            endWrite();
           }
         }
       }
@@ -3903,13 +4109,18 @@ function wrapObject(obj, node, options) {
       if (hadProperty && result) {
         if (isObject6(oldValue))
           detachPlace(oldValue, node, prop);
+        beginWrite();
         try {
+          triggerKeyChange(target);
           if (event !== undefined)
             dispatch(located, event);
         } finally {
-          triggerKeyChange(target);
-          if (isObject6(oldValue)) {
-            evictDeep(oldValue);
+          try {
+            if (isObject6(oldValue)) {
+              evictDeep(oldValue);
+            }
+          } finally {
+            endWrite();
           }
         }
       }
