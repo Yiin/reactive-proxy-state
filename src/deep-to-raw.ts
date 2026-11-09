@@ -20,10 +20,13 @@ export function deepToRaw<T>(input: T, seen: WeakMap<any, any> = new WeakMap()):
   }
 
   if (Array.isArray(input)) {
+    // the raw items: the iterator of an array proxy gives a proxy per object
+    const source: any[] = toRaw(input as any);
     const result: any[] = [];
     seen.set(input, result);
-    for (const item of input) {
-      result.push(deepToRaw(item, seen));
+    seen.set(source, result);
+    for (let i = 0; i < source.length; i++) {
+      result.push(deepToRaw(source[i], seen));
     }
     return result as any;
   }

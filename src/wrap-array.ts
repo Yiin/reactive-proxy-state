@@ -5,6 +5,7 @@ import {
   wrapperCache,
   globalSeen,
   proxyStats,
+  toRaw,
 } from "./utils";
 import { wrapChild } from "./reactive";
 import {
@@ -24,7 +25,7 @@ import {
   copyPayloadAfter,
   copyPayloadReaching,
 } from "./location";
-import { track, trigger } from "./watch-effect";
+import { activeEffect, track, trigger } from "./watch-effect";
 import { ReactiveFlags } from "./constants";
 
 // avoid repeated typeof checks
@@ -194,6 +195,54 @@ function evictRemoved(removed: readonly unknown[]): void {
     if (isObject(removed[i])) evictDeep(removed[i]);
   }
 }
+
+/** Track what a loop over `target` reads: its items and its length. */
+function trackIteration(target: unknown[]): void {
+  if (activeEffect === null) return;
+  track(target, Symbol.iterator);
+  track(target, "length");
+}
+
+/**
+ * The iterator of `[Symbol.iterator]()`, `values()` and `entries()` of an
+ * array proxy, so also of `for...of`, spread, `Array.from` and
+ * destructuring. It steps like the native one: the length is read at every
+ * step, and once done it stays done. An item is what an index read gives:
+ * the proxy of an object, placed at its index, so a write through it emits
+ * at the index the item holds then, also after a splice moved it. 2.0.0 and
+ * 3.0.0 iterated the raw array, and a write through a raw item sent nothing.
+ */
+class ArrayProxyIterator {
+  private target: unknown[] | undefined;
+  private index = 0;
+
+  constructor(target: unknown[], private readonly node: LocationNode, private readonly entries: boolean) {
+    this.target = target;
+  }
+
+  next(): IteratorResult<unknown> {
+    const target = this.target;
+    if (target !== undefined) {
+      const index = this.index;
+      if (index < target.length) {
+        this.index = index + 1;
+        if (activeEffect !== null) track(target, String(index));
+        const value = target[index];
+        const item = isObject(value) ? wrapChild(value, this.node, index) : value;
+        return { value: this.entries ? [index, item] : item, done: false };
+      }
+      this.target = undefined;
+    }
+    return { value: undefined, done: true };
+  }
+}
+
+// %IteratorPrototype% gives `[Symbol.iterator]() { return this }` and the
+// iterator helpers (`map`, `toArray`) where the engine has them
+Object.setPrototypeOf(
+  ArrayProxyIterator.prototype,
+  Object.getPrototypeOf(Object.getPrototypeOf([][Symbol.iterator]()))
+);
 
 export function wrapArray<T extends any[]>(arr: T, node: LocationNode): T {
   // reuse existing proxy if available for performance
@@ -424,20 +473,37 @@ export function wrapArray<T extends any[]>(arr: T, node: LocationNode): T {
           };
           return methodCache[prop];
         // special wrapper for find to ensure returned element is reactive
-        case "find": {
-          track(target, Symbol.iterator);
-          if (!methodCache[prop]) {
-            methodCache[prop] = function (
-              predicate: (value: any, index: number, obj: any[]) => boolean,
-              thisArg?: any
-            ) {
-              const idx = Array.prototype.findIndex.call(target, predicate, thisArg);
-              if (idx === -1) return undefined;
-              const value = target[idx];
-              if (!isObject(value)) return value;
-              return wrapChild(value, node, idx);
-            };
-          }
+        case "find":
+        case "findLast": {
+          const findIndex = prop === "find" ? Array.prototype.findIndex : Array.prototype.findLastIndex;
+          methodCache[prop] = function (
+            predicate: (value: any, index: number, obj: any[]) => boolean,
+            thisArg?: any
+          ) {
+            trackIteration(target);
+            const idx = findIndex.call(target, predicate, thisArg);
+            if (idx === -1) return undefined;
+            const value = target[idx];
+            if (!isObject(value)) return value;
+            return wrapChild(value, node, idx);
+          };
+          return methodCache[prop];
+        }
+        // the proxies that index reads, `find` and iteration give are found
+        // where their raw objects are
+        case "indexOf":
+        case "lastIndexOf":
+        case "includes": {
+          const method = (Array.prototype as any)[prop] as Function;
+          methodCache[prop] = function (searched: unknown, fromIndex?: unknown): unknown {
+            trackIteration(target);
+            const from = arguments.length > 1;
+            const result = from ? method.call(target, searched, fromIndex) : method.call(target, searched);
+            if (result !== -1 && result !== false) return result;
+            if (!isObject(searched) || !(searched as any)[ReactiveFlags.IS_REACTIVE]) return result;
+            const raw = toRaw(searched);
+            return from ? method.call(target, raw, fromIndex) : method.call(target, raw);
+          };
           return methodCache[prop];
         }
         // special wrapper for at to ensure returned element is reactive
@@ -458,11 +524,18 @@ export function wrapArray<T extends any[]>(arr: T, node: LocationNode): T {
           }
           return methodCache[prop];
         }
-        // handle methods that rely on iteration state
         case Symbol.iterator:
         case "values":
+        case "entries": {
+          const entries = prop === "entries";
+          methodCache[prop] = function (): ArrayProxyIterator {
+            trackIteration(target);
+            return new ArrayProxyIterator(target, node, entries);
+          };
+          return methodCache[prop];
+        }
+        // handle methods that rely on iteration state
         case "keys":
-        case "entries":
         case "forEach":
         case "map":
         case "filter":
