@@ -482,3 +482,87 @@ function replicaText(_key, value) {
   if (value instanceof Set) return { set: [...value] };
   return value;
 }
+
+/** Writes for `recordWideWrites`: each sends more than 100 events, or runs more than 100 effect writes. */
+const WIDE = 150;
+const wideWrites = {
+  "a length grow past 100": {
+    init: () => ({ list: [] }),
+    write: (s) => (s.list.length = WIDE),
+  },
+  "an alias at 150 places": {
+    init: () => { const shared = { n: 0 }; return { list: Array.from({ length: WIDE }, () => shared) }; },
+    write: (s) => (s.list[0].n = 1),
+  },
+  "an effect that writes 150 items": {
+    init: () => ({ trigger: 0, items: Array.from({ length: WIDE }, () => ({ done: false })) }),
+    effects: (lib, s) => [lib.watchEffect(() => { if (s.trigger !== 0) for (const item of s.items) item.done = true; })],
+    write: (s) => (s.trigger = 1),
+  },
+  "150 effects that write once each": {
+    init: () => ({ trigger: 0, out: Array.from({ length: WIDE }, () => 0) }),
+    effects: (lib, s) => Array.from({ length: WIDE }, (_, index) => lib.watchEffect(() => { if (s.trigger !== 0) s.out[index] = s.trigger; })),
+    write: (s) => (s.trigger = 1),
+  },
+};
+
+/** How the listener stamps `version` for each event other than its own. */
+const wideStyles = {
+  "stamps before it forwards": (s, forward, count) => { s.version = count; forward(); },
+  "bumps version before it forwards": (s, forward) => { try { s.version++; } finally { forward(); } },
+  "stamps after it forwards": (s, forward, count) => { forward(); s.version = count; },
+  "bumps version after it forwards": (s, forward) => { forward(); s.version++; },
+};
+
+/**
+ * Finite fan-out with a listener that stamps every event, as the upgrade
+ * guide shows, on sync and async roots (`roots` lists which, `true` for
+ * async). 3.0.6 sends every event; 3.0.7 threw after 100 listener writes.
+ * The last line says whether the replica equals the source.
+ */
+export async function recordWideWrites(lib, roots = [false, true]) {
+  const cases = {};
+  for (const async of roots) {
+    for (const [writeName, change] of Object.entries(wideWrites)) {
+      for (const [styleName, style] of Object.entries(wideStyles)) {
+        const events = [];
+        let armed = false;
+        let count = 0;
+        let remote;
+        const state = lib.reactive({ ...change.init(), version: 0 }, (event) => {
+          if (event.path.length === 0) {
+            remote = event.newValue;
+            return;
+          }
+          const forward = () => {
+            events.push(eventText(lib, event));
+            lib.updateState(remote, event);
+          };
+          if (!armed || event.path[0] === "version") forward();
+          else style(state, forward, ++count);
+        }, [], { async });
+        if (async) await new Promise((resolve) => setTimeout(resolve, 0));
+        const stops = change.effects?.(lib, state) ?? [];
+        if (async) await new Promise((resolve) => setTimeout(resolve, 0));
+        armed = true;
+        const logged = [];
+        const log = console.error;
+        console.error = (error) => { logged.push(error instanceof Error ? error.message : String(error)); };
+        try {
+          change.write(state);
+          if (async) await new Promise((resolve) => setTimeout(resolve, 0));
+        } catch (error) {
+          events.push(`throws ${error.message}`);
+        } finally {
+          console.error = log;
+        }
+        for (const message of logged) events.push(`logs ${message}`);
+        for (const stop of stops) stop();
+        const same = JSON.stringify(lib.deepToRaw(state), replicaText) === JSON.stringify(remote, replicaText);
+        events.push(`version ${lib.toRaw(state).version}, ${same ? "replica equals the source" : "replica differs from the source"}`);
+        cases[`${async ? "async" : "sync"} listener ${styleName}: ${writeName}`] = events;
+      }
+    }
+  }
+  return cases;
+}
