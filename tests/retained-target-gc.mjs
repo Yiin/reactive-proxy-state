@@ -5,7 +5,7 @@ const { reactive, watchEffect, toRaw } = await import(pathToFileURL(resolve(proc
 assert.equal(typeof globalThis.gc, "function", "run with --expose-gc");
 function read(state, key) {
   if (state == null) return;
-  if (state instanceof Map) return state.get(key);
+  if (state instanceof Map) return process.argv[3] === "membership" ? state.has(key) : state.get(key);
   if (state instanceof Set) return state.has(key);
   return state[key];
 }
@@ -20,7 +20,16 @@ function sample(kind) {
   holder.value = null;
   return { weak, stop };
 }
-const samples = Array.from({ length: 30 }, (_, index) => sample(process.argv[3] === "objects" ? 0 : index % 3));
+// Bun 1.4.3 can conservatively retain a setup frame's last target even
+// across later GC turns. Separate setup turns let those frames return.
+// Keep the zero-retained assertion: one retained target can be a real leak.
+const samples = [];
+for (let index = 0; index < 30; index++) {
+  await new Promise(resolve => setTimeout(() => {
+    samples.push(sample(process.argv[3] === "objects" ? 0 : index % 3));
+    resolve();
+  }, 0));
+}
 for (let round = 0; round < 20; round++) {
   await new Promise(resolve => setTimeout(resolve, 5));
   globalThis.gc();
