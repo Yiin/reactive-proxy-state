@@ -97,7 +97,12 @@ const sameEntry = (before: any, after: any, key: unknown) =>
  */
 const changedFor: Record<string, (before: any, after: any) => boolean> = {
   get: (before, after) => !sameEntry(before, after, "a") || !sameEntry(before, after, "z"),
-  "has (Map)": (before, after) => !sameEntry(before, after, "a") || !sameEntry(before, after, "z"),
+  "has (Map)": (before, after) => before.has("a") !== after.has("a") || before.has("z") !== after.has("z"),
+  "keys()": (before, after) => {
+    const left = [...before.keys()];
+    const right = [...after.keys()];
+    return left.length !== right.length || left.some((key, index) => !Object.is(key, right[index]));
+  },
   "has (Set)": (before, after) => !sameEntry(before, after, 1) || !sameEntry(before, after, 9),
   size: (before, after) => before.size !== after.size,
 };

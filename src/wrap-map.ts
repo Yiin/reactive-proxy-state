@@ -26,7 +26,7 @@ import {
   shallowCopy,
 } from "./location";
 import type { StateEvent } from "./types";
-import { activeEffect, trackingVersion, beginWrite, endWrite, track, trackEntry, triggerCleared, triggerCollection } from "./watch-effect";
+import { activeEffect, trackingVersion, beginWrite, endWrite, track, trackKeys, trackMembership, trackEntry, triggerCleared, triggerCollection } from "./watch-effect";
 import { ReactiveFlags } from "./constants";
 
 function isObject(value: unknown): value is object {
@@ -46,7 +46,8 @@ class MapProxyIterator<K, V> {
   next(): IteratorResult<unknown> {
     if (this.target === undefined) return { value: undefined, done: true };
     if (activeEffect !== null && this.trackedAt !== trackingVersion) {
-      track(this.target, Symbol.iterator);
+      if (this.kind === "keys") trackKeys(this.target);
+      else track(this.target, Symbol.iterator);
       this.trackedAt = trackingVersion;
     }
     const step = this.iterator.next();
@@ -256,7 +257,7 @@ export function wrapMap<K, V>(map: Map<K, V>, node: LocationNode): Map<K, V> {
       }
       if (prop === "has") {
         methodCache[prop] = function (key: K): boolean {
-          trackEntry(target, key);
+          trackMembership(target, key);
           return target.has(key);
         }.bind(target);
         return methodCache[prop];

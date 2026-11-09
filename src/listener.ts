@@ -53,10 +53,11 @@ export function listenerGeneration(): number {
 
 /** A listener call uses its round with its first write, before mutation. */
 export function checkListenerWrite(): void {
-  if (listening < 0 || (listening & 1) !== 0) return;
+  if (listening < 0) return;
+  if (refusal !== undefined) throw refusal;
+  if ((listening & 1) !== 0) return;
   const generation = listening >> 1;
   if (
-    refusal === undefined &&
     generation < MAX_LISTENER_WRITE_DEPTH &&
     (generation === 0 || ++rounds <= MAX_LISTENER_WRITE_ROUNDS)
   ) {

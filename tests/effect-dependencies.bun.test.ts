@@ -108,9 +108,9 @@ describe("dependency sets go when their last effect leaves", () => {
       for (let i = 0; i < 10_000; i++) state.map.has(`k${i}`);
       state.map.size;
     });
-    expect(dependencyCounts(raw)).toEqual({ properties: 1, entries: 10_000 });
+    expect(dependencyCounts(raw)).toEqual({ properties: 1, entries: undefined, membership: 10_000 });
     stop();
-    expect(dependencyCounts(raw)).toEqual({ properties: 0, entries: 0 });
+    expect(dependencyCounts(raw)).toEqual({ properties: 0, entries: undefined, membership: 0 });
     // the empty maps go with the next write
     state.map.set("k0", 1);
     expect(dependencyCounts(raw)).toEqual({ properties: undefined, entries: undefined });
@@ -124,7 +124,7 @@ describe("dependency sets go when their last effect leaves", () => {
       for (let i = 0; i < 100; i++) state.map.has(`r${round}-${i}`);
     });
     for (let round = 1; round <= 50; round++) state.round = round;
-    expect(dependencyCounts(raw)).toEqual({ properties: undefined, entries: 100 });
+    expect(dependencyCounts(raw)).toEqual({ properties: undefined, entries: undefined, membership: 100 });
   });
 
   test("a rerun keeps the dependency sets it reads again", () => {
@@ -161,7 +161,7 @@ describe("dependency sets go when their last effect leaves", () => {
     for (const stop of stops) stop();
     for (const raw of [toRaw(state.list), toRaw(state.set), toRaw(state.obj)]) {
       const counts = dependencyCounts(raw);
-      expect((counts.properties ?? 0) + (counts.entries ?? 0)).toBe(0);
+      expect((counts.properties ?? 0) + (counts.entries ?? 0) + (counts.membership ?? 0)).toBe(0);
     }
     // the root still has the effects' reads of `list`, `set` and `obj`: none, they stopped
     expect(dependencyCounts(toRaw(state)).properties ?? 0).toBe(0);

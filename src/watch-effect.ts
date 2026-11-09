@@ -64,6 +64,8 @@ const targetMap = new WeakMap<object, Deps>();
 // shares a dependency with a property ("get", "size"), and keyed by the entry itself,
 // as the collection keys it (1 and "1" are two entries, NaN is one)
 const entryMap = new WeakMap<object, Deps>();
+/** Map membership changes independently of the value stored at a key. */
+const membershipMap = new WeakMap<object, Deps>();
 
 /**
  * Dependencies a cleanup at the start of a run left without effects, the
@@ -110,8 +112,8 @@ function depsOf(maps: WeakMap<object, Deps>, target: object): Map<unknown, Dep> 
  * has no map.
  * @internal
  */
-export function dependencyCounts(target: object): { properties?: number; entries?: number } {
-  return { properties: targetMap.get(target)?.size, entries: entryMap.get(target)?.size };
+export function dependencyCounts(target: object): { properties?: number; entries?: number; membership?: number } {
+  return { properties: targetMap.get(target)?.size, entries: entryMap.get(target)?.size, membership: membershipMap.get(target)?.size };
 }
 
 /**
@@ -220,6 +222,12 @@ export function track(target: object, key: string | symbol): void {
 export function trackEntry(target: object, entry: unknown): void {
   if (!activeEffect || !activeEffect.active) return;
   addDep(depFor(entryMap, target, entry), target, entry);
+}
+
+/** Tracks whether a Map holds `entry`, without reading its value. @internal */
+export function trackMembership(target: object, entry: unknown): void {
+  if (!activeEffect || !activeEffect.active) return;
+  addDep(depFor(membershipMap, target, entry), target, entry);
 }
 
 /**
@@ -554,12 +562,17 @@ function unchanged(from: number, to: number, same: (index: number) => boolean): 
 export function triggerCollection(target: object, entry: unknown, sizeChanged: boolean): void {
   const depsMap = depsOf(targetMap, target);
   const entryDeps = depsOf(entryMap, target);
-  if (!depsMap && !entryDeps) return; // no effects tracked for this target
+  const membershipDeps = sizeChanged ? depsOf(membershipMap, target) : undefined;
+  if (!depsMap && !entryDeps && !membershipDeps) return; // no effects tracked for this target
   startBatch();
   try {
     if (entryDeps) queueEffects(entryDeps.get(entry), target, entry);
+    if (membershipDeps) queueEffects(membershipDeps.get(entry), target, entry);
     if (depsMap) {
-      if (sizeChanged) queueEffects(depsMap.get("size"), target, "size");
+      if (sizeChanged) {
+        queueEffects(depsMap.get("size"), target, "size");
+        queueEffects(depsMap.get(keysKey), target, keysKey);
+      }
       queueEffects(depsMap.get(Symbol.iterator), target, Symbol.iterator);
     }
   } finally {
@@ -576,13 +589,18 @@ export function triggerCollection(target: object, entry: unknown, sizeChanged: b
 export function triggerCleared(target: object, removed: readonly unknown[]): void {
   const depsMap = depsOf(targetMap, target);
   const entryDeps = depsOf(entryMap, target);
-  if (!depsMap && !entryDeps) return; // no effects tracked for this target
+  const membershipDeps = depsOf(membershipMap, target);
+  if (!depsMap && !entryDeps && !membershipDeps) return; // no effects tracked for this target
   startBatch();
   try {
     if (entryDeps) {
       for (let i = 0; i < removed.length; i++) queueEffects(entryDeps.get(removed[i]), target, removed[i]);
     }
+    if (membershipDeps) {
+      for (let i = 0; i < removed.length; i++) queueEffects(membershipDeps.get(removed[i]), target, removed[i]);
+    }
     if (depsMap) {
+      queueEffects(depsMap.get(keysKey), target, keysKey);
       queueEffects(depsMap.get("size"), target, "size");
       queueEffects(depsMap.get(Symbol.iterator), target, Symbol.iterator);
     }
