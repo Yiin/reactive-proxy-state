@@ -76,7 +76,7 @@ describe("3.0.3 listener ordering review", () => {
       let armed = false;
       const raw = [0, 1, 2];
       const state = reactive({ list: raw }, event => {
-        if (armed && event.action === `array-${method}`) state.list[method === "unshift" ? 2 : 0] = 2;
+        if (armed && event.action === `array-${method}`) state.list[method === "unshift" ? 2 : 0] = method === "unshift" ? 0 : 2;
       });
       const values: number[] = [];
       const stop = watchEffect(() => { values.push(state.list[1]); });
@@ -205,3 +205,24 @@ test("getOrInsertComputed keeps native callback and return rules during nested w
   expect(Reflect.apply(insert, state.map, [2, () => { state.map.set(2, 5); return 9; }])).toBe(9);
   expect(state.map.get(2)).toBe(9);
 });
+
+for (const method of ["shift", "splice", "unshift"] as const) {
+  test(`${method}: a listener preserves changed hole dependencies`, () => {
+    let armed = false;
+    const initial = method === "unshift" ? [undefined, , undefined] : [undefined, undefined, , undefined];
+    const state = reactive({ list: initial }, event => {
+      if (armed && event.action === `array-${method}`) {
+        if (method === "unshift") state.list[2] = undefined;
+        else delete state.list[0];
+      }
+    });
+    const holes: boolean[] = [];
+    const stop = watchEffect(() => { state.list[1]; holes.push(1 in toRaw(state.list)); });
+    armed = true;
+    if (method === "unshift") state.list.unshift(undefined);
+    else if (method === "splice") state.list.splice(0, 1);
+    else state.list.shift();
+    expect(holes).toEqual(method === "unshift" ? [false, true] : [true, false]);
+    stop();
+  });
+}
