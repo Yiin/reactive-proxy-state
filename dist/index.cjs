@@ -1915,7 +1915,13 @@ function findAll(node, tail, firstOnly) {
       if (visiting.has(parent))
         continue;
       segments.push(segment(parent, place.key, current.raw));
-      enter(parent);
+      const root = parent.root;
+      if (root !== undefined && parent.places.length === 0) {
+        out.push({ root, path: buildPath(root.path, segments, tail) });
+        segments.pop();
+      } else {
+        enter(parent);
+      }
       continue;
     }
     frames.pop();
