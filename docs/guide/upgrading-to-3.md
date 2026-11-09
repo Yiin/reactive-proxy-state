@@ -82,6 +82,8 @@ Each write now invalidates computed values and cached array methods before it ca
 A listener can write again. That nested write delivers its events, then runs waiting effects in source order.
 An effect already waiting runs once. A later write can queue it again after it runs.
 Array moves determine changed indexes before listeners can change the array again.
+Debug `onTrigger` hooks run after event delivery and before effects.
+A hook that throws cannot prevent event delivery or stop the remaining effects.
 
 Saved array, Map, and Set iterators track each step inside an effect.
 This includes array `keys()` and the first step that reaches the end.
