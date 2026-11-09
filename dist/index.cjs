@@ -1450,6 +1450,8 @@ function flushEffects() {
     if (triggerNotifications.length > 0)
       triggerNotifications.length = 0;
     flushing = false;
+    if (batchDepth === 0)
+      endOperation();
   }
   if (failed)
     throw failure;
@@ -1460,12 +1462,10 @@ function startBatch() {
 function endBatch() {
   if (--batchDepth !== 0 || flushing)
     return;
-  try {
-    if (queue.length > 0 || triggerNotifications.length > 0)
-      flushEffects();
-  } finally {
+  if (queue.length > 0 || triggerNotifications.length > 0)
+    flushEffects();
+  else
     endOperation();
-  }
 }
 function beginWrite() {
   startBatch();
@@ -1686,24 +1686,30 @@ function watchEffect(effectCallback, options = {}) {
 // src/listener.ts
 var MAX_LISTENER_WRITE_DEPTH = 100;
 var MAX_LISTENER_WRITE_ROUNDS = 1e5;
-var listenerGeneration = -1;
-var listenerWrote = false;
+var listening = -1;
 var emittingEffect = null;
 var asyncDeliveries = 0;
 var rounds = 0;
 var refusal;
+function writeGeneration() {
+  return (listening >> 1) + 1;
+}
+function listenerGeneration() {
+  return listening >> 1;
+}
 function checkListenerWrite() {
-  if (listenerGeneration < 0 || listenerWrote)
+  if (listening < 0 || (listening & 1) !== 0)
     return;
-  if (refusal === undefined && listenerGeneration < MAX_LISTENER_WRITE_DEPTH && (listenerGeneration === 0 || ++rounds <= MAX_LISTENER_WRITE_ROUNDS)) {
-    listenerWrote = true;
+  const generation = listening >> 1;
+  if (refusal === undefined && generation < MAX_LISTENER_WRITE_DEPTH && (generation === 0 || ++rounds <= MAX_LISTENER_WRITE_ROUNDS)) {
+    listening |= 1;
     return;
   }
-  refusal ??= new RangeError(listenerGeneration >= MAX_LISTENER_WRITE_DEPTH ? `reactive-proxy-state: refused a listener write nested ${listenerGeneration + 1} deep ` + `(at most ${MAX_LISTENER_WRITE_DEPTH}). Filter event paths to stop listener writes from repeating` : `reactive-proxy-state: refused a listener write after ${MAX_LISTENER_WRITE_ROUNDS} nested rounds ` + `in one operation. Filter event paths to stop listener writes from repeating`);
+  refusal ??= new RangeError(generation >= MAX_LISTENER_WRITE_DEPTH ? `reactive-proxy-state: refused a listener write nested ${generation + 1} deep ` + `(at most ${MAX_LISTENER_WRITE_DEPTH}). Filter event paths to stop listener writes from repeating` : `reactive-proxy-state: refused a listener write after ${MAX_LISTENER_WRITE_ROUNDS} nested rounds ` + `in one operation. Filter event paths to stop listener writes from repeating`);
   throw refusal;
 }
 function endOperation() {
-  if (listenerGeneration >= 0 || asyncDeliveries > 0)
+  if (rounds === 0 && refusal === undefined || listening >= 0 || asyncDeliveries > 0)
     return;
   rounds = 0;
   const error = refusal;
@@ -1728,33 +1734,34 @@ function endAsyncDelivery() {
   console.error(error);
 }
 function emitListener(emit, event, generation) {
-  const previousGeneration = listenerGeneration;
-  const previousWrote = listenerWrote;
-  const previousEffect = activeEffect;
-  listenerGeneration = generation;
-  listenerWrote = false;
-  if (previousEffect === null) {
-    try {
-      emit(event);
-    } finally {
-      listenerGeneration = previousGeneration;
-      listenerWrote = previousWrote;
-      if (previousGeneration < 0 && batchDepth === 0 && !flushing)
-        endOperation();
-    }
+  if (activeEffect !== null) {
+    emitUntracked(emit, event, generation);
     return;
   }
+  const previous = listening;
+  listening = generation << 1;
+  try {
+    emit(event);
+  } finally {
+    listening = previous;
+    if (previous < 0 && batchDepth === 0 && !flushing)
+      endOperation();
+  }
+}
+function emitUntracked(emit, event, generation) {
+  const previous = listening;
+  const previousEffect = activeEffect;
   const previousEmittingEffect = emittingEffect;
   emittingEffect = previousEffect;
   setActiveEffect(null);
+  listening = generation << 1;
   try {
     emit(event);
   } finally {
     setActiveEffect(previousEffect);
     emittingEffect = previousEmittingEffect;
-    listenerGeneration = previousGeneration;
-    listenerWrote = previousWrote;
-    if (previousGeneration < 0 && batchDepth === 0 && !flushing)
+    listening = previous;
+    if (previous < 0 && batchDepth === 0 && !flushing)
       endOperation();
   }
 }
@@ -2040,7 +2047,7 @@ function dispatch(target, event) {
   const { root, paths } = target;
   if (paths.length === 1) {
     if (root.undelivered === undefined)
-      emitListener(root.emit, event, listenerGeneration + 1);
+      emitListener(root.emit, event, writeGeneration());
     else
       deliver(root, [event]);
     return;
@@ -2076,12 +2083,19 @@ function copiesPerPath(event, paths, async) {
 }
 function deliver(root, events) {
   const emit = root.emit;
-  const generation = listenerGeneration + 1;
+  const generation = writeGeneration();
   const waiting = root.undelivered;
   if (waiting !== undefined) {
-    const marks = waiting.marks;
-    if (marks === undefined ? generation !== waiting.generation : generation !== marks[marks.length - 1]) {
-      (waiting.marks ??= []).push(waiting.events.length, generation);
+    if (waiting.changeAt < 0) {
+      if (generation !== waiting.generation) {
+        waiting.changeAt = waiting.events.length;
+        waiting.changeGeneration = generation;
+      }
+    } else {
+      const marks = waiting.marks;
+      if (generation !== (marks === undefined ? waiting.changeGeneration : marks[marks.length - 1])) {
+        (waiting.marks ??= []).push(waiting.events.length, generation);
+      }
     }
     for (let i = 0;i < events.length; i++) {
       waiting.events.push(events[i]);
@@ -2092,7 +2106,14 @@ function deliver(root, events) {
     emitListener(emit, events[0], generation);
     return;
   }
-  const queue2 = root.undelivered = { events, next: 0, generation, marks: undefined };
+  const queue2 = root.undelivered = {
+    events,
+    next: 0,
+    generation,
+    changeAt: -1,
+    changeGeneration: 0,
+    marks: undefined
+  };
   let current = generation;
   let mark = 0;
   let failed = false;
@@ -2100,9 +2121,10 @@ function deliver(root, events) {
   try {
     while (queue2.next < queue2.events.length) {
       const index = queue2.next++;
-      const marks = queue2.marks;
-      if (marks !== undefined && marks[mark] === index) {
-        current = marks[mark + 1];
+      if (index === queue2.changeAt)
+        current = queue2.changeGeneration;
+      else if (queue2.marks !== undefined && mark < queue2.marks.length && queue2.marks[mark] === index) {
+        current = queue2.marks[mark + 1];
         mark += 2;
       }
       try {
@@ -4035,7 +4057,7 @@ function createAsyncEmit(emit) {
   let flushScheduled = false;
   return (event) => {
     queue2.push(event);
-    generations.push(listenerGeneration);
+    generations.push(listenerGeneration());
     if (!flushScheduled) {
       flushScheduled = true;
       queueMicrotask(() => {
@@ -4090,7 +4112,7 @@ function reactive(obj, emit, path = [], options) {
     try {
       const newValue = cloneStored(obj, undefined, 2 /* All */);
       fresh = copiedFresh;
-      emitListener(emit, { action: "replace", path: [], newValue }, listenerGeneration + 1);
+      emitListener(emit, { action: "replace", path: [], newValue }, writeGeneration());
     } catch (error) {
       if (error instanceof SnapshotLimitError)
         throw error;

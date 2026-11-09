@@ -1,9 +1,11 @@
 import type { EmitFunction, StateEvent } from "./types";
 import { activeEffect } from "./watch-effect";
-/** The generation of the event the running listener received; -1 outside listeners. */
-export declare let listenerGeneration: number;
 /** Tracking is paused, but writes still belong to the effect that called the listener. */
 export declare let emittingEffect: typeof activeEffect;
+/** The generation of the events a write made now sends. */
+export declare function writeGeneration(): number;
+/** The generation of the event the running listener received. */
+export declare function listenerGeneration(): number;
 /** A listener call uses its round with its first write, before mutation. */
 export declare function checkListenerWrite(): void;
 /** Async delivery microtasks hold their operation until every queued event is delivered. */

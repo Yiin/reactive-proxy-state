@@ -42,14 +42,17 @@ export interface LocationRoot {
 /**
  * A root's queue: `events[next]` is the oldest event not delivered yet. The
  * events of the write that started it have `generation` (see
- * `emitListener`). Events listener writes added have the generations in
- * `marks`, pairs of a first index and its generation, made only when a
- * listener writes.
+ * `emitListener`). Listener writes add events of other generations: from
+ * index `changeAt` on they have `changeGeneration`, and `marks` holds any
+ * later changes, pairs of a first index and its generation. Most queues
+ * change at most once, so they allocate no `marks`.
  */
 interface Undelivered {
     events: StateEvent[];
     next: number;
     generation: number;
+    changeAt: number;
+    changeGeneration: number;
     marks: number[] | undefined;
 }
 export declare class Place {
