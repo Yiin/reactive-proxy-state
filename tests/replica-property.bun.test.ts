@@ -3,7 +3,7 @@ import fc from "fast-check";
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import type * as Library from "../src/index";
-import { caseArbitrary, comparable, comparableWhenFinite, runCase } from "./replica-property.model.mjs";
+import { caseArbitrary, comparable, comparableWhenFinite, runCase, sameEventLog } from "./replica-property.model.mjs";
 
 const lib = await import(process.env.RPS_TEST_BUNDLE ?? "../src/index") as typeof Library;
 // The dist/index.js of the npm tarball of 3.0.6, checked against
@@ -28,13 +28,30 @@ test("a replica of a listener that writes state equals the source after every wr
       const ours = runCase(lib, spec);
       expect(ours.mismatch).toBeUndefined();
       // Only finite cases without listener-read dependencies can run on 3.0.6.
-      if (comparable(spec)) expect(ours.log).toEqual(runCase(baseline, spec).log);
+      if (comparable(spec)) expect(sameEventLog(spec, ours, runCase(baseline, spec))).toBe(true);
       else if (comparableWhenFinite(spec)) {
         const theirs = runCase(baseline, spec, { stopLoops: true });
-        if (!theirs.looped) expect(ours.log).toEqual(theirs.log);
+        if (!theirs.looped) expect(sameEventLog(spec, ours, theirs)).toBe(true);
       }
     }),
     { seed, numRuns }
   );
   // a branching listener loop runs up to the 100,000-round total before it stops
 }, 180_000);
+
+test("Map key readers skip value-update hook errors without changing event bytes", () => {
+  const spec = {
+    init: { alias: false, objects: [{ n: 0 }], a: 0, b: 0, c: 0, p: 0, q: 0, list: [], map: [["k1", 0]], set: [] },
+    effects: [{ reads: ["a"], kind: "trim", target: "map", limit: 1, throwMod: 0, throwAt: 0, throwAfterWrite: false, hookThrows: true }],
+    rules: [],
+    writes: [{ op: "map.set", key: "k1", value: 1 }],
+  };
+  const current = runCase(lib, spec);
+  const previous = runCase(baseline, spec);
+  expect(current.effectRuns).toEqual([1]);
+  expect(previous.effectRuns).toEqual([2]);
+  expect(current.log).toEqual(previous.log.filter(line => line !== "threw hook 0"));
+  expect(sameEventLog(spec, current, previous)).toBe(true);
+  const differentValue = runCase(lib, { ...spec, writes: [{ op: "map.set", key: "k1", value: 2 }] });
+  expect(sameEventLog(spec, differentValue, previous)).toBe(false);
+});

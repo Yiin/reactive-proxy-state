@@ -10,7 +10,7 @@
 import fc from "fast-check";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
-import { caseArbitrary, classify, comparable, comparableWhenFinite, runCase } from "./replica-property.model.mjs";
+import { caseArbitrary, classify, comparable, comparableWhenFinite, runCase, sameEventLog } from "./replica-property.model.mjs";
 
 const [bundle, baselineBundle, seedArg, runArg] = process.argv.slice(2);
 if (bundle === undefined || baselineBundle === undefined) {
@@ -36,6 +36,7 @@ const counts = {
   finiteListenerWrites: 0,
   baselineLooped: 0,
   sameAsBaseline: 0,
+  fewerMapKeyErrors: 0,
   baselineReplicaDiffers: 0,
 };
 const failures = [];
@@ -48,7 +49,8 @@ for (let seed = 1; seed <= seeds; seed++) {
       const finite = !strict && comparableWhenFinite(spec) ? runCase(baseline, spec, { stopLoops: true }) : undefined;
       const theirs = strict ? runCase(baseline, spec) : finite !== undefined && !finite.looped ? finite : undefined;
       const kinds = classify(spec);
-      const same = theirs !== undefined && ours.log.join("\n") === theirs.log.join("\n");
+      const exact = theirs !== undefined && ours.log.join("\n") === theirs.log.join("\n");
+      const same = theirs !== undefined && sameEventLog(spec, ours, theirs);
       counts.cases++;
       counts.writes += spec.writes.length;
       counts.events += ours.log.filter((line) => !line.startsWith("threw ") && !line.startsWith("skipped ")).length;
@@ -58,6 +60,7 @@ for (let seed = 1; seed <= seeds; seed++) {
       if (finite !== undefined) counts[finite.looped ? "baselineLooped" : "finiteListenerWrites"]++;
       for (const kind of ["srjbj9", "hooks", "listenerReads", "queued"]) if (kinds[kind]) counts[kind]++;
       if (same) counts.sameAsBaseline++;
+      if (same && !exact) counts.fewerMapKeyErrors++;
       if (theirs?.mismatch !== undefined) counts.baselineReplicaDiffers++;
       if (ours.mismatch !== undefined) return false;
       return theirs === undefined || same;

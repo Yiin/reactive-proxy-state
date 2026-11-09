@@ -339,6 +339,7 @@ function applyWrite(state, write, lib) {
  */
 export function runCase(lib, spec, { stopLoops = false } = {}) {
   const log = [];
+  const effectRuns = spec.effects.map(() => 0);
   let remote;
   let stamp = 100;
   let state;
@@ -399,6 +400,7 @@ export function runCase(lib, spec, { stopLoops = false } = {}) {
     const options = effect.hookThrows ? { onTrigger: () => { throw new Error(`hook ${index}`); } } : {};
     attempt(`effect ${index}`, () => {
       stops.push(lib.watchEffect(() => {
+        effectRuns[index]++;
         let value = 0;
         for (const name of effect.reads) value += sources[name].read(state, computed);
         const throws = effect.throwMod > 0 && value % effect.throwMod === effect.throwAt % effect.throwMod;
@@ -413,5 +415,22 @@ export function runCase(lib, spec, { stopLoops = false } = {}) {
   spec.writes.forEach((write, index) => attempt(`write ${index} ${write.op}`, () => applyWrite(state, write, lib)));
   for (const stop of stops) stop();
   computed.stop?.();
-  return { log, mismatch, looped };
+  return { log, mismatch, looped, effectRuns };
+}
+
+/**
+ * Map trimming reads keys. Since 3.0.9 it skips value-only updates, so its
+ * effect or trigger hook can throw fewer times. Every event byte and every
+ * other error must still match; the effect oracle checks the run counts.
+ */
+export function sameEventLog(spec, current, baseline) {
+  const fewerErrors = new Set();
+  spec.effects.forEach((effect, index) => {
+    if (effect.kind === "trim" && effect.target === "map" && current.effectRuns[index] < baseline.effectRuns[index]) {
+      fewerErrors.add(`threw hook ${index}`);
+      fewerErrors.add(`threw effect ${index}`);
+    }
+  });
+  const comparableLog = result => result.log.filter(line => !fewerErrors.has(line)).join("\n");
+  return comparableLog(current) === comparableLog(baseline);
 }
