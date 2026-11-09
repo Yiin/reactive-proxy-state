@@ -20,9 +20,7 @@ function sample(kind) {
   holder.value = null;
   return { weak, stop };
 }
-// Bun 1.4.3 can conservatively retain a setup frame's last target even
-// across later GC turns. Separate setup turns let those frames return.
-// Keep the zero-retained assertion: one retained target can be a real leak.
+// Separate setup turns let the frames that hold the targets return.
 const samples = [];
 for (let index = 0; index < 30; index++) {
   await new Promise(resolve => setTimeout(() => {
@@ -30,8 +28,16 @@ for (let index = 0; index < 30; index++) {
     resolve();
   }, 0));
 }
+// JSC scans stack words conservatively. Returned setup frames can leave a
+// target-shaped word behind, even across timer turns. Overwrite those slots
+// with numbers before GC; keep the strict zero-retained assertion below.
+function clearStack(depth, a, b, c, d, e, f, g, h) {
+  if (depth === 0) return a + b + c + d + e + f + g + h;
+  return clearStack(depth - 1, b, c, d, e, f, g, h, depth) + a;
+}
 for (let round = 0; round < 20; round++) {
   await new Promise(resolve => setTimeout(resolve, 5));
+  assert.ok(clearStack(256, 0, 1, 2, 3, 4, 5, 6, 7) > 0);
   globalThis.gc();
 }
 const retained = samples.filter(sample => sample.weak.deref() !== undefined).length;
