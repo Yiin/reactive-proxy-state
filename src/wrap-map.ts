@@ -150,8 +150,10 @@ export function wrapMap<K, V>(map: Map<K, V>, node: LocationNode): Map<K, V> {
           if (Object.is(key, -0)) key = 0 as K;
           if (proxy.has(key)) return proxy.get(key);
           const inserted = prop === "getOrInsertComputed" ? (value as (key: K) => V)(key) : value as V;
-          proxy.set(key, inserted);
-          return isObject(inserted) ? wrapUnplaced(inserted) : inserted;
+          const stored = isObject(inserted) ? unwrapForStore(inserted) : inserted;
+          proxy.set(key, stored as V);
+          if (!isObject(stored)) return stored;
+          return target.get(key) === stored ? wrapChild(stored, node, key) : wrapUnplaced(stored);
         };
         return methodCache[prop];
       }
