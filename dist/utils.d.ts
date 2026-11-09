@@ -145,6 +145,11 @@ export declare function cloneTreeAfter<T>(value: T, container: object, contents:
  * Indexes come first among string keys. Undefined when no keys remain.
  */
 export declare function namedKeys(array: object): (string | symbol)[] | undefined;
+/**
+ * A canonical array index ("0", "17": digits without a leading zero, below
+ * 2^32 - 1) as a number, or -1.
+ */
+export declare function arrayIndex(key: string | symbol): number;
 /** `object[key] = value` as an own enumerable data property: no setter runs, and `__proto__` stays a key. */
 export declare function setData(object: object, key: PropertyKey, value: unknown): void;
 /**

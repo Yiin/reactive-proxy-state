@@ -34,8 +34,12 @@ __export(exports_src, {
   updateState: () => updateState,
   unref: () => unref,
   triggerRef: () => triggerRef,
+  triggerCollection: () => triggerCollection,
+  triggerCleared: () => triggerCleared,
+  triggerArray: () => triggerArray,
   trigger: () => trigger,
   trackVueReactiveEvents: () => trackVueReactiveEvents,
+  trackEntry: () => trackEntry,
   track: () => track,
   toRefs: () => toRefs,
   toRef: () => toRef,
@@ -499,7 +503,7 @@ function noteFresh(value) {
 function namedKeys(array) {
   const keys = Object.keys(array);
   let start = keys.length;
-  while (start > 0 && !isIndexKey(keys[start - 1]))
+  while (start > 0 && arrayIndex(keys[start - 1]) < 0)
     start--;
   const symbols = Object.getOwnPropertySymbols(array);
   let names = start === keys.length ? undefined : keys.slice(start);
@@ -509,19 +513,19 @@ function namedKeys(array) {
   }
   return names;
 }
-function isIndexKey(key) {
-  const length = key.length;
-  if (length === 0 || length > 10)
-    return false;
+function arrayIndex(key) {
+  if (typeof key !== "string" || key.length === 0 || key.length > 10)
+    return -1;
   const first = key.charCodeAt(0);
-  if (first < 48 || first > 57 || first === 48 && length > 1)
-    return false;
-  for (let i = 1;i < length; i++) {
+  if (first < 48 || first > 57 || first === 48 && key.length > 1)
+    return -1;
+  for (let i = 1;i < key.length; i++) {
     const code = key.charCodeAt(i);
     if (code < 48 || code > 57)
-      return false;
+      return -1;
   }
-  return length < 10 || Number(key) < 4294967295;
+  const index = Number(key);
+  return index < 4294967295 ? index : -1;
 }
 function setData(object, key, value) {
   Object.defineProperty(object, key, { value, writable: true, enumerable: true, configurable: true });
@@ -2479,35 +2483,113 @@ function flushEffects() {
     }
   }
 }
+function queueEffects(dep, target, key, triggerLevel) {
+  if (dep === undefined)
+    return;
+  dep.forEach((effect) => {
+    if (effect !== activeEffect && effect.active) {
+      if (effect.options?.onTrigger) {
+        effect.options.onTrigger({ effect: effect._rawCallback, target, key, type: "trigger" });
+      }
+      if (!queuedEffects.has(effect) || triggerLevel < queuedEffects.get(effect)) {
+        queuedEffects.set(effect, triggerLevel);
+      }
+    }
+  });
+}
 function trigger(target, key) {
   const depsMap = targetMap.get(target);
   if (!depsMap)
     return;
-  currentTriggerDepth++;
-  const triggerLevel = currentTriggerDepth;
+  const triggerLevel = ++currentTriggerDepth;
   try {
-    const addEffects = (depKey) => {
-      const dep = depsMap.get(depKey);
-      if (dep) {
-        dep.forEach((effect) => {
-          if (effect !== activeEffect && effect.active) {
-            if (effect.options?.onTrigger) {
-              effect.options.onTrigger({ effect: effect._rawCallback, target, key, type: "trigger" });
-            }
-            if (!queuedEffects.has(effect) || triggerLevel < queuedEffects.get(effect)) {
-              queuedEffects.set(effect, triggerLevel);
-            }
-          }
-        });
-      }
-    };
-    addEffects(key);
+    queueEffects(depsMap.get(key), target, key, triggerLevel);
     if (queuedEffects.size > 0) {
       flushEffects();
     }
   } finally {
     currentTriggerDepth--;
   }
+}
+function triggerArray(target, from, to, lengthChanged, before) {
+  const depsMap = targetMap.get(target);
+  if (!depsMap)
+    return;
+  const triggerLevel = ++currentTriggerDepth;
+  try {
+    if (to - from <= depsMap.size) {
+      for (let index = from;index < to; index++) {
+        if (before !== undefined && sameAt(before, target, index))
+          continue;
+        const key = String(index);
+        queueEffects(depsMap.get(key), target, key, triggerLevel);
+      }
+    } else {
+      depsMap.forEach((dep, key) => {
+        const index = arrayIndex(key);
+        if (index < from || index >= to)
+          return;
+        if (before !== undefined && sameAt(before, target, index))
+          return;
+        queueEffects(dep, target, key, triggerLevel);
+      });
+    }
+    if (lengthChanged)
+      queueEffects(depsMap.get("length"), target, "length", triggerLevel);
+    queueEffects(depsMap.get(Symbol.iterator), target, Symbol.iterator, triggerLevel);
+    if (queuedEffects.size > 0) {
+      flushEffects();
+    }
+  } finally {
+    currentTriggerDepth--;
+  }
+}
+function entryKey(entry) {
+  return typeof entry === "object" && entry !== null || typeof entry === "function" ? "[object]" : String(entry);
+}
+function trackEntry(target, entry) {
+  if (activeEffect !== null)
+    track(target, entryKey(entry));
+}
+function triggerCollection(target, entry, sizeChanged) {
+  const depsMap = targetMap.get(target);
+  if (!depsMap)
+    return;
+  const triggerLevel = ++currentTriggerDepth;
+  try {
+    const key = entryKey(entry);
+    queueEffects(depsMap.get(key), target, key, triggerLevel);
+    if (sizeChanged)
+      queueEffects(depsMap.get("size"), target, "size", triggerLevel);
+    queueEffects(depsMap.get(Symbol.iterator), target, Symbol.iterator, triggerLevel);
+    if (queuedEffects.size > 0) {
+      flushEffects();
+    }
+  } finally {
+    currentTriggerDepth--;
+  }
+}
+function triggerCleared(target, removed) {
+  const depsMap = targetMap.get(target);
+  if (!depsMap)
+    return;
+  const triggerLevel = ++currentTriggerDepth;
+  try {
+    for (let i = 0;i < removed.length; i++) {
+      const key = entryKey(removed[i]);
+      queueEffects(depsMap.get(key), target, key, triggerLevel);
+    }
+    queueEffects(depsMap.get("size"), target, "size", triggerLevel);
+    queueEffects(depsMap.get(Symbol.iterator), target, Symbol.iterator, triggerLevel);
+    if (queuedEffects.size > 0) {
+      flushEffects();
+    }
+  } finally {
+    currentTriggerDepth--;
+  }
+}
+function sameAt(before, after, index) {
+  return Object.is(before[index], after[index]) && index in before === index in after;
 }
 function watchEffect(effectCallback, options = {}) {
   const run = () => {
@@ -2556,20 +2638,6 @@ function watchEffect(effectCallback, options = {}) {
 // src/wrap-array.ts
 function isObject3(v) {
   return v && typeof v === "object";
-}
-function arrayIndex(prop) {
-  if (typeof prop !== "string" || prop.length === 0 || prop.length > 10)
-    return -1;
-  const first = prop.charCodeAt(0);
-  if (first < 48 || first > 57 || first === 48 && prop.length > 1)
-    return -1;
-  for (let i = 1;i < prop.length; i++) {
-    const code = prop.charCodeAt(i);
-    if (code < 48 || code > 57)
-      return -1;
-  }
-  const index = Number(prop);
-  return index < 4294967295 ? index : -1;
 }
 function placeKey(prop) {
   const index = arrayIndex(prop);
@@ -2679,10 +2747,8 @@ function evictRemoved(removed) {
   }
 }
 function trackIteration(target) {
-  if (activeEffect === null)
-    return;
-  track(target, Symbol.iterator);
-  track(target, "length");
+  if (activeEffect !== null)
+    track(target, Symbol.iterator);
 }
 
 class ArrayProxyIterator {
@@ -2727,9 +2793,9 @@ function wrapArray(arr, node) {
       if (prop === "__v_isReactive" /* IS_REACTIVE */)
         return true;
       track(target, prop);
-      if (methodCache[prop]) {
-        return methodCache[prop];
-      }
+      const cached = methodCache[prop];
+      if (cached !== undefined && hasOwn.call(methodCache, prop))
+        return cached;
       switch (prop) {
         case "sort":
         case "reverse":
@@ -2759,7 +2825,7 @@ function wrapArray(arr, node) {
             relinkReorder(node, target, before, prop === "fill" ? [args[0]] : undefined);
             if (event !== undefined)
               dispatch(located, event);
-            trigger(target, Symbol.iterator);
+            triggerArray(target, reorder.first, reorder.last, false, before);
             evictRemoved(before);
             return proxy;
           };
@@ -2789,10 +2855,7 @@ function wrapArray(arr, node) {
               relinkArray(node, target, oldLength, undefined, items, copied === 2 /* Fresh */);
               if (event !== undefined)
                 dispatch(located, event);
-              trigger(target, Symbol.iterator);
-              if (oldLength !== newLength) {
-                trigger(target, "length");
-              }
+              triggerArray(target, oldLength, newLength, oldLength !== newLength);
             }
             return result;
           };
@@ -2825,10 +2888,7 @@ function wrapArray(arr, node) {
               dispatch(located, event);
             if (isObject3(oldValue))
               evictDeep(oldValue);
-            trigger(target, Symbol.iterator);
-            if (oldLength !== newLength) {
-              trigger(target, "length");
-            }
+            triggerArray(target, newLength, oldLength, oldLength !== newLength);
             return result;
           };
           return methodCache[prop];
@@ -2858,10 +2918,7 @@ function wrapArray(arr, node) {
               dispatch(located, event);
             if (isObject3(oldValue))
               evictDeep(oldValue);
-            trigger(target, Symbol.iterator);
-            if (oldLength !== newLength) {
-              trigger(target, "length");
-            }
+            triggerArray(target, 0, oldLength, oldLength !== newLength);
             return result;
           };
           return methodCache[prop];
@@ -2889,10 +2946,7 @@ function wrapArray(arr, node) {
               relinkArray(node, target, 0, undefined, items, copied === 2 /* Fresh */);
               if (event !== undefined)
                 dispatch(located, event);
-              trigger(target, Symbol.iterator);
-              if (oldLength !== newLength) {
-                trigger(target, "length");
-              }
+              triggerArray(target, 0, newLength, oldLength !== newLength);
             }
             return result;
           };
@@ -2928,10 +2982,8 @@ function wrapArray(arr, node) {
               if (event !== undefined)
                 dispatch(located, event);
               evictRemoved(deletedItems);
-              trigger(target, Symbol.iterator);
-              if (oldLength !== newLength) {
-                trigger(target, "length");
-              }
+              const end = actualDeleteCount === items.length ? actualStart + actualDeleteCount : Math.max(oldLength, newLength);
+              triggerArray(target, actualStart, end, oldLength !== newLength);
             }
             return deletedItems;
           };
@@ -2995,18 +3047,6 @@ function wrapArray(arr, node) {
           };
           return methodCache[prop];
         }
-        case "keys":
-        case "forEach":
-        case "map":
-        case "filter":
-        case "reduce":
-        case "reduceRight":
-        case "findIndex":
-        case "every":
-        case "some":
-        case "join":
-          track(target, Symbol.iterator);
-          break;
         case "length":
           track(target, "length");
           return Reflect.get(target, prop, receiver);
@@ -3027,6 +3067,9 @@ function wrapArray(arr, node) {
         return wrapChild(value, node, placeKey(prop));
       }
       if (typeof value === "function") {
+        if (prop === "constructor" || prop === "valueOf")
+          return value;
+        trackIteration(target);
         return value.bind(target);
       }
       return value;
@@ -3040,7 +3083,8 @@ function wrapArray(arr, node) {
       if (isObject3(oldValue) && isObject3(value) && deepEqual(oldValue, value))
         return true;
       const truncated = prop === "length" && Number(value) < target.length ? target.slice(Number(value)) : undefined;
-      const isNumericIndex = typeof prop === "number" || arrayIndex(prop) >= 0 || typeof prop === "string" && !isNaN(parseInt(prop));
+      const index = arrayIndex(prop);
+      const isNumericIndex = typeof prop === "number" || index >= 0 || typeof prop === "string" && !isNaN(parseInt(prop));
       const emits = isNumericIndex || prop === "length" || !writesThroughSetter(target, prop, node);
       const grows = prop === "length" && Number(value) > Number(oldValue);
       const located = emits ? grows ? locate(node) : locate(node, prop) : undefined;
@@ -3052,6 +3096,7 @@ function wrapArray(arr, node) {
         Reflect.set(after, prop, value);
         copyPayloadReaching(event, located, target, after);
       }
+      const oldLength = target.length;
       const result = Reflect.set(target, prop, value, receiver);
       if (result && emits) {
         if (truncated !== undefined) {
@@ -3065,13 +3110,13 @@ function wrapArray(arr, node) {
         }
         if (grows) {
           if (located !== undefined) {
-            const oldLength = Number(oldValue);
-            const newLength = Number(value);
+            const oldLength2 = Number(oldValue);
+            const newLength2 = Number(value);
             const events = [];
-            for (let i = oldLength;i < newLength; i++) {
-              const index = String(i);
+            for (let i = oldLength2;i < newLength2; i++) {
+              const index2 = String(i);
               for (let j = 0;j < located.paths.length; j++) {
-                events.push({ action: "set", path: [...located.paths[j], index], newValue: undefined });
+                events.push({ action: "set", path: [...located.paths[j], index2], newValue: undefined });
               }
             }
             if (events.length > 0)
@@ -3085,7 +3130,15 @@ function wrapArray(arr, node) {
         }
         if (truncated !== undefined)
           evictRemoved(truncated);
-        trigger(target, prop);
+        const newLength = target.length;
+        if (index >= 0) {
+          triggerArray(target, index, index + 1, newLength !== oldLength);
+        } else if (prop === "length") {
+          if (newLength !== oldLength)
+            triggerArray(target, newLength, oldLength, true);
+        } else {
+          trigger(target, prop);
+        }
       }
       return result;
     },
@@ -3105,7 +3158,11 @@ function wrapArray(arr, node) {
           detachPlace(oldValue, node, placeKey(prop));
         if (event !== undefined)
           dispatch(located, event);
-        trigger(target, prop);
+        const index = arrayIndex(prop);
+        if (index >= 0)
+          triggerArray(target, index, index + 1, false);
+        else
+          trigger(target, prop);
         if (isObject3(oldValue))
           evictDeep(oldValue);
       }
@@ -3141,9 +3198,9 @@ function wrapMap(map, node) {
       if (prop === Symbol.iterator || prop === "entries" || prop === "values" || prop === "keys" || prop === "forEach") {
         track(target, Symbol.iterator);
       }
-      if (methodCache[prop]) {
-        return methodCache[prop];
-      }
+      const cached = methodCache[prop];
+      if (cached !== undefined && hasOwn.call(methodCache, prop))
+        return cached;
       if (prop === "set") {
         methodCache[prop] = function(key, value2) {
           if (value2 != null && typeof value2 === "object")
@@ -3151,7 +3208,7 @@ function wrapMap(map, node) {
           const existed = target.has(key);
           const oldValue = target.get(key);
           const oldSize = target.size;
-          if (oldValue === value2)
+          if (oldValue === value2 && existed)
             return receiver;
           if (oldValue && typeof oldValue === "object" && value2 && typeof value2 === "object" && deepEqual(oldValue, value2))
             return receiver;
@@ -3180,14 +3237,7 @@ function wrapMap(map, node) {
             attachValue(value2, node, key, copied === 2 /* Fresh */, located && oldValue, held);
           if (event !== undefined)
             dispatch(located, event);
-          if (!existed) {
-            trigger(target, Symbol.iterator);
-            if (oldSize !== newSize) {
-              trigger(target, "size");
-            }
-          } else {
-            trigger(target, String(key));
-          }
+          triggerCollection(target, key, oldSize !== newSize);
           if (isObject4(oldValue))
             evictDeep(oldValue);
           return receiver;
@@ -3224,11 +3274,7 @@ function wrapMap(map, node) {
               detachPlace(oldValue, node, key);
             if (event !== undefined)
               dispatch(located, event);
-            trigger(target, Symbol.iterator);
-            if (oldSize !== newSize) {
-              trigger(target, "size");
-            }
-            trigger(target, String(key));
+            triggerCollection(target, key, oldSize !== newSize);
             if (isObject4(oldValue))
               evictDeep(oldValue);
           }
@@ -3243,7 +3289,6 @@ function wrapMap(map, node) {
             return;
           const removed = [...target];
           target.clear();
-          const newSize = target.size;
           if (watch.indexed)
             forgetReplicaIndex(target);
           for (const [key, value2] of removed) {
@@ -3258,10 +3303,7 @@ function wrapMap(map, node) {
               key: null
             });
           }
-          trigger(target, Symbol.iterator);
-          if (oldSize !== newSize) {
-            trigger(target, "size");
-          }
+          triggerCleared(target, removed.map(([key]) => key));
           for (const [, value2] of removed) {
             if (isObject4(value2))
               evictDeep(value2);
@@ -3271,7 +3313,7 @@ function wrapMap(map, node) {
       }
       if (prop === "get") {
         methodCache[prop] = function(key) {
-          track(target, String(key));
+          trackEntry(target, key);
           const value2 = target.get(key);
           if (!value2 || typeof value2 !== "object")
             return value2;
@@ -3280,9 +3322,8 @@ function wrapMap(map, node) {
         return methodCache[prop];
       }
       if (prop === "has") {
-        track(target, Symbol.iterator);
         methodCache[prop] = function(key) {
-          track(target, String(key));
+          trackEntry(target, key);
           return target.has(key);
         }.bind(target);
         return methodCache[prop];
@@ -3323,6 +3364,8 @@ function wrapMap(map, node) {
       }
       const value = Reflect.get(target, prop, receiver);
       if (typeof value === "function") {
+        if (prop === "valueOf")
+          return value;
         return value.bind(target);
       }
       return value;
@@ -3357,9 +3400,9 @@ function wrapSet(set, node) {
       if (prop === Symbol.iterator || prop === "entries" || prop === "values" || prop === "keys" || prop === "forEach") {
         track(target, Symbol.iterator);
       }
-      if (methodCache[prop]) {
-        return methodCache[prop];
-      }
+      const cached = methodCache[prop];
+      if (cached !== undefined && hasOwn.call(methodCache, prop))
+        return cached;
       if (prop === "add") {
         methodCache[prop] = function(value2) {
           if (value2 != null && typeof value2 === "object")
@@ -3385,10 +3428,7 @@ function wrapSet(set, node) {
               attachValue(value2, node, undefined, copied === 2 /* Fresh */);
             if (event !== undefined)
               dispatch(located, event);
-            trigger(target, Symbol.iterator);
-            if (oldSize !== newSize) {
-              trigger(target, "size");
-            }
+            triggerCollection(target, value2, oldSize !== newSize);
           }
           return receiver;
         };
@@ -3421,10 +3461,7 @@ function wrapSet(set, node) {
                 detachPlace(value2, node, undefined);
               if (event !== undefined)
                 dispatch(located, event);
-              trigger(target, Symbol.iterator);
-              if (oldSize !== newSize) {
-                trigger(target, "size");
-              }
+              triggerCollection(target, value2, oldSize !== newSize);
               if (isObject5(value2))
                 evictDeep(value2);
             }
@@ -3441,7 +3478,6 @@ function wrapSet(set, node) {
             return;
           const removed = [...target];
           target.clear();
-          const newSize = target.size;
           if (watch.indexed)
             forgetReplicaIndex(target);
           for (const member of removed) {
@@ -3456,10 +3492,7 @@ function wrapSet(set, node) {
               value: null
             });
           }
-          trigger(target, Symbol.iterator);
-          if (oldSize !== newSize) {
-            trigger(target, "size");
-          }
+          triggerCleared(target, removed);
           for (const member of removed) {
             if (isObject5(member))
               evictDeep(member);
@@ -3468,11 +3501,8 @@ function wrapSet(set, node) {
         return methodCache[prop];
       }
       if (prop === "has") {
-        track(target, Symbol.iterator);
         methodCache[prop] = function(value2) {
-          if (typeof value2 === "string" || typeof value2 === "number" || typeof value2 === "symbol") {
-            track(target, String(value2));
-          }
+          trackEntry(target, value2);
           return target.has(value2);
         }.bind(target);
         return methodCache[prop];
@@ -3518,6 +3548,8 @@ function wrapSet(set, node) {
       }
       const value = Reflect.get(target, prop, receiver);
       if (typeof value === "function") {
+        if (prop === "valueOf")
+          return value;
         return value.bind(target);
       }
       return value;
