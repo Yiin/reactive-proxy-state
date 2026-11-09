@@ -338,10 +338,14 @@ function endBatch(): void {
  * ran them when the nested write ended, and a replica got an effect's
  * event before the event that set it off. @internal
  */
-export const beginWrite = startBatch;
+export function beginWrite(): void {
+  startBatch();
+}
 
 /** Finish a write; the outermost one runs the effects and hooks it queued. @internal */
-export const endWrite = endBatch;
+export function endWrite(): void {
+  endBatch();
+}
 
 /**
  * Queue the effects of `dep`, the effects that read `key` of `target`. The

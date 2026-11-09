@@ -2583,8 +2583,12 @@ function endBatch() {
   if (--batchDepth === 0 && !flushing && (queue.length > 0 || triggerNotifications.length > 0))
     flushEffects();
 }
-var beginWrite = startBatch;
-var endWrite = endBatch;
+function beginWrite() {
+  startBatch();
+}
+function endWrite() {
+  endBatch();
+}
 function queueEffects(dep, target, key) {
   if (dep === undefined)
     return;
