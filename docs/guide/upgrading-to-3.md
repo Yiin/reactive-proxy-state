@@ -123,17 +123,12 @@ What to check when you upgrade:
 
 ## 3.0.7: listener loops stop and queued old values stay stable
 
-The core permits 100 nested listener-write rounds per caller write.
-A round is one listener call that attempts state writes.
-All writes in that call share its round.
-All descendant events share the same budget, including alias events and queued events.
-This bounds branching loops as well as direct recursion.
-The bound also applies to async roots and writes between roots.
-Round 101 is refused before mutation.
+3.0.7 bounds listener writes, so a listener that writes for each event it receives stops.
+Its bound counted every listener write of a caller write, and threw on finite fan-out.
+3.0.8 counts how deep listener writes nest instead (see below).
+A refused write throws before mutation.
 The library drains committed events and waiting effects, then throws a `RangeError`.
-An async root reports the error from its delivery microtask.
 Catching the refused write inside the listener does not hide the final error.
-A later caller write starts a new chain.
 
 Replace temporary reentry guards with event-path filters.
 A queued event can arrive after a temporary guard has cleared.
@@ -159,3 +154,39 @@ Immediate single-path removals keep their existing behavior.
 Listener reads no longer become dependencies of the effect whose write called the listener.
 This includes initial events, queued events, and listener errors.
 Effects and computed values created or evaluated inside listeners still track their own reads.
+
+
+## 3.0.8: the listener bound counts depth
+
+3.0.7 has a regression, and 3.0.8 fixes it. Upgrade from 3.0.7 directly.
+The 3.0.7 bound counted every listener write of one caller write, not how deep they nested.
+Finite writes that 3.0.6 handled threw a `RangeError` in 3.0.7:
+
+- a `length` grow past 100 indexes, with a listener that stamps every event,
+- a write into an object aliased at more than 100 places,
+- one effect that writes more than 100 items, or more than 100 effects that each write once in one flush,
+- the same writes on an `{ async: true }` root, where the error left the delivery microtask uncaught and ended a Node process.
+
+3.0.7 also kept the count of a `ref` or `computed` write that ran effects.
+After 100 such writes, every later write threw, also a write no listener reacts to.
+
+In 3.0.8 the bound counts generations.
+A write made outside a listener sends events of generation 0.
+A write a listener makes while it receives an event of generation `g` sends events of generation `g + 1`.
+A queued event keeps its generation, also across roots and async microtasks.
+A listener write of generation 101 is refused before mutation.
+Rounds of generation 2 and deeper also count toward a total of 100,000 per operation.
+That total stops loops that branch, where every event makes two listener writes.
+An operation is one write, ref write or trigger made outside listeners, with its delivery and its effects.
+On an async root, an operation is one delivery microtask.
+Every operation starts fresh, so an error never carries over to a later write.
+Loops through effects stay bounded by the effect loop limit of 100,000 runs.
+The events of every write that 3.0.6 handled without a loop are byte-equal to 3.0.6, apart from the 3.0.7 changes above.
+
+What to check when you upgrade:
+
+- **The error message changed.** The `RangeError` says `refused a listener write nested 101 deep`, or `refused a listener write after 100000 nested rounds`. 3.0.7 said `listeners exceeded 100 nested write rounds`.
+- **An async root logs the bound's error.** It calls `console.error` with the `RangeError` after the microtask delivered every queued event, and does not throw. A listener's own error is still thrown from the microtask, as in 3.0.6.
+- **The bound's error wins.** When an effect or a listener also threw in the same operation, the caller gets the `RangeError`.
+- **A temporary reentry guard around a listener write** stops at a depth of 100 per queued chain, not after 100 writes in total. Use event-path filters, as shown above.
+- **Removed values on async roots show the state before the write.** Since 3.0.7, a queued event copies its `oldValue` and `oldValues` before the write. A removed object that reaches the written container, through a cycle, holds that container as it was before the write. 3.0.6 copied it with the write applied on async roots. A synchronous root that queues the event (an alias, a write during a delivery) copies it the same way. An immediate synchronous event still sends the removed object itself.
