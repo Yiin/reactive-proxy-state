@@ -1,0 +1,314 @@
+{
+ "listener stamps before it forwards, an effect that reads the stamp: object set": [
+  "action=\"set\" newValue=\"0\" oldValue=\"\" path=[\"copy\"]#0",
+  "action=\"set\" newValue=1 oldValue=0 path=[\"version\"]#0",
+  "action=\"set\" newValue=15 oldValue=0 path=[\"x\"]#0",
+  "action=\"set\" newValue=2 oldValue=1 path=[\"version\"]#0",
+  "action=\"set\" newValue=\"1\" oldValue=\"0\" path=[\"copy\"]#0",
+  "replica equals the source"
+ ],
+ "listener bumps version before it forwards, an effect that reads the stamp: object set": [
+  "action=\"set\" newValue=\"0\" oldValue=\"\" path=[\"copy\"]#0",
+  "action=\"set\" newValue=1 oldValue=0 path=[\"version\"]#0",
+  "action=\"set\" newValue=15 oldValue=0 path=[\"x\"]#0",
+  "action=\"set\" newValue=2 oldValue=1 path=[\"version\"]#0",
+  "action=\"set\" newValue=\"1\" oldValue=\"0\" path=[\"copy\"]#0",
+  "replica equals the source"
+ ],
+ "listener stamps before it forwards, an effect that reads the stamp: object add": [
+  "action=\"set\" newValue=\"0\" oldValue=\"\" path=[\"copy\"]#0",
+  "action=\"set\" newValue=1 oldValue=0 path=[\"version\"]#0",
+  "action=\"set\" newValue=1 oldValue=undefined path=[\"o\",\"z\"]#0",
+  "action=\"set\" newValue=2 oldValue=1 path=[\"version\"]#0",
+  "action=\"set\" newValue=\"1\" oldValue=\"0\" path=[\"copy\"]#0",
+  "replica equals the source"
+ ],
+ "listener bumps version before it forwards, an effect that reads the stamp: object add": [
+  "action=\"set\" newValue=\"0\" oldValue=\"\" path=[\"copy\"]#0",
+  "action=\"set\" newValue=1 oldValue=0 path=[\"version\"]#0",
+  "action=\"set\" newValue=1 oldValue=undefined path=[\"o\",\"z\"]#0",
+  "action=\"set\" newValue=2 oldValue=1 path=[\"version\"]#0",
+  "action=\"set\" newValue=\"1\" oldValue=\"0\" path=[\"copy\"]#0",
+  "replica equals the source"
+ ],
+ "listener stamps before it forwards, an effect that reads the stamp: object delete": [
+  "action=\"set\" newValue=\"0\" oldValue=\"\" path=[\"copy\"]#0",
+  "action=\"set\" newValue=1 oldValue=0 path=[\"version\"]#0",
+  "action=\"delete\" oldValue=1 path=[\"o\",\"k\"]#0",
+  "action=\"set\" newValue=2 oldValue=1 path=[\"version\"]#0",
+  "action=\"set\" newValue=\"1\" oldValue=\"0\" path=[\"copy\"]#0",
+  "replica equals the source"
+ ],
+ "listener bumps version before it forwards, an effect that reads the stamp: object delete": [
+  "action=\"set\" newValue=\"0\" oldValue=\"\" path=[\"copy\"]#0",
+  "action=\"set\" newValue=1 oldValue=0 path=[\"version\"]#0",
+  "action=\"delete\" oldValue=1 path=[\"o\",\"k\"]#0",
+  "action=\"set\" newValue=2 oldValue=1 path=[\"version\"]#0",
+  "action=\"set\" newValue=\"1\" oldValue=\"0\" path=[\"copy\"]#0",
+  "replica equals the source"
+ ],
+ "listener stamps before it forwards, an effect that reads the stamp: array push": [
+  "action=\"set\" newValue=\"0\" oldValue=\"\" path=[\"copy\"]#0",
+  "action=\"set\" newValue=1 oldValue=0 path=[\"version\"]#0",
+  "action=\"array-push\" items=[4]#0 key=3 path=[\"list\"]#1",
+  "action=\"set\" newValue=2 oldValue=1 path=[\"version\"]#0",
+  "action=\"set\" newValue=\"1\" oldValue=\"0\" path=[\"copy\"]#0",
+  "replica equals the source"
+ ],
+ "listener bumps version before it forwards, an effect that reads the stamp: array push": [
+  "action=\"set\" newValue=\"0\" oldValue=\"\" path=[\"copy\"]#0",
+  "action=\"set\" newValue=1 oldValue=0 path=[\"version\"]#0",
+  "action=\"array-push\" items=[4]#0 key=3 path=[\"list\"]#1",
+  "action=\"set\" newValue=2 oldValue=1 path=[\"version\"]#0",
+  "action=\"set\" newValue=\"1\" oldValue=\"0\" path=[\"copy\"]#0",
+  "replica equals the source"
+ ],
+ "listener stamps before it forwards, an effect that reads the stamp: array splice": [
+  "action=\"set\" newValue=\"0\" oldValue=\"\" path=[\"copy\"]#0",
+  "action=\"set\" newValue=1 oldValue=0 path=[\"version\"]#0",
+  "action=\"array-splice\" deleteCount=1 items=undefined key=0 oldValues=[1]#0 path=[\"list\"]#1",
+  "action=\"set\" newValue=2 oldValue=1 path=[\"version\"]#0",
+  "action=\"set\" newValue=\"1\" oldValue=\"0\" path=[\"copy\"]#0",
+  "replica equals the source"
+ ],
+ "listener bumps version before it forwards, an effect that reads the stamp: array splice": [
+  "action=\"set\" newValue=\"0\" oldValue=\"\" path=[\"copy\"]#0",
+  "action=\"set\" newValue=1 oldValue=0 path=[\"version\"]#0",
+  "action=\"array-splice\" deleteCount=1 items=undefined key=0 oldValues=[1]#0 path=[\"list\"]#1",
+  "action=\"set\" newValue=2 oldValue=1 path=[\"version\"]#0",
+  "action=\"set\" newValue=\"1\" oldValue=\"0\" path=[\"copy\"]#0",
+  "replica equals the source"
+ ],
+ "listener stamps before it forwards, no effect: a longer length": [
+  "action=\"set\" newValue=undefined path=[\"list\",\"3\"]#0",
+  "action=\"set\" newValue=undefined path=[\"list\",\"4\"]#0",
+  "action=\"set\" newValue=1 oldValue=0 path=[\"version\"]#0",
+  "action=\"set\" newValue=2 oldValue=1 path=[\"version\"]#0",
+  "replica equals the source"
+ ],
+ "listener stamps before it forwards, an effect that copies what the write changed: a longer length": [
+  "action=\"set\" newValue=\"3\" oldValue=\"\" path=[\"copy\"]#0",
+  "action=\"set\" newValue=undefined path=[\"list\",\"3\"]#0",
+  "action=\"set\" newValue=undefined path=[\"list\",\"4\"]#0",
+  "action=\"set\" newValue=1 oldValue=0 path=[\"version\"]#0",
+  "action=\"set\" newValue=2 oldValue=1 path=[\"version\"]#0",
+  "action=\"set\" newValue=3 oldValue=2 path=[\"version\"]#0",
+  "action=\"set\" newValue=\"5\" oldValue=\"3\" path=[\"copy\"]#0",
+  "replica equals the source"
+ ],
+ "listener stamps before it forwards, an effect that writes back what the write changed: a longer length": [
+  "action=\"set\" newValue=undefined path=[\"list\",\"3\"]#0",
+  "action=\"set\" newValue=undefined path=[\"list\",\"4\"]#0",
+  "action=\"set\" newValue=1 oldValue=0 path=[\"version\"]#0",
+  "action=\"set\" newValue=2 oldValue=1 path=[\"version\"]#0",
+  "action=\"set\" newValue=3 oldValue=2 path=[\"version\"]#0",
+  "action=\"set\" newValue=3 oldValue=5 path=[\"list\",\"length\"]#0",
+  "replica equals the source"
+ ],
+ "listener stamps before it forwards, an effect that throws: a longer length": [
+  "action=\"set\" newValue=undefined path=[\"list\",\"3\"]#0",
+  "action=\"set\" newValue=undefined path=[\"list\",\"4\"]#0",
+  "action=\"set\" newValue=1 oldValue=0 path=[\"version\"]#0",
+  "action=\"set\" newValue=2 oldValue=1 path=[\"version\"]#0",
+  "throws effect failed",
+  "replica equals the source"
+ ],
+ "listener stamps before it forwards, an effect that reads the stamp: a longer length": [
+  "action=\"set\" newValue=\"0\" oldValue=\"\" path=[\"copy\"]#0",
+  "action=\"set\" newValue=undefined path=[\"list\",\"3\"]#0",
+  "action=\"set\" newValue=undefined path=[\"list\",\"4\"]#0",
+  "action=\"set\" newValue=1 oldValue=0 path=[\"version\"]#0",
+  "action=\"set\" newValue=2 oldValue=1 path=[\"version\"]#0",
+  "action=\"set\" newValue=3 oldValue=2 path=[\"version\"]#0",
+  "action=\"set\" newValue=\"2\" oldValue=\"0\" path=[\"copy\"]#0",
+  "replica equals the source"
+ ],
+ "listener bumps version before it forwards, no effect: a longer length": [
+  "action=\"set\" newValue=undefined path=[\"list\",\"3\"]#0",
+  "action=\"set\" newValue=undefined path=[\"list\",\"4\"]#0",
+  "action=\"set\" newValue=1 oldValue=0 path=[\"version\"]#0",
+  "action=\"set\" newValue=2 oldValue=1 path=[\"version\"]#0",
+  "replica equals the source"
+ ],
+ "listener bumps version before it forwards, an effect that copies what the write changed: a longer length": [
+  "action=\"set\" newValue=\"3\" oldValue=\"\" path=[\"copy\"]#0",
+  "action=\"set\" newValue=undefined path=[\"list\",\"3\"]#0",
+  "action=\"set\" newValue=undefined path=[\"list\",\"4\"]#0",
+  "action=\"set\" newValue=1 oldValue=0 path=[\"version\"]#0",
+  "action=\"set\" newValue=2 oldValue=1 path=[\"version\"]#0",
+  "action=\"set\" newValue=3 oldValue=2 path=[\"version\"]#0",
+  "action=\"set\" newValue=\"5\" oldValue=\"3\" path=[\"copy\"]#0",
+  "replica equals the source"
+ ],
+ "listener bumps version before it forwards, an effect that writes back what the write changed: a longer length": [
+  "action=\"set\" newValue=undefined path=[\"list\",\"3\"]#0",
+  "action=\"set\" newValue=undefined path=[\"list\",\"4\"]#0",
+  "action=\"set\" newValue=1 oldValue=0 path=[\"version\"]#0",
+  "action=\"set\" newValue=2 oldValue=1 path=[\"version\"]#0",
+  "action=\"set\" newValue=3 oldValue=2 path=[\"version\"]#0",
+  "action=\"set\" newValue=3 oldValue=5 path=[\"list\",\"length\"]#0",
+  "replica equals the source"
+ ],
+ "listener bumps version before it forwards, an effect that throws: a longer length": [
+  "action=\"set\" newValue=undefined path=[\"list\",\"3\"]#0",
+  "action=\"set\" newValue=undefined path=[\"list\",\"4\"]#0",
+  "action=\"set\" newValue=1 oldValue=0 path=[\"version\"]#0",
+  "action=\"set\" newValue=2 oldValue=1 path=[\"version\"]#0",
+  "throws effect failed",
+  "replica equals the source"
+ ],
+ "listener bumps version before it forwards, an effect that reads the stamp: a longer length": [
+  "action=\"set\" newValue=\"0\" oldValue=\"\" path=[\"copy\"]#0",
+  "action=\"set\" newValue=undefined path=[\"list\",\"3\"]#0",
+  "action=\"set\" newValue=undefined path=[\"list\",\"4\"]#0",
+  "action=\"set\" newValue=1 oldValue=0 path=[\"version\"]#0",
+  "action=\"set\" newValue=2 oldValue=1 path=[\"version\"]#0",
+  "action=\"set\" newValue=3 oldValue=2 path=[\"version\"]#0",
+  "action=\"set\" newValue=\"2\" oldValue=\"0\" path=[\"copy\"]#0",
+  "replica equals the source"
+ ],
+ "listener stamps after it forwards, an effect that reads the stamp: a longer length": [
+  "action=\"set\" newValue=\"0\" oldValue=\"\" path=[\"copy\"]#0",
+  "action=\"set\" newValue=undefined path=[\"list\",\"3\"]#0",
+  "action=\"set\" newValue=undefined path=[\"list\",\"4\"]#0",
+  "action=\"set\" newValue=1 oldValue=0 path=[\"version\"]#0",
+  "action=\"set\" newValue=2 oldValue=1 path=[\"version\"]#0",
+  "action=\"set\" newValue=\"2\" oldValue=\"0\" path=[\"copy\"]#0",
+  "action=\"set\" newValue=3 oldValue=2 path=[\"version\"]#0",
+  "replica equals the source"
+ ],
+ "listener stamps before it forwards, an effect that reads the stamp: map set": [
+  "action=\"set\" newValue=\"0\" oldValue=\"\" path=[\"copy\"]#0",
+  "action=\"set\" newValue=1 oldValue=0 path=[\"version\"]#0",
+  "action=\"map-set\" key=\"a\" newValue=5 oldValue=1 path=[\"map\"]#0",
+  "action=\"set\" newValue=2 oldValue=1 path=[\"version\"]#0",
+  "action=\"set\" newValue=\"1\" oldValue=\"0\" path=[\"copy\"]#0",
+  "replica equals the source"
+ ],
+ "listener bumps version before it forwards, an effect that reads the stamp: map set": [
+  "action=\"set\" newValue=\"0\" oldValue=\"\" path=[\"copy\"]#0",
+  "action=\"set\" newValue=1 oldValue=0 path=[\"version\"]#0",
+  "action=\"map-set\" key=\"a\" newValue=5 oldValue=1 path=[\"map\"]#0",
+  "action=\"set\" newValue=2 oldValue=1 path=[\"version\"]#0",
+  "action=\"set\" newValue=\"1\" oldValue=\"0\" path=[\"copy\"]#0",
+  "replica equals the source"
+ ],
+ "listener stamps before it forwards, an effect that reads the stamp: set add": [
+  "action=\"set\" newValue=\"0\" oldValue=\"\" path=[\"copy\"]#0",
+  "action=\"set\" newValue=1 oldValue=0 path=[\"version\"]#0",
+  "action=\"set-add\" path=[\"set\"]#0 value=9",
+  "action=\"set\" newValue=2 oldValue=1 path=[\"version\"]#0",
+  "action=\"set\" newValue=\"1\" oldValue=\"0\" path=[\"copy\"]#0",
+  "replica equals the source"
+ ],
+ "listener bumps version before it forwards, an effect that reads the stamp: set add": [
+  "action=\"set\" newValue=\"0\" oldValue=\"\" path=[\"copy\"]#0",
+  "action=\"set\" newValue=1 oldValue=0 path=[\"version\"]#0",
+  "action=\"set-add\" path=[\"set\"]#0 value=9",
+  "action=\"set\" newValue=2 oldValue=1 path=[\"version\"]#0",
+  "action=\"set\" newValue=\"1\" oldValue=\"0\" path=[\"copy\"]#0",
+  "replica equals the source"
+ ],
+ "listener stamps before it forwards, no effect: an alias write": [
+  "action=\"set\" newValue=3 oldValue=1 path=[\"o\",\"k\"]#0",
+  "action=\"set\" newValue=3 oldValue=1 path=[\"o2\",\"k\"]#0",
+  "action=\"set\" newValue=1 oldValue=0 path=[\"version\"]#0",
+  "action=\"set\" newValue=2 oldValue=1 path=[\"version\"]#0",
+  "replica equals the source"
+ ],
+ "listener stamps before it forwards, an effect that copies what the write changed: an alias write": [
+  "action=\"set\" newValue=\"1\" oldValue=\"\" path=[\"copy\"]#0",
+  "action=\"set\" newValue=3 oldValue=1 path=[\"o\",\"k\"]#0",
+  "action=\"set\" newValue=3 oldValue=1 path=[\"o2\",\"k\"]#0",
+  "action=\"set\" newValue=1 oldValue=0 path=[\"version\"]#0",
+  "action=\"set\" newValue=2 oldValue=1 path=[\"version\"]#0",
+  "action=\"set\" newValue=3 oldValue=2 path=[\"version\"]#0",
+  "action=\"set\" newValue=\"3\" oldValue=\"1\" path=[\"copy\"]#0",
+  "replica equals the source"
+ ],
+ "listener stamps before it forwards, an effect that writes back what the write changed: an alias write": [
+  "action=\"set\" newValue=3 oldValue=1 path=[\"o\",\"k\"]#0",
+  "action=\"set\" newValue=3 oldValue=1 path=[\"o2\",\"k\"]#0",
+  "action=\"set\" newValue=1 oldValue=0 path=[\"version\"]#0",
+  "action=\"set\" newValue=2 oldValue=1 path=[\"version\"]#0",
+  "action=\"set\" newValue=2 oldValue=3 path=[\"o\",\"k\"]#0",
+  "action=\"set\" newValue=2 oldValue=3 path=[\"o2\",\"k\"]#0",
+  "action=\"set\" newValue=3 oldValue=2 path=[\"version\"]#0",
+  "action=\"set\" newValue=4 oldValue=3 path=[\"version\"]#0",
+  "replica equals the source"
+ ],
+ "listener stamps before it forwards, an effect that throws: an alias write": [
+  "action=\"set\" newValue=3 oldValue=1 path=[\"o\",\"k\"]#0",
+  "action=\"set\" newValue=3 oldValue=1 path=[\"o2\",\"k\"]#0",
+  "action=\"set\" newValue=1 oldValue=0 path=[\"version\"]#0",
+  "action=\"set\" newValue=2 oldValue=1 path=[\"version\"]#0",
+  "throws effect failed",
+  "replica equals the source"
+ ],
+ "listener stamps before it forwards, an effect that reads the stamp: an alias write": [
+  "action=\"set\" newValue=\"0\" oldValue=\"\" path=[\"copy\"]#0",
+  "action=\"set\" newValue=3 oldValue=1 path=[\"o\",\"k\"]#0",
+  "action=\"set\" newValue=3 oldValue=1 path=[\"o2\",\"k\"]#0",
+  "action=\"set\" newValue=1 oldValue=0 path=[\"version\"]#0",
+  "action=\"set\" newValue=2 oldValue=1 path=[\"version\"]#0",
+  "action=\"set\" newValue=3 oldValue=2 path=[\"version\"]#0",
+  "action=\"set\" newValue=\"2\" oldValue=\"0\" path=[\"copy\"]#0",
+  "replica equals the source"
+ ],
+ "listener bumps version before it forwards, no effect: an alias write": [
+  "action=\"set\" newValue=3 oldValue=1 path=[\"o\",\"k\"]#0",
+  "action=\"set\" newValue=3 oldValue=1 path=[\"o2\",\"k\"]#0",
+  "action=\"set\" newValue=1 oldValue=0 path=[\"version\"]#0",
+  "action=\"set\" newValue=2 oldValue=1 path=[\"version\"]#0",
+  "replica equals the source"
+ ],
+ "listener bumps version before it forwards, an effect that copies what the write changed: an alias write": [
+  "action=\"set\" newValue=\"1\" oldValue=\"\" path=[\"copy\"]#0",
+  "action=\"set\" newValue=3 oldValue=1 path=[\"o\",\"k\"]#0",
+  "action=\"set\" newValue=3 oldValue=1 path=[\"o2\",\"k\"]#0",
+  "action=\"set\" newValue=1 oldValue=0 path=[\"version\"]#0",
+  "action=\"set\" newValue=2 oldValue=1 path=[\"version\"]#0",
+  "action=\"set\" newValue=3 oldValue=2 path=[\"version\"]#0",
+  "action=\"set\" newValue=\"3\" oldValue=\"1\" path=[\"copy\"]#0",
+  "replica equals the source"
+ ],
+ "listener bumps version before it forwards, an effect that writes back what the write changed: an alias write": [
+  "action=\"set\" newValue=3 oldValue=1 path=[\"o\",\"k\"]#0",
+  "action=\"set\" newValue=3 oldValue=1 path=[\"o2\",\"k\"]#0",
+  "action=\"set\" newValue=1 oldValue=0 path=[\"version\"]#0",
+  "action=\"set\" newValue=2 oldValue=1 path=[\"version\"]#0",
+  "action=\"set\" newValue=2 oldValue=3 path=[\"o\",\"k\"]#0",
+  "action=\"set\" newValue=2 oldValue=3 path=[\"o2\",\"k\"]#0",
+  "action=\"set\" newValue=3 oldValue=2 path=[\"version\"]#0",
+  "action=\"set\" newValue=4 oldValue=3 path=[\"version\"]#0",
+  "replica equals the source"
+ ],
+ "listener bumps version before it forwards, an effect that throws: an alias write": [
+  "action=\"set\" newValue=3 oldValue=1 path=[\"o\",\"k\"]#0",
+  "action=\"set\" newValue=3 oldValue=1 path=[\"o2\",\"k\"]#0",
+  "action=\"set\" newValue=1 oldValue=0 path=[\"version\"]#0",
+  "action=\"set\" newValue=2 oldValue=1 path=[\"version\"]#0",
+  "throws effect failed",
+  "replica equals the source"
+ ],
+ "listener bumps version before it forwards, an effect that reads the stamp: an alias write": [
+  "action=\"set\" newValue=\"0\" oldValue=\"\" path=[\"copy\"]#0",
+  "action=\"set\" newValue=3 oldValue=1 path=[\"o\",\"k\"]#0",
+  "action=\"set\" newValue=3 oldValue=1 path=[\"o2\",\"k\"]#0",
+  "action=\"set\" newValue=1 oldValue=0 path=[\"version\"]#0",
+  "action=\"set\" newValue=2 oldValue=1 path=[\"version\"]#0",
+  "action=\"set\" newValue=3 oldValue=2 path=[\"version\"]#0",
+  "action=\"set\" newValue=\"2\" oldValue=\"0\" path=[\"copy\"]#0",
+  "replica equals the source"
+ ],
+ "listener stamps after it forwards, an effect that reads the stamp: an alias write": [
+  "action=\"set\" newValue=\"0\" oldValue=\"\" path=[\"copy\"]#0",
+  "action=\"set\" newValue=3 oldValue=1 path=[\"o\",\"k\"]#0",
+  "action=\"set\" newValue=3 oldValue=1 path=[\"o2\",\"k\"]#0",
+  "action=\"set\" newValue=1 oldValue=0 path=[\"version\"]#0",
+  "action=\"set\" newValue=2 oldValue=1 path=[\"version\"]#0",
+  "action=\"set\" newValue=\"2\" oldValue=\"0\" path=[\"copy\"]#0",
+  "action=\"set\" newValue=3 oldValue=2 path=[\"version\"]#0",
+  "replica equals the source"
+ ]
+}

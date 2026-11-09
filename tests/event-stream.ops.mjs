@@ -393,3 +393,92 @@ async function effectCases(lib) {
   }
   return cases;
 }
+
+/**
+ * Writes for `recordListenerWrites`, what an effect reads of what each
+ * changes, and how an effect writes it back. "a longer length" and "an
+ * alias write" send several events.
+ */
+const listenerWrites = {
+  "object set": { write: (s) => (s.x = 15), read: (s) => s.x, fix: (s) => { if (s.x > 10) s.x = 10; } },
+  "object add": { write: (s) => (s.o.z = 1), read: (s) => JSON.stringify(s.o), fix: (s) => { if (s.o.z === 1) s.o.z = 2; } },
+  "object delete": { write: (s) => delete s.o.k, read: (s) => JSON.stringify(s.o), fix: (s) => { if (JSON.stringify(s.o) === "{}") s.o.k = 0; } },
+  "array push": { write: (s) => s.list.push(4), read: (s) => s.list.join(), fix: (s) => { if (s.list.length > 3) s.list.splice(0, s.list.length - 3); } },
+  "array splice": { write: (s) => s.list.splice(0, 1), read: (s) => s.list.join(), fix: (s) => { if (s.list.length < 3) s.list.push(0); } },
+  "a longer length": { write: (s) => (s.list.length = 5), read: (s) => s.list.length, fix: (s) => { if (s.list.length > 3) s.list.length = 3; } },
+  "map set": { write: (s) => s.map.set("a", 5), read: (s) => s.map.get("a"), fix: (s) => { if (s.map.get("a") > 2) s.map.set("a", 2); } },
+  "set add": { write: (s) => s.set.add(9), read: (s) => s.set.size, fix: (s) => { if (s.set.size > 1) s.set.delete(9); } },
+  "an alias write": { write: (s) => (s.o.k = 3), read: (s) => s.o.k, fix: (s) => { if (s.o.k > 2) s.o.k = 2; } },
+};
+
+/**
+ * What the listener does with each event of the write: it stamps
+ * `version` before it forwards (with a number it counts, or with
+ * `version++`, which reads it), or after.
+ */
+const listenerStyles = {
+  "stamps before it forwards": (s, forward, count) => { s.version = count; forward(); },
+  "bumps version before it forwards": (s, forward) => { s.version++; forward(); },
+  "stamps after it forwards": (s, forward, count) => { forward(); s.version = count; },
+};
+
+const listenerEffects = {
+  "no effect": () => {},
+  "an effect that copies what the write changed": (s, { read }) => { s.copy = JSON.stringify(read(s)); },
+  "an effect that writes back what the write changed": (s, { fix }) => fix(s),
+  "an effect that throws": (s, { read }, armed) => { read(s); if (armed()) throw new Error("effect failed"); },
+  "an effect that reads the stamp": (s) => { s.copy = String(s.version); },
+};
+
+/**
+ * Each case's events when a listener writes `version` while it receives
+ * the events of a write, and an effect reads, writes or throws. The last
+ * line says whether the replica that applied the events equals the source.
+ */
+export function recordListenerWrites(lib) {
+  const cases = {};
+  for (const [writeName, change] of Object.entries(listenerWrites)) {
+    for (const [styleName, style] of Object.entries(listenerStyles)) {
+      for (const [effectName, effect] of Object.entries(listenerEffects)) {
+        const events = [];
+        let armed = false;
+        let count = 0;
+        let remote;
+        const o = { k: 1 };
+        const raw = { x: 0, version: 0, copy: "", o, list: [1, 2, 3], map: new Map([["a", 1]]), set: new Set([1]) };
+        if (writeName === "an alias write") raw.o2 = o;
+        const state = lib.reactive(raw, (event) => {
+          if (event.path.length === 0) {
+            remote = event.newValue;
+            return;
+          }
+          const forward = () => {
+            events.push(eventText(lib, event));
+            lib.updateState(remote, event);
+          };
+          if (!armed || event.path[0] === "version") forward();
+          else style(state, forward, ++count);
+        });
+        const stop = lib.watchEffect(() => effect(state, change, () => armed));
+        armed = true;
+        try {
+          change.write(state);
+        } catch (error) {
+          events.push(`throws ${error.message}`);
+        }
+        stop();
+        const same = JSON.stringify(lib.deepToRaw(state), replicaText) === JSON.stringify(remote, replicaText);
+        events.push(same ? "replica equals the source" : "replica differs from the source");
+        cases[`listener ${styleName}, ${effectName}: ${writeName}`] = events;
+      }
+    }
+  }
+  return cases;
+}
+
+/** JSON of a state with its Maps and Sets. */
+function replicaText(_key, value) {
+  if (value instanceof Map) return { map: [...value] };
+  if (value instanceof Set) return { set: [...value] };
+  return value;
+}
