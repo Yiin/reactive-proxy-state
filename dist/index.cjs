@@ -33,12 +33,15 @@ __export(exports_src, {
   watch: () => watch,
   updateState: () => updateState,
   unref: () => unref,
+  triggerSplice: () => triggerSplice,
   triggerRef: () => triggerRef,
+  triggerKeyChange: () => triggerKeyChange,
   triggerCollection: () => triggerCollection,
   triggerCleared: () => triggerCleared,
   triggerArray: () => triggerArray,
   trigger: () => trigger,
   trackVueReactiveEvents: () => trackVueReactiveEvents,
+  trackKeys: () => trackKeys,
   trackEntry: () => trackEntry,
   track: () => track,
   toRefs: () => toRefs,
@@ -55,6 +58,7 @@ __export(exports_src, {
   isReactive: () => isReactive,
   isComputed: () => isComputed,
   getProxyStats: () => getProxyStats,
+  dependencyCounts: () => dependencyCounts,
   deepToRaw: () => deepToRaw,
   deepEqual: () => deepEqual,
   deepClone: () => deepClone,
@@ -271,36 +275,6 @@ function evictDescendantsFromPathCache(root, pathKey) {
 }
 function isObject(val) {
   return val !== null && typeof val === "object";
-}
-function traverse(value, seen = new Set) {
-  if (!isObject(value) || seen.has(value)) {
-    return value;
-  }
-  seen.add(value);
-  if (Array.isArray(value)) {
-    value.length;
-    for (let i = 0;i < value.length; i++) {
-      traverse(value[i], seen);
-    }
-  } else if (value instanceof Set || value instanceof Map) {
-    value.size;
-    const rawValue = value.__v_raw || value;
-    for (const v of rawValue) {
-      if (Array.isArray(v)) {
-        traverse(v[0], seen);
-        traverse(v[1], seen);
-      } else {
-        traverse(v, seen);
-      }
-    }
-    return value;
-  } else {
-    Object.keys(value).length;
-    for (const key in value) {
-      traverse(value[key], seen);
-    }
-  }
-  return value;
 }
 var SNAPSHOT_SHARED_COPY_LIMIT = 1e5;
 
@@ -2393,20 +2367,63 @@ function restoreEvicted(node) {
 
 // src/watch-effect.ts
 var activeEffect = null;
-var queuedEffects = new Map;
-var isFlushing = false;
-var currentTriggerDepth = 0;
 function setActiveEffect(effect) {
   activeEffect = effect;
 }
-var targetMap = new WeakMap;
-function cleanupEffect(effect) {
-  if (effect.dependencies) {
-    effect.dependencies.forEach((dep) => {
-      dep.delete(effect);
-    });
-    effect.dependencies.clear();
+
+class Dep extends Set {
+  owner;
+  key;
+  constructor(owner, key) {
+    super();
+    this.owner = owner;
+    this.key = key;
   }
+}
+var targetMap = new WeakMap;
+var entryMap = new WeakMap;
+var emptiedDeps = [];
+var emptiedCount = 0;
+function releaseDep(dep) {
+  if (dep.size === 0 && dep.owner.get(dep.key) === dep)
+    dep.owner.delete(dep.key);
+}
+function releaseEmptied(from) {
+  for (let i = from;i < emptiedCount; i++) {
+    releaseDep(emptiedDeps[i]);
+    emptiedDeps[i] = undefined;
+  }
+  emptiedCount = from;
+  if (from === 0 && emptiedDeps.length > 4096)
+    emptiedDeps.length = 0;
+}
+function depsOf(maps, target) {
+  const deps = maps.get(target);
+  if (deps === undefined || deps.size > 0)
+    return deps;
+  maps.delete(target);
+  return;
+}
+function dependencyCounts(target) {
+  return { properties: targetMap.get(target)?.size, entries: entryMap.get(target)?.size };
+}
+function detachEffect(effect, defer) {
+  const dependencies = effect.dependencies;
+  if (dependencies === undefined || dependencies.size === 0)
+    return;
+  dependencies.forEach((dep) => {
+    dep.delete(effect);
+    if (dep.size > 0)
+      return;
+    if (defer)
+      emptiedDeps[emptiedCount++] = dep;
+    else
+      releaseDep(dep);
+  });
+  dependencies.clear();
+}
+function cleanupEffect(effect) {
+  detachEffect(effect, false);
 }
 function runCleanupFunctions(effect) {
   if (effect.cleanupFns && effect.cleanupFns.length > 0) {
@@ -2420,172 +2437,255 @@ function runCleanupFunctions(effect) {
     effect.cleanupFns = [];
   }
 }
+function depFor(maps, target, key) {
+  let deps = maps.get(target);
+  if (deps === undefined) {
+    deps = new Map;
+    maps.set(target, deps);
+  }
+  let dep = deps.get(key);
+  if (dep === undefined) {
+    dep = new Dep(deps, key);
+    deps.set(key, dep);
+  }
+  return dep;
+}
+function addDep(dep, target, key) {
+  const effect = activeEffect;
+  if (dep.has(effect))
+    return;
+  dep.add(effect);
+  if (!effect.dependencies) {
+    effect.dependencies = new Set;
+  }
+  effect.dependencies.add(dep);
+  if (effect.options?.onTrack) {
+    effect.options.onTrack({ effect: effect._rawCallback, target, key, type: "track" });
+  }
+}
 function track(target, key) {
   if (!activeEffect || !activeEffect.active)
     return;
-  let depsMap = targetMap.get(target);
-  if (!depsMap) {
-    depsMap = new Map;
-    targetMap.set(target, depsMap);
-  }
-  let dep = depsMap.get(key);
-  if (!dep) {
-    dep = new Set;
-    depsMap.set(key, dep);
-  }
-  const effectToAdd = activeEffect;
-  if (!dep.has(effectToAdd)) {
-    dep.add(effectToAdd);
-    if (!effectToAdd.dependencies) {
-      effectToAdd.dependencies = new Set;
-    }
-    effectToAdd.dependencies.add(dep);
-    if (effectToAdd.options?.onTrack) {
-      effectToAdd.options.onTrack({ effect: effectToAdd._rawCallback, target, key, type: "track" });
-    }
-  }
+  addDep(depFor(targetMap, target, key), target, key);
 }
-function flushEffects() {
-  if (isFlushing)
+function trackEntry(target, entry) {
+  if (!activeEffect || !activeEffect.active)
     return;
-  isFlushing = true;
+  addDep(depFor(entryMap, target, entry), target, entry);
+}
+var keysKey = Symbol("keys");
+function trackKeys(target) {
+  track(target, keysKey);
+}
+var queue = [];
+var flushing = false;
+var batchDepth = 0;
+var flushCount = 0;
+var MAX_FLUSH_RUNS = 1e5;
+function flushEffects() {
+  flushing = true;
+  const flushId = ++flushCount;
+  let failed = false;
+  let failure;
+  let index = 0;
   try {
-    let minDepth = Infinity;
-    for (const depth of queuedEffects.values()) {
-      if (depth < minDepth)
-        minDepth = depth;
-    }
-    const effectsToRun = [];
-    for (const [effect, depth] of queuedEffects.entries()) {
-      if (depth === minDepth) {
-        effectsToRun.push(effect);
-        queuedEffects.delete(effect);
-      }
-    }
-    for (const effect of effectsToRun) {
+    for (;index < queue.length; index++) {
+      const effect = queue[index];
+      effect.queued = false;
       if (!effect.active)
         continue;
-      if (effect.options?.scheduler) {
-        effect.options.scheduler(effect.run);
+      const runs = effect.flushId === flushId ? effect.flushRuns + 1 : 1;
+      effect.flushId = flushId;
+      effect.flushRuns = runs;
+      if (runs > MAX_FLUSH_RUNS) {
+        if (!failed) {
+          failed = true;
+          failure = new RangeError(`reactive-proxy-state: an effect ran ${MAX_FLUSH_RUNS} times in one flush. ` + `Effects that write what other effects read loop when each write is new`);
+        }
+        index++;
+        break;
       }
-    }
-    for (const effect of effectsToRun) {
-      if (!effect.active)
-        continue;
-      if (!effect.options?.scheduler) {
-        effect.run();
+      try {
+        const scheduler = effect.options?.scheduler;
+        if (scheduler)
+          scheduler(effect.run);
+        else
+          effect.run();
+      } catch (error) {
+        if (!failed) {
+          failed = true;
+          failure = error;
+        }
       }
     }
   } finally {
-    isFlushing = false;
-    if (queuedEffects.size > 0) {
-      flushEffects();
-    }
+    for (;index < queue.length; index++)
+      queue[index].queued = false;
+    queue.length = 0;
+    flushing = false;
   }
+  if (failed)
+    throw failure;
 }
-function queueEffects(dep, target, key, triggerLevel) {
+function startBatch() {
+  batchDepth++;
+}
+function endBatch() {
+  if (--batchDepth === 0 && !flushing && queue.length > 0)
+    flushEffects();
+}
+function queueEffects(dep, target, key) {
   if (dep === undefined)
     return;
   dep.forEach((effect) => {
-    if (effect !== activeEffect && effect.active) {
-      if (effect.options?.onTrigger) {
-        effect.options.onTrigger({ effect: effect._rawCallback, target, key, type: "trigger" });
-      }
-      if (!queuedEffects.has(effect) || triggerLevel < queuedEffects.get(effect)) {
-        queuedEffects.set(effect, triggerLevel);
-      }
+    if (effect === activeEffect || !effect.active)
+      return;
+    if (effect.options?.onTrigger) {
+      effect.options.onTrigger({ effect: effect._rawCallback, target, key, type: "trigger" });
+    }
+    if (effect.invalidate !== undefined) {
+      effect.invalidate();
+    } else if (!effect.queued) {
+      effect.queued = true;
+      queue.push(effect);
     }
   });
 }
 function trigger(target, key) {
-  const depsMap = targetMap.get(target);
+  const depsMap = depsOf(targetMap, target);
   if (!depsMap)
     return;
-  const triggerLevel = ++currentTriggerDepth;
+  startBatch();
   try {
-    queueEffects(depsMap.get(key), target, key, triggerLevel);
-    if (queuedEffects.size > 0) {
-      flushEffects();
-    }
+    queueEffects(depsMap.get(key), target, key);
   } finally {
-    currentTriggerDepth--;
+    endBatch();
   }
+}
+function triggerKeyChange(target) {
+  const depsMap = depsOf(targetMap, target);
+  if (!depsMap)
+    return;
+  startBatch();
+  try {
+    depsMap.forEach((dep, key) => queueEffects(dep, target, key));
+  } finally {
+    endBatch();
+  }
+}
+function queueIndexes(depsMap, target, from, to, same) {
+  if (to - from <= depsMap.size) {
+    for (let index = from;index < to; index++) {
+      const key = String(index);
+      const dep = depsMap.get(key);
+      if (dep === undefined || same !== undefined && same(index))
+        continue;
+      queueEffects(dep, target, key);
+    }
+  } else {
+    depsMap.forEach((dep, key) => {
+      const index = arrayIndex(key);
+      if (index < from || index >= to)
+        return;
+      if (same !== undefined && same(index))
+        return;
+      queueEffects(dep, target, key);
+    });
+  }
+}
+function queueWhole(depsMap, target, lengthChanged) {
+  if (lengthChanged)
+    queueEffects(depsMap.get("length"), target, "length");
+  queueEffects(depsMap.get(Symbol.iterator), target, Symbol.iterator);
 }
 function triggerArray(target, from, to, lengthChanged, before) {
-  const depsMap = targetMap.get(target);
+  const depsMap = depsOf(targetMap, target);
   if (!depsMap)
     return;
-  const triggerLevel = ++currentTriggerDepth;
+  startBatch();
   try {
-    if (to - from <= depsMap.size) {
-      for (let index = from;index < to; index++) {
-        if (before !== undefined && sameAt(before, target, index))
-          continue;
-        const key = String(index);
-        queueEffects(depsMap.get(key), target, key, triggerLevel);
-      }
-    } else {
-      depsMap.forEach((dep, key) => {
-        const index = arrayIndex(key);
-        if (index < from || index >= to)
-          return;
-        if (before !== undefined && sameAt(before, target, index))
-          return;
-        queueEffects(dep, target, key, triggerLevel);
-      });
-    }
-    if (lengthChanged)
-      queueEffects(depsMap.get("length"), target, "length", triggerLevel);
-    queueEffects(depsMap.get(Symbol.iterator), target, Symbol.iterator, triggerLevel);
-    if (queuedEffects.size > 0) {
-      flushEffects();
-    }
+    queueIndexes(depsMap, target, from, to, before === undefined ? undefined : (index) => sameAt(before, target, index));
+    queueWhole(depsMap, target, lengthChanged);
   } finally {
-    currentTriggerDepth--;
+    endBatch();
   }
 }
-function entryKey(entry) {
-  return typeof entry === "object" && entry !== null || typeof entry === "function" ? "[object]" : String(entry);
-}
-function trackEntry(target, entry) {
-  if (activeEffect !== null)
-    track(target, entryKey(entry));
-}
-function triggerCollection(target, entry, sizeChanged) {
-  const depsMap = targetMap.get(target);
+function triggerSplice(target, start, removed, inserted, oldLength) {
+  const depsMap = depsOf(targetMap, target);
   if (!depsMap)
     return;
-  const triggerLevel = ++currentTriggerDepth;
+  const newLength = target.length;
+  const removedEnd = start + removed.length;
+  const moved = removed.length - inserted;
+  const end = moved === 0 ? removedEnd : Math.max(oldLength, newLength);
+  const same = (index) => {
+    let had;
+    let held;
+    if (index < removedEnd) {
+      had = index - start in removed;
+      held = removed[index - start];
+    } else if (index < oldLength) {
+      const now = index - moved;
+      had = now in target;
+      held = target[now];
+    } else {
+      had = false;
+      held = undefined;
+    }
+    return Object.is(held, target[index]) && had === index in target;
+  };
+  if (moved === 0 && unchanged(start, end, same))
+    return;
+  startBatch();
   try {
-    const key = entryKey(entry);
-    queueEffects(depsMap.get(key), target, key, triggerLevel);
-    if (sizeChanged)
-      queueEffects(depsMap.get("size"), target, "size", triggerLevel);
-    queueEffects(depsMap.get(Symbol.iterator), target, Symbol.iterator, triggerLevel);
-    if (queuedEffects.size > 0) {
-      flushEffects();
+    queueIndexes(depsMap, target, start, end, same);
+    queueWhole(depsMap, target, oldLength !== newLength);
+  } finally {
+    endBatch();
+  }
+}
+function unchanged(from, to, same) {
+  for (let index = from;index < to; index++) {
+    if (!same(index))
+      return false;
+  }
+  return true;
+}
+function triggerCollection(target, entry, sizeChanged) {
+  const depsMap = depsOf(targetMap, target);
+  const entryDeps = depsOf(entryMap, target);
+  if (!depsMap && !entryDeps)
+    return;
+  startBatch();
+  try {
+    if (entryDeps)
+      queueEffects(entryDeps.get(entry), target, entry);
+    if (depsMap) {
+      if (sizeChanged)
+        queueEffects(depsMap.get("size"), target, "size");
+      queueEffects(depsMap.get(Symbol.iterator), target, Symbol.iterator);
     }
   } finally {
-    currentTriggerDepth--;
+    endBatch();
   }
 }
 function triggerCleared(target, removed) {
-  const depsMap = targetMap.get(target);
-  if (!depsMap)
+  const depsMap = depsOf(targetMap, target);
+  const entryDeps = depsOf(entryMap, target);
+  if (!depsMap && !entryDeps)
     return;
-  const triggerLevel = ++currentTriggerDepth;
+  startBatch();
   try {
-    for (let i = 0;i < removed.length; i++) {
-      const key = entryKey(removed[i]);
-      queueEffects(depsMap.get(key), target, key, triggerLevel);
+    if (entryDeps) {
+      for (let i = 0;i < removed.length; i++)
+        queueEffects(entryDeps.get(removed[i]), target, removed[i]);
     }
-    queueEffects(depsMap.get("size"), target, "size", triggerLevel);
-    queueEffects(depsMap.get(Symbol.iterator), target, Symbol.iterator, triggerLevel);
-    if (queuedEffects.size > 0) {
-      flushEffects();
+    if (depsMap) {
+      queueEffects(depsMap.get("size"), target, "size");
+      queueEffects(depsMap.get(Symbol.iterator), target, Symbol.iterator);
     }
   } finally {
-    currentTriggerDepth--;
+    endBatch();
   }
 }
 function sameAt(before, after, index) {
@@ -2597,9 +2697,10 @@ function watchEffect(effectCallback, options = {}) {
       throw new Error("Trying to run a stopped effect");
     }
     const previousEffect = activeEffect;
+    const emptiedFrom = emptiedCount;
     try {
       runCleanupFunctions(effectFn);
-      cleanupEffect(effectFn);
+      detachEffect(effectFn, true);
       setActiveEffect(effectFn);
       const onCleanup = (cleanupFn) => {
         if (!effectFn.cleanupFns) {
@@ -2610,6 +2711,7 @@ function watchEffect(effectCallback, options = {}) {
       return effectCallback(onCleanup);
     } finally {
       setActiveEffect(previousEffect);
+      releaseEmptied(emptiedFrom);
     }
   };
   const effectFn = {
@@ -2618,7 +2720,11 @@ function watchEffect(effectCallback, options = {}) {
     options,
     active: true,
     _rawCallback: effectCallback,
-    cleanupFns: []
+    cleanupFns: [],
+    invalidate: undefined,
+    queued: false,
+    flushId: 0,
+    flushRuns: 0
   };
   if (!options.lazy) {
     effectFn.run();
@@ -2628,7 +2734,6 @@ function watchEffect(effectCallback, options = {}) {
       runCleanupFunctions(effectFn);
       cleanupEffect(effectFn);
       effectFn.active = false;
-      queuedEffects.delete(effectFn);
     }
   };
   stopHandle.effect = effectFn;
@@ -2740,6 +2845,13 @@ function writeReorder(target, reorder) {
       delete target[i];
   }
 }
+var noItems = [];
+function readerOf(target, method) {
+  return function() {
+    trackIteration(target);
+    return method.apply(target, arguments);
+  };
+}
 function evictRemoved(removed) {
   for (let i = 0;i < removed.length; i++) {
     if (isObject3(removed[i]))
@@ -2767,8 +2879,7 @@ class ArrayProxyIterator {
       const index = this.index;
       if (index < target.length) {
         this.index = index + 1;
-        if (activeEffect !== null)
-          track(target, String(index));
+        trackIteration(target);
         const value = target[index];
         const item = isObject3(value) ? wrapChild(value, this.node, index) : value;
         return { value: this.entries ? [index, item] : item, done: false };
@@ -2801,7 +2912,6 @@ function wrapArray(arr, node) {
         case "reverse":
         case "fill":
         case "copyWithin": {
-          track(target, "length");
           const method = Array.prototype[prop];
           methodCache[prop] = function(...args) {
             if (prop === "fill" && isObject3(args[0]))
@@ -2823,16 +2933,18 @@ function wrapArray(arr, node) {
               copyPayloadAfter(event, located, target, after);
             writeReorder(target, reorder);
             relinkReorder(node, target, before, prop === "fill" ? [args[0]] : undefined);
-            if (event !== undefined)
-              dispatch(located, event);
-            triggerArray(target, reorder.first, reorder.last, false, before);
-            evictRemoved(before);
+            try {
+              if (event !== undefined)
+                dispatch(located, event);
+            } finally {
+              triggerArray(target, reorder.first, reorder.last, false, before);
+              evictRemoved(before);
+            }
             return proxy;
           };
           return methodCache[prop];
         }
         case "push":
-          track(target, "length");
           methodCache[prop] = function(...items) {
             unwrapItems(items);
             const oldLength = target.length;
@@ -2853,15 +2965,17 @@ function wrapArray(arr, node) {
             const newLength = target.length;
             if (items.length > 0) {
               relinkArray(node, target, oldLength, undefined, items, copied === 2 /* Fresh */);
-              if (event !== undefined)
-                dispatch(located, event);
-              triggerArray(target, oldLength, newLength, oldLength !== newLength);
+              try {
+                if (event !== undefined)
+                  dispatch(located, event);
+              } finally {
+                triggerArray(target, oldLength, newLength, oldLength !== newLength);
+              }
             }
             return result;
           };
           return methodCache[prop];
         case "pop":
-          track(target, "length");
           methodCache[prop] = function() {
             if (target.length === 0)
               return;
@@ -2884,21 +2998,24 @@ function wrapArray(arr, node) {
             const newLength = target.length;
             if (isObject3(oldValue))
               detachPlace(oldValue, node, poppedIndex);
-            if (event !== undefined)
-              dispatch(located, event);
-            if (isObject3(oldValue))
-              evictDeep(oldValue);
-            triggerArray(target, newLength, oldLength, oldLength !== newLength);
+            try {
+              if (event !== undefined)
+                dispatch(located, event);
+            } finally {
+              if (isObject3(oldValue))
+                evictDeep(oldValue);
+              triggerArray(target, newLength, oldLength, oldLength !== newLength);
+            }
             return result;
           };
           return methodCache[prop];
         case "shift":
-          track(target, "length");
           methodCache[prop] = function() {
             if (target.length === 0)
               return;
             const oldLength = target.length;
             const oldValue = target[0];
+            const removed = 0 in target ? [oldValue] : new Array(1);
             const located = locate(node);
             const event = located && {
               action: "array-shift",
@@ -2912,18 +3029,19 @@ function wrapArray(arr, node) {
               copyPayloadReaching(event, located, target, after);
             }
             const result = target.shift();
-            const newLength = target.length;
-            relinkArray(node, target, 0, [oldValue]);
-            if (event !== undefined)
-              dispatch(located, event);
-            if (isObject3(oldValue))
-              evictDeep(oldValue);
-            triggerArray(target, 0, oldLength, oldLength !== newLength);
+            relinkArray(node, target, 0, removed);
+            try {
+              if (event !== undefined)
+                dispatch(located, event);
+            } finally {
+              if (isObject3(oldValue))
+                evictDeep(oldValue);
+              triggerSplice(target, 0, removed, 0, oldLength);
+            }
             return result;
           };
           return methodCache[prop];
         case "unshift":
-          track(target, "length");
           methodCache[prop] = function(...items) {
             unwrapItems(items);
             const oldLength = target.length;
@@ -2941,18 +3059,19 @@ function wrapArray(arr, node) {
               copyPayloadReaching(event, located, target, after);
             }
             const result = target.unshift(...items);
-            const newLength = target.length;
             if (items.length > 0) {
               relinkArray(node, target, 0, undefined, items, copied === 2 /* Fresh */);
-              if (event !== undefined)
-                dispatch(located, event);
-              triggerArray(target, 0, newLength, oldLength !== newLength);
+              try {
+                if (event !== undefined)
+                  dispatch(located, event);
+              } finally {
+                triggerSplice(target, 0, noItems, items.length, oldLength);
+              }
             }
             return result;
           };
           return methodCache[prop];
         case "splice":
-          track(target, "length");
           methodCache[prop] = function(...args) {
             const oldLength = target.length;
             const actualStart = args.length === 0 ? 0 : clampIndex(toIntegerOrInfinity(args[0]), oldLength);
@@ -2976,14 +3095,15 @@ function wrapArray(arr, node) {
               copyPayloadReaching(event, located, target, after);
             }
             const deletedItems = target.splice(actualStart, actualDeleteCount, ...items);
-            const newLength = target.length;
             if (changes) {
               relinkArray(node, target, actualStart, deletedItems, items, copied === 2 /* Fresh */);
-              if (event !== undefined)
-                dispatch(located, event);
-              evictRemoved(deletedItems);
-              const end = actualDeleteCount === items.length ? actualStart + actualDeleteCount : Math.max(oldLength, newLength);
-              triggerArray(target, actualStart, end, oldLength !== newLength);
+              try {
+                if (event !== undefined)
+                  dispatch(located, event);
+              } finally {
+                evictRemoved(deletedItems);
+                triggerSplice(target, actualStart, deletedItems, items.length, oldLength);
+              }
             }
             return deletedItems;
           };
@@ -3048,20 +3168,17 @@ function wrapArray(arr, node) {
           return methodCache[prop];
         }
         case "length":
-          track(target, "length");
           return Reflect.get(target, prop, receiver);
       }
       const value = Reflect.get(target, prop, receiver);
       const index = arrayIndex(prop);
       if (index >= 0) {
-        track(target, prop);
         if (!isObject3(value))
           return value;
         return wrapChild(value, node, index);
       }
       const isNumericIndex = typeof prop === "string" && !isNaN(parseInt(prop, 10));
       if (isNumericIndex) {
-        track(target, prop);
         if (!isObject3(value))
           return value;
         return wrapChild(value, node, placeKey(prop));
@@ -3069,8 +3186,10 @@ function wrapArray(arr, node) {
       if (typeof value === "function") {
         if (prop === "constructor" || prop === "valueOf")
           return value;
-        trackIteration(target);
-        return value.bind(target);
+        const method = readerOf(target, value);
+        if (Array.prototype[prop] === value)
+          methodCache[prop] = method;
+        return method;
       }
       return value;
     },
@@ -3080,6 +3199,7 @@ function wrapArray(arr, node) {
       const oldValue = target[prop];
       if (oldValue === value && Reflect.has(target, prop))
         return true;
+      const sameNaN = oldValue !== oldValue && value !== value && Reflect.has(target, prop);
       if (isObject3(oldValue) && isObject3(value) && deepEqual(oldValue, value))
         return true;
       const truncated = prop === "length" && Number(value) < target.length ? target.slice(Number(value)) : undefined;
@@ -3108,36 +3228,41 @@ function wrapArray(arr, node) {
           if (isObject3(value))
             attachValue(value, node, key, copied === 2 /* Fresh */, located && oldValue, held);
         }
-        if (grows) {
-          if (located !== undefined) {
-            const oldLength2 = Number(oldValue);
-            const newLength2 = Number(value);
-            const events = [];
-            for (let i = oldLength2;i < newLength2; i++) {
-              const index2 = String(i);
-              for (let j = 0;j < located.paths.length; j++) {
-                events.push({ action: "set", path: [...located.paths[j], index2], newValue: undefined });
+        try {
+          if (grows) {
+            if (located !== undefined) {
+              const oldLength2 = Number(oldValue);
+              const newLength = Number(value);
+              const events = [];
+              for (let i = oldLength2;i < newLength; i++) {
+                const index2 = String(i);
+                for (let j = 0;j < located.paths.length; j++) {
+                  events.push({ action: "set", path: [...located.paths[j], index2], newValue: undefined });
+                }
               }
+              if (events.length > 0)
+                deliver(located.root, events);
             }
-            if (events.length > 0)
-              deliver(located.root, events);
+          } else if (event !== undefined) {
+            dispatch(located, event);
           }
-        } else if (event !== undefined) {
-          dispatch(located, event);
-        }
-        if (isObject3(oldValue) && oldValue !== value) {
-          evictDeep(oldValue);
-        }
-        if (truncated !== undefined)
-          evictRemoved(truncated);
-        const newLength = target.length;
-        if (index >= 0) {
-          triggerArray(target, index, index + 1, newLength !== oldLength);
-        } else if (prop === "length") {
-          if (newLength !== oldLength)
-            triggerArray(target, newLength, oldLength, true);
-        } else {
-          trigger(target, prop);
+        } finally {
+          if (isObject3(oldValue) && oldValue !== value) {
+            evictDeep(oldValue);
+          }
+          if (truncated !== undefined)
+            evictRemoved(truncated);
+          const newLength = target.length;
+          if (sameNaN) {} else if (index >= 0) {
+            triggerArray(target, index, index + 1, newLength !== oldLength);
+          } else if (prop === "length") {
+            if (newLength !== oldLength)
+              triggerArray(target, newLength, oldLength, true);
+          } else {
+            if (methodCache[prop] !== undefined)
+              methodCache[prop] = undefined;
+            trigger(target, prop);
+          }
         }
       }
       return result;
@@ -3156,15 +3281,21 @@ function wrapArray(arr, node) {
       if (hadProperty && result) {
         if (isObject3(oldValue))
           detachPlace(oldValue, node, placeKey(prop));
-        if (event !== undefined)
-          dispatch(located, event);
-        const index = arrayIndex(prop);
-        if (index >= 0)
-          triggerArray(target, index, index + 1, false);
-        else
-          trigger(target, prop);
-        if (isObject3(oldValue))
-          evictDeep(oldValue);
+        try {
+          if (event !== undefined)
+            dispatch(located, event);
+        } finally {
+          const index = arrayIndex(prop);
+          if (index >= 0)
+            triggerArray(target, index, index + 1, false);
+          else {
+            if (methodCache[prop] !== undefined)
+              methodCache[prop] = undefined;
+            trigger(target, prop);
+          }
+          if (isObject3(oldValue))
+            evictDeep(oldValue);
+        }
       }
       return result;
     }
@@ -3194,10 +3325,6 @@ function wrapMap(map, node) {
         return target;
       if (prop === "__v_isReactive" /* IS_REACTIVE */)
         return true;
-      track(target, prop);
-      if (prop === Symbol.iterator || prop === "entries" || prop === "values" || prop === "keys" || prop === "forEach") {
-        track(target, Symbol.iterator);
-      }
       const cached = methodCache[prop];
       if (cached !== undefined && hasOwn.call(methodCache, prop))
         return cached;
@@ -3235,11 +3362,15 @@ function wrapMap(map, node) {
             detachPlace(oldValue, node, key);
           if (isObject4(value2))
             attachValue(value2, node, key, copied === 2 /* Fresh */, located && oldValue, held);
-          if (event !== undefined)
-            dispatch(located, event);
-          triggerCollection(target, key, oldSize !== newSize);
-          if (isObject4(oldValue))
-            evictDeep(oldValue);
+          try {
+            if (event !== undefined)
+              dispatch(located, event);
+          } finally {
+            if (!existed || oldValue === oldValue || value2 === value2)
+              triggerCollection(target, key, oldSize !== newSize);
+            if (isObject4(oldValue))
+              evictDeep(oldValue);
+          }
           return receiver;
         };
         return methodCache[prop];
@@ -3272,11 +3403,14 @@ function wrapMap(map, node) {
               indexRemoved(target, key);
             if (isObject4(oldValue))
               detachPlace(oldValue, node, key);
-            if (event !== undefined)
-              dispatch(located, event);
-            triggerCollection(target, key, oldSize !== newSize);
-            if (isObject4(oldValue))
-              evictDeep(oldValue);
+            try {
+              if (event !== undefined)
+                dispatch(located, event);
+            } finally {
+              triggerCollection(target, key, oldSize !== newSize);
+              if (isObject4(oldValue))
+                evictDeep(oldValue);
+            }
           }
           return result;
         };
@@ -3296,17 +3430,20 @@ function wrapMap(map, node) {
               detachPlace(value2, node, key);
           }
           const located = locate(node);
-          if (located !== undefined) {
-            dispatch(located, {
-              action: "map-clear",
-              path: located.paths[0],
-              key: null
-            });
-          }
-          triggerCleared(target, removed.map(([key]) => key));
-          for (const [, value2] of removed) {
-            if (isObject4(value2))
-              evictDeep(value2);
+          try {
+            if (located !== undefined) {
+              dispatch(located, {
+                action: "map-clear",
+                path: located.paths[0],
+                key: null
+              });
+            }
+          } finally {
+            triggerCleared(target, removed.map(([key]) => key));
+            for (const [, value2] of removed) {
+              if (isObject4(value2))
+                evictDeep(value2);
+            }
           }
         };
         return methodCache[prop];
@@ -3329,7 +3466,6 @@ function wrapMap(map, node) {
         return methodCache[prop];
       }
       if (prop === Symbol.iterator || prop === "entries" || prop === "values" || prop === "keys" || prop === "forEach") {
-        track(target, Symbol.iterator);
         if (prop === "forEach") {
           methodCache[prop] = (callbackfn, thisArg) => {
             const entriesIterator = proxy.entries();
@@ -3340,6 +3476,7 @@ function wrapMap(map, node) {
           return methodCache[prop];
         }
         methodCache[prop] = function* () {
+          track(target, Symbol.iterator);
           for (const [key, value2] of target.entries()) {
             if (prop === "keys") {
               yield key;
@@ -3382,6 +3519,15 @@ function wrapMap(map, node) {
 function isObject5(value) {
   return value !== null && typeof value === "object";
 }
+var setReaders = new Set([
+  "union",
+  "intersection",
+  "difference",
+  "symmetricDifference",
+  "isSubsetOf",
+  "isSupersetOf",
+  "isDisjointFrom"
+]);
 function wrapSet(set, node) {
   const cachedProxy = wrapperCache.get(set);
   if (cachedProxy)
@@ -3396,10 +3542,6 @@ function wrapSet(set, node) {
         return target;
       if (prop === "__v_isReactive" /* IS_REACTIVE */)
         return true;
-      track(target, prop);
-      if (prop === Symbol.iterator || prop === "entries" || prop === "values" || prop === "keys" || prop === "forEach") {
-        track(target, Symbol.iterator);
-      }
       const cached = methodCache[prop];
       if (cached !== undefined && hasOwn.call(methodCache, prop))
         return cached;
@@ -3426,9 +3568,12 @@ function wrapSet(set, node) {
               indexAdded(target, value2);
             if (isObject5(value2))
               attachValue(value2, node, undefined, copied === 2 /* Fresh */);
-            if (event !== undefined)
-              dispatch(located, event);
-            triggerCollection(target, value2, oldSize !== newSize);
+            try {
+              if (event !== undefined)
+                dispatch(located, event);
+            } finally {
+              triggerCollection(target, value2, oldSize !== newSize);
+            }
           }
           return receiver;
         };
@@ -3459,11 +3604,14 @@ function wrapSet(set, node) {
                 indexRemoved(target, value2);
               if (isObject5(value2))
                 detachPlace(value2, node, undefined);
-              if (event !== undefined)
-                dispatch(located, event);
-              triggerCollection(target, value2, oldSize !== newSize);
-              if (isObject5(value2))
-                evictDeep(value2);
+              try {
+                if (event !== undefined)
+                  dispatch(located, event);
+              } finally {
+                triggerCollection(target, value2, oldSize !== newSize);
+                if (isObject5(value2))
+                  evictDeep(value2);
+              }
             }
             return result;
           }
@@ -3485,17 +3633,20 @@ function wrapSet(set, node) {
               detachPlace(member, node, undefined);
           }
           const located = locate(node);
-          if (located !== undefined) {
-            dispatch(located, {
-              action: "set-clear",
-              path: located.paths[0],
-              value: null
-            });
-          }
-          triggerCleared(target, removed);
-          for (const member of removed) {
-            if (isObject5(member))
-              evictDeep(member);
+          try {
+            if (located !== undefined) {
+              dispatch(located, {
+                action: "set-clear",
+                path: located.paths[0],
+                value: null
+              });
+            }
+          } finally {
+            triggerCleared(target, removed);
+            for (const member of removed) {
+              if (isObject5(member))
+                evictDeep(member);
+            }
           }
         };
         return methodCache[prop];
@@ -3508,7 +3659,6 @@ function wrapSet(set, node) {
         return methodCache[prop];
       }
       if (prop === "values" || prop === Symbol.iterator || prop === "entries" || prop === "keys" || prop === "forEach") {
-        track(target, Symbol.iterator);
         const originalMethod = Reflect.get(target, prop, receiver);
         if (prop === "forEach") {
           methodCache[prop] = (callbackfn, thisArg) => {
@@ -3520,21 +3670,19 @@ function wrapSet(set, node) {
           return methodCache[prop];
         }
         methodCache[prop] = function* (...args) {
-          let index = 0;
+          track(target, Symbol.iterator);
           const iterator = originalMethod.apply(target, args);
           for (const entry of iterator) {
             let valueToWrap = entry;
             if (prop === "entries") {
               valueToWrap = entry[1];
             }
-            track(target, String(index));
             const wrappedValue = isObject5(valueToWrap) ? wrapChild(valueToWrap, node, undefined) : valueToWrap;
             if (prop === "entries") {
               yield [wrappedValue, wrappedValue];
             } else {
               yield wrappedValue;
             }
-            index++;
           }
         };
         return methodCache[prop];
@@ -3550,6 +3698,13 @@ function wrapSet(set, node) {
       if (typeof value === "function") {
         if (prop === "valueOf")
           return value;
+        if (setReaders.has(prop)) {
+          methodCache[prop] = function() {
+            track(target, Symbol.iterator);
+            return value.apply(target, arguments);
+          };
+          return methodCache[prop];
+        }
         return value.bind(target);
       }
       return value;
@@ -3570,19 +3725,19 @@ function isReactive(value) {
   return !!(value && value["__v_isReactive" /* IS_REACTIVE */]);
 }
 function createAsyncEmit(emit) {
-  const queue = [];
+  const queue2 = [];
   let flushScheduled = false;
   return (event) => {
-    queue.push(event);
+    queue2.push(event);
     if (!flushScheduled) {
       flushScheduled = true;
       queueMicrotask(() => {
         let failed = false;
         let failure;
         let next = 0;
-        while (next < queue.length) {
+        while (next < queue2.length) {
           try {
-            emit(queue[next++]);
+            emit(queue2[next++]);
           } catch (error) {
             if (!failed) {
               failed = true;
@@ -3590,11 +3745,11 @@ function createAsyncEmit(emit) {
             }
           }
           if (next === FLUSH_CHUNK) {
-            queue.splice(0, next);
+            queue2.splice(0, next);
             next = 0;
           }
         }
-        queue.length = 0;
+        queue2.length = 0;
         flushScheduled = false;
         if (failed)
           throw failure;
@@ -3708,17 +3863,24 @@ function wrapObject(obj, node, options) {
           setData(after, prop, value);
         copyPayloadReaching(event, located, target, after);
       }
+      const had = hasOwn.call(target, prop);
       const result = Reflect.set(target, prop, value, receiver);
       if (result && emits) {
         if (isObject6(oldValue))
           detachPlace(oldValue, node, prop);
         if (isObject6(value))
           attachValue(value, node, prop, copied === 2 /* Fresh */, located && oldValue, held);
-        if (event !== undefined)
-          dispatch(located, event);
-        trigger(target, prop);
-        if (isObject6(oldValue)) {
-          evictDeep(oldValue);
+        try {
+          if (event !== undefined)
+            dispatch(located, event);
+        } finally {
+          if (!had && hasOwn.call(target, prop))
+            triggerKeyChange(target);
+          else if (oldValue === oldValue || value === value)
+            trigger(target, prop);
+          if (isObject6(oldValue)) {
+            evictDeep(oldValue);
+          }
         }
       }
       return result;
@@ -3741,11 +3903,14 @@ function wrapObject(obj, node, options) {
       if (hadProperty && result) {
         if (isObject6(oldValue))
           detachPlace(oldValue, node, prop);
-        if (event !== undefined)
-          dispatch(located, event);
-        trigger(target, prop);
-        if (isObject6(oldValue)) {
-          evictDeep(oldValue);
+        try {
+          if (event !== undefined)
+            dispatch(located, event);
+        } finally {
+          triggerKeyChange(target);
+          if (isObject6(oldValue)) {
+            evictDeep(oldValue);
+          }
         }
       }
       return result;
@@ -4079,24 +4244,27 @@ function computed(getterOrOptions) {
   let _value;
   let _dirty = true;
   let computedRef;
-  const stopHandle = watchEffect(getter, {
-    lazy: true,
-    scheduler: () => {
-      if (!_dirty) {
-        _dirty = true;
-        trigger(computedRef, "value");
-      }
-    }
-  });
+  const stopHandle = watchEffect(getter, { lazy: true });
   const effectRunner = stopHandle.effect;
+  effectRunner.invalidate = () => {
+    if (!_dirty) {
+      _dirty = true;
+      trigger(computedRef, "value");
+    }
+  };
   computedRef = {
     [isRefSymbol]: true,
     [isComputedSymbol]: true,
     get value() {
       track(computedRef, "value");
       if (_dirty) {
-        _value = effectRunner.run();
         _dirty = false;
+        try {
+          _value = effectRunner.run();
+        } catch (error) {
+          _dirty = true;
+          throw error;
+        }
       }
       return _value;
     },
@@ -4116,6 +4284,29 @@ function isComputed(c) {
 }
 
 // src/watch.ts
+function traverse(value, seen = new Set) {
+  if (value === null || typeof value !== "object" || seen.has(value))
+    return value;
+  seen.add(value);
+  if (Array.isArray(value)) {
+    for (let i = 0;i < value.length; i++)
+      traverse(value[i], seen);
+  } else if (value instanceof Map) {
+    value.forEach((item, key) => {
+      traverse(key, seen);
+      traverse(item, seen);
+    });
+  } else if (value instanceof Set) {
+    value.forEach((item) => traverse(item, seen));
+  } else {
+    const raw = toRaw(value);
+    if (raw !== value)
+      trackKeys(raw);
+    for (const key in value)
+      traverse(value[key], seen);
+  }
+  return value;
+}
 function watch(source, callback, options = {}) {
   const { immediate = false, deep = true } = options;
   const isMultiSource = Array.isArray(source);

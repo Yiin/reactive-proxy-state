@@ -10,13 +10,13 @@ export interface TrackedEffect<T = any> {
     options?: WatchEffectOptions;
     active?: boolean;
     _rawCallback: EffectCallback<T>;
-    triggerDepth?: number;
     cleanupFns?: (() => void)[];
 }
 export declare let activeEffect: TrackedEffect<any> | null;
 export declare function setActiveEffect(effect: TrackedEffect<any> | null): void;
 /**
- * removes an effect from all dependency sets it belongs to.
+ * removes an effect from all dependency sets it belongs to, and each set it
+ * leaves empty from its map.
  * this is crucial to prevent memory leaks and unnecessary updates when an effect is stopped or re-run.
  */
 export declare function cleanupEffect(effect: TrackedEffect<any>): void;
@@ -41,13 +41,13 @@ export interface WatchEffectOptions {
     onTrack?: (event: {
         effect: EffectCallback<any>;
         target: object;
-        key: string | symbol;
+        key: unknown;
         type: 'track';
     }) => void;
     onTrigger?: (event: {
         effect: EffectCallback<any>;
         target: object;
-        key: string | symbol;
+        key: unknown;
         type: 'trigger';
     }) => void;
 }
