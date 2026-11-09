@@ -52,8 +52,9 @@ class SetProxyIterator<T> {
       this.target = undefined;
       return step;
     }
-    const value = isObject(step.value) ? wrapChild(step.value, this.node, undefined) : step.value;
-    return { value: this.entries ? [value, value] : value, done: false };
+    if (isObject(step.value)) step.value = wrapChild(step.value, this.node, undefined);
+    if (this.entries) return { value: [step.value, step.value], done: false };
+    return step;
   }
 }
 
