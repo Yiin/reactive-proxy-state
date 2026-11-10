@@ -1,9 +1,14 @@
 // Random hides, shows, defines, deletes, aliases and writes inside the
-// objects keys hold (3.0.18: a place under a hidden key leads to no root).
-// After every step, a replica fed by the events holds what the source shows
-// (JSON, keys sorted), and `updateState` logged no warning: no event names a
-// path through a hidden key. Run by Bun (tests/hidden-children.bun.test.ts)
-// and by Node: node tests/hidden-children.property.mjs <bundle> <runs> [seed]
+// objects keys hold (3.0.18: a place under a hidden key leads to no root),
+// symbol keys and array names that hold aliases (3.0.19: a replica holds
+// what JSON holds). After every step, a replica fed by the events holds what
+// the source shows (JSON, keys sorted), and `updateState` logged no warning:
+// no event names a path through a hidden key. A write inside an object sends
+// one event per path JSON shows it at, and no other; it reruns an effect
+// that read the written key when the value changed; and no step counts a
+// detached write, as every object written is in the tree. Run by Bun
+// (tests/hidden-children.bun.test.ts) and by Node:
+// node tests/hidden-children.property.mjs <bundle> <runs> [seed]
 import fc from "fast-check";
 import { resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -28,8 +33,13 @@ const stepArbitrary = fc.oneof(
   fc.record({ op: fc.constantFrom("innerHide", "innerShow"), key: fc.constantFrom(...keys), child: fc.constantFrom(...childKeys) }),
   fc.record({ op: fc.constant("deep"), key: fc.constantFrom(...keys), value: fc.integer({ min: 0, max: 3 }) }),
   fc.record({ op: fc.constant("other"), value: fc.integer({ min: 0, max: 3 }) }),
-  fc.record({ op: fc.constantFrom("push", "item"), key: fc.constantFrom(...keys), value: fc.integer({ min: 0, max: 3 }) })
+  fc.record({ op: fc.constantFrom("push", "item"), key: fc.constantFrom(...keys), value: fc.integer({ min: 0, max: 3 }) }),
+  // a symbol key or an array name that holds a value, maybe an alias
+  fc.record({ op: fc.constantFrom("symbol", "name"), key: fc.constantFrom(...keys), value: valueArbitrary }),
+  fc.record({ op: fc.constant("symbolInner"), value: fc.integer({ min: 0, max: 3 }) })
 );
+
+const symbol = Symbol("s");
 
 export const stepsArbitrary = fc.array(stepArbitrary, { minLength: 1, maxLength: 16 });
 
@@ -45,12 +55,25 @@ const isObject = (value) => value !== null && typeof value === "object";
 const has = (object, key) => Object.prototype.hasOwnProperty.call(object, key);
 
 /**
+ * The paths JSON shows `target` (a raw object) at below `value`: through
+ * enumerable string keys of objects and the indexes of arrays.
+ */
+function jsonPaths(value, target, path = [], out = []) {
+  if (!isObject(value)) return out;
+  if (value === target) out.push(path.join("."));
+  const keys = Array.isArray(value) ? value.map((_, index) => String(index)) : Object.keys(value);
+  for (const key of keys) jsonPaths(value[key], target, [...path, key], out);
+  return out;
+}
+
+/**
  * Runs `steps` on `lib`. Gives undefined when every step kept the replica
  * equal and logged no warning, else the first step that did not, with
  * what differed.
  */
 export function runHiddenChildren(lib, steps) {
-  const { reactive, updateState, toRaw } = lib;
+  const { reactive, updateState, toRaw, watchEffect, getProxyStats } = lib;
+  const detachedBefore = getProxyStats().detachedWrites;
   const source = { obj: { a: { n: 0 }, b: { n: 0, m: { x: 0 } }, c: 1 }, other: { n: 0 } };
   const remote = structuredClone(source);
   const warnings = [];
@@ -80,6 +103,19 @@ export function runHiddenChildren(lib, steps) {
     const step = steps[index];
     const obj = state.obj;
     const child = has(toRaw(obj), step.key ?? "") ? obj[step.key] : undefined;
+    const before = events.length;
+    // a write inside an object: the object (a proxy), the key, the value written
+    const inside = writeInside(step, obj, child, state, value);
+    let runs = 0;
+    let stop;
+    let old;
+    if (inside !== undefined) {
+      old = toRaw(inside.target)[inside.key];
+      stop = watchEffect(() => {
+        runs++;
+        inside.target[inside.key];
+      });
+    }
     switch (step.op) {
       case "hide":
       case "show":
@@ -118,12 +154,60 @@ export function runHiddenChildren(lib, steps) {
       case "item":
         if (Array.isArray(child) && isObject(child[0])) child[0].n = step.value;
         break;
+      case "symbol":
+        obj[symbol] = value(step.value);
+        break;
+      case "name":
+        if (Array.isArray(child)) child.meta = value(step.value);
+        break;
+      case "symbolInner":
+        if (isObject(obj[symbol]) && !Array.isArray(obj[symbol])) obj[symbol].n = step.value;
+        break;
     }
     const got = sortedJson(remote);
     const want = sortedJson(toRaw(state));
-    if (got !== want || warnings.length > 0) return { step: index, op: step, replica: got, source: want, warnings, events };
+    const fail = (why) => ({ step: index, op: step, why, replica: got, source: want, warnings, events });
+    if (got !== want || warnings.length > 0) return fail("replica");
+    if (inside !== undefined) {
+      stop();
+      const raw = toRaw(inside.target);
+      const written = raw[inside.key];
+      const changed = !(Object.is(old, written) || (isObject(old) && isObject(written) && sortedJson(old) === sortedJson(written)));
+      // the key is shown when JSON shows it: an enumerable string key
+      const shown = typeof inside.key === "string" && Object.prototype.propertyIsEnumerable.call(raw, inside.key);
+      const paths = changed && shown ? jsonPaths(toRaw(state), raw).map((path) => `${path}.${String(inside.key)}`).sort() : [];
+      const sent = events.slice(before).map((event) => event.slice(event.indexOf(" ") + 1)).sort();
+      if (JSON.stringify(sent) !== JSON.stringify(paths)) return fail({ sent, paths });
+      if (changed && runs !== 2) return fail({ runs });
+    }
+    if (getProxyStats().detachedWrites !== detachedBefore) return fail("detached write");
   }
   return undefined;
+}
+
+/**
+ * The object (a proxy), key and value of a step that writes inside an
+ * object with `=`, or undefined for any other step. A step that writes
+ * nothing (no such child) gives undefined too.
+ */
+function writeInside(step, obj, child, state, value) {
+  const plain = (target) => isObject(target) && !Array.isArray(target);
+  switch (step.op) {
+    case "inner":
+      return plain(child) ? { target: child, key: step.child } : undefined;
+    case "deep":
+      return plain(child) && plain(child.m) ? { target: child.m, key: "x" } : undefined;
+    case "other":
+      return { target: state.other, key: "n" };
+    case "item":
+      return Array.isArray(child) && isObject(child[0]) ? { target: child[0], key: "n" } : undefined;
+    case "symbolInner":
+      return plain(obj[symbol]) ? { target: obj[symbol], key: "n" } : undefined;
+    case "symbol":
+      return { target: obj, key: symbol };
+    default:
+      return undefined;
+  }
 }
 
 /** The property over `runs` cases; throws with the shrunk counterexample. */
