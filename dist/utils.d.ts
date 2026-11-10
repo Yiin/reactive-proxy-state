@@ -97,9 +97,11 @@ export declare const enum Named {
  * wire that keeps identity (structuredClone, an in-process listener) would
  * then hold one object where the source has several places, and apply each
  * per-place event to it again. Cycles are kept. Every own enumerable data
- * property is copied as an own data property (also `__proto__`), and an
- * array's holes stay holes; `named` says which arrays keep their named
- * properties. Levels deeper than `FILL_DEPTH` take no stack frame, so any
+ * property with a string key is copied as an own data property (also
+ * `__proto__`), and an array's holes stay holes; `named` says which arrays
+ * keep their named properties. A symbol key is not copied: a replica holds
+ * what JSON holds, and no event names a symbol key (see `hidden` in
+ * location.ts). Levels deeper than `FILL_DEPTH` take no stack frame, so any
  * depth fits.
  *
  * Throws a `SnapshotLimitError` (a `RangeError`) when the copy would make more than
@@ -135,10 +137,10 @@ export declare let copiedFresh: boolean;
  */
 export declare function cloneTreeAfter<T>(value: T, container: object, contents: object, named: Named): T;
 /**
- * The enumerable string and symbol keys of `array` other than indexes.
- * Indexes come first among string keys. Undefined when no keys remain.
+ * The enumerable string keys of `array` other than indexes. Indexes come
+ * first among string keys. Undefined when no keys remain.
  */
-export declare function namedKeys(array: object): (string | symbol)[] | undefined;
+export declare function namedKeys(array: object): string[] | undefined;
 /**
  * A canonical array index ("0", "17": digits without a leading zero, below
  * 2^32 - 1) as a number, or -1.

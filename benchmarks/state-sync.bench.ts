@@ -136,10 +136,31 @@ const wrappingResults = runBenchmark(
     }
 );
 
+// Benchmark hidden keys: a key that is not enumerable, a write inside the
+// object it holds, and a symbol key, which a replica never holds; none of
+// them sends an event, and each reruns its readers
+const hiddenResults = runBenchmark(
+    "Hidden Key Writes",
+    () => {
+        const raw: any = createComplexEntityState();
+        Object.defineProperty(raw, "cache", { value: { hits: 0 }, writable: true, enumerable: false, configurable: true });
+        raw[Symbol.for("meta")] = { seen: 0 };
+        return reactive(raw, emit);
+    },
+    (state) => {
+        state.cache.hits++;
+        state.cache = { hits: state.cache.hits };
+        state[Symbol.for("meta")].seen++;
+        state.counter++;
+        collectedEvents = [];
+    }
+);
+
 console.log("\n--- Summary ---");
 console.log(`Plain Object Ops/Sec: ${plainResults.avgOpsPerSec}`);
 console.log(`Wrapped Object Ops/Sec: ${wrappedResults.avgOpsPerSec}`);
 console.log(`Wrapping Cost Ops/Sec: ${wrappingResults.avgOpsPerSec}`);
+console.log(`Hidden Key Ops/Sec: ${hiddenResults.avgOpsPerSec}`);
 
 const overheadFactor = parseFloat(plainResults.avgOpsPerSec) / parseFloat(wrappedResults.avgOpsPerSec);
 console.log(`\nWrapped object mutations are roughly ${overheadFactor.toFixed(2)}x slower than plain object mutations.`);

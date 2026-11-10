@@ -372,3 +372,21 @@ A non-configurable, read-only define of `NaN` succeeds again, as on a plain obje
 An object with a hidden key no longer reads a property descriptor on each write; 3.0.17 did, also after the hidden key was deleted.
 
 Every other write sends the same events as in 3.0.17.
+
+## 3.0.19: no symbol keys on a replica
+
+A replica holds what JSON holds, so a symbol key is hidden whatever its flags.
+A write, a define or a `delete` of a symbol key, and a write inside an object a symbol key holds, send nothing and still rerun the effects that read them.
+3.0.18 sent such a write with the path segment `"Symbol(s)"`, and `updateState` added that string key to the replica.
+Event payloads (the initial `replace`, `newValue`, `items`, removed values) no longer copy symbol keys, also not on arrays, Maps, Sets and Dates.
+
+A write inside an object that an array name holds is sent on the object's other places alone.
+3.0.18 also sent it under the name, which a replica built from JSON does not have.
+A name that `parseInt` reads a number from (`"01"`) still reads as an item, and writes inside it are sent.
+
+`getProxyStats().detachedWrites` counts a write whose object left the tree, and only such a write.
+3.0.18 counted a write inside an object that a hidden key holds, which is in the tree, and no longer counted a write of a hidden key on an object that left.
+
+An object whose last accessor is deleted, or made data by a define, reads no property descriptor per write after one look at its keys; 3.0.18 kept reading one.
+
+Every other write sends the same events as in 3.0.18.

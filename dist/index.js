@@ -354,8 +354,6 @@ function copyLeaf(value) {
     else
       copy[key] = entry;
   }
-  if (Object.getOwnPropertySymbols(value).length !== 0)
-    return;
   return copy;
 }
 function readsOf(identity) {
@@ -403,13 +401,7 @@ function namedKeys(array) {
   let start = keys.length;
   while (start > 0 && arrayIndex(keys[start - 1]) < 0)
     start--;
-  const symbols = Object.getOwnPropertySymbols(array);
-  let names = start === keys.length ? undefined : keys.slice(start);
-  for (let i = 0;i < symbols.length; i++) {
-    if (isEnumerable.call(array, symbols[i]))
-      (names ??= []).push(symbols[i]);
-  }
-  return names;
+  return start === keys.length ? undefined : keys.slice(start);
 }
 function arrayIndex(key) {
   if (typeof key !== "string" || key.length === 0 || key.length > 10)
@@ -512,11 +504,6 @@ function entriesOf(source, identity) {
   for (const key in source)
     if (hasOwn.call(source, key))
       entries.push(source[key]);
-  const symbolKeys = Object.getOwnPropertySymbols(source);
-  for (let i = 0;i < symbolKeys.length; i++) {
-    if (isEnumerable.call(source, symbolKeys[i]))
-      entries.push(source[symbolKeys[i]]);
-  }
   return entries;
 }
 var cloneAncestors = [];
@@ -638,9 +625,6 @@ function cloneEntry(value, depth, named) {
       else
         copy[key] = child;
     }
-    const symbolKeys = Object.getOwnPropertySymbols(value);
-    if (symbolKeys.length !== 0)
-      pushed = fillSymbols(value, identity, copy, depth, named, symbolKeys, pushed);
   } else if (kind === 1 /* Array */) {
     const length = copy.length;
     for (let i = 0;i < length; i++) {
@@ -729,22 +713,6 @@ function fillObject(value, identity, copy, depth, named) {
       setData(copy, key, child);
     else
       copy[key] = child;
-  }
-  const symbolKeys = Object.getOwnPropertySymbols(value);
-  return symbolKeys.length === 0 ? pushed : fillSymbols(value, identity, copy, depth, named, symbolKeys, pushed);
-}
-function fillSymbols(value, identity, copy, depth, named, symbolKeys, pushed) {
-  const below = depth + 1;
-  for (let i = 0;i < symbolKeys.length; i++) {
-    const symbolKey = symbolKeys[i];
-    if (!isEnumerable.call(value, symbolKey))
-      continue;
-    const child = value[symbolKey];
-    if (child !== null && typeof child === "object" && !pushed) {
-      pushed = true;
-      enterPath(identity, copy, depth);
-    }
-    copy[symbolKey] = cloneValue(child, below, named);
   }
   return pushed;
 }
@@ -838,11 +806,6 @@ function fillCollectionProperties(value, copy, depth, named) {
   for (const key in value) {
     if (hasOwn.call(value, key))
       setData(copy, key, cloneValue(value[key], depth, named));
-  }
-  const symbols = Object.getOwnPropertySymbols(value);
-  for (let i = 0;i < symbols.length; i++) {
-    if (isEnumerable.call(value, symbols[i]))
-      setData(copy, symbols[i], cloneValue(value[symbols[i]], depth, named));
   }
 }
 var collectionIdentityKey = Symbol.for("@yiin/reactive-proxy-state.collection-identities.v4");
@@ -1772,7 +1735,7 @@ function getLocationNode(raw) {
 function ensureLocationNode(raw) {
   let node = nodes.get(raw);
   if (node === undefined) {
-    const kind = raw instanceof Map ? 1 /* Map */ : raw instanceof Set ? 2 /* Set */ : 0 /* Plain */;
+    const kind = Array.isArray(raw) ? 3 /* Array */ : raw instanceof Map ? 1 /* Map */ : raw instanceof Set ? 2 /* Set */ : 0 /* Plain */;
     node = {
       id: ++nodeCount,
       raw,
@@ -1786,7 +1749,7 @@ function ensureLocationNode(raw) {
       relinkedPlaces: 0,
       lostLink: false,
       dataOnly: undefined,
-      hidden: kind === 0 /* Plain */ ? undefined : null,
+      hidden: kind === 1 /* Map */ || kind === 2 /* Set */ ? null : undefined,
       childPlaces: 0,
       walk: 0,
       touched: 0,
@@ -1805,9 +1768,9 @@ function ownDescriptor(target, prop, node) {
 function lookAtKeys(node) {
   const target = node.raw;
   const keys = Reflect.ownKeys(target);
-  const array = Array.isArray(target);
+  const array = node.kind === 3 /* Array */;
   const small = keys.length <= 64;
-  let dataOnly = small;
+  let dataOnly = small ? true : null;
   let hidden = null;
   for (let i = 0;i < keys.length; i++) {
     const key = keys[i];
@@ -1817,17 +1780,24 @@ function lookAtKeys(node) {
       const descriptor = Reflect.getOwnPropertyDescriptor(target, key);
       if (descriptor.get !== undefined || descriptor.set !== undefined)
         dataOnly = false;
-      if (!descriptor.enumerable)
+      if (!descriptor.enumerable || typeof key === "symbol")
         (hidden ??= new Set).add(key);
-    } else if (!isEnumerable.call(target, key))
+    } else if (typeof key === "symbol" || !isEnumerable.call(target, key))
       (hidden ??= new Set).add(key);
   }
   node.dataOnly = dataOnly;
   node.hidden = hidden;
 }
+function shownKey(key, enumerable) {
+  return enumerable && typeof key !== "symbol";
+}
+function accessorMayBeGone(node) {
+  if (node.dataOnly === false)
+    node.dataOnly = undefined;
+}
 function noteHidden(node, prop, hidden) {
   const keys = node.hidden;
-  if (keys === undefined || typeof prop === "string" && Array.isArray(node.raw) && arrayIndex(prop) >= 0)
+  if (keys === undefined || typeof prop === "string" && node.kind === 3 /* Array */ && arrayIndex(prop) >= 0)
     return;
   if (hidden)
     (keys ?? (node.hidden = new Set)).add(prop);
@@ -1839,6 +1809,11 @@ function hiddenAt(parent, key) {
     lookAtKeys(parent);
   const hidden = parent.hidden;
   return hidden !== null && hidden !== undefined && hidden.has(key);
+}
+function unsentPlace(parent, key) {
+  if (parent.kind !== 3 /* Array */)
+    return parent.hidden !== null && hiddenAt(parent, key);
+  return typeof key !== "number" && (typeof key !== "string" || isNaN(parseInt(key, 10)) || hiddenAt(parent, key));
 }
 function fixedAfter(target, prop, descriptor, current) {
   if ("configurable" in descriptor && "writable" in descriptor)
@@ -1881,17 +1856,23 @@ function forwardsTo(receiver, target) {
   return true;
 }
 var MAX_RECEIVER_CHAIN = 64;
-function unsent() {
+function unsent(node) {
   checkListenerWrite();
+  countUnsent(node);
   return;
 }
+function countUnsent(node) {
+  if (node.proxy === undefined && !isAttached(node))
+    proxyStats.detachedWrites++;
+}
+var unsentHolder;
 function replacedInTree(node, oldValue) {
   return isObject2(oldValue) && isAttached(node) ? oldValue : undefined;
 }
 function definedAccessorFlags(node, target, prop, descriptor) {
   const result = Reflect.defineProperty(target, prop, descriptor);
   if (result && "enumerable" in descriptor)
-    noteHidden(node, prop, descriptor.enumerable !== true);
+    noteHidden(node, prop, !shownKey(prop, descriptor.enumerable === true));
   return result;
 }
 function holdsIn(parent, key, raw) {
@@ -1934,6 +1915,7 @@ function samePlace(place, parent, key) {
 }
 function chain(node, tail, events) {
   let reversed;
+  const pathless = !events;
   let current = node;
   for (let steps = 0;steps < FAST_CHAIN_LIMIT; steps++) {
     const places = current.places;
@@ -1941,7 +1923,7 @@ function chain(node, tail, events) {
     if (root !== undefined) {
       if (places.length !== 0)
         return;
-      return { root, paths: [buildPath(root.path, reversed, tail)] };
+      return pathless ? false : { root, paths: [buildPath(root.path, reversed, tail)] };
     }
     if (places.length !== 1)
       return places.length === 0 ? null : undefined;
@@ -1952,9 +1934,13 @@ function chain(node, tail, events) {
       current.places = [];
       return null;
     }
-    if (events && parent.hidden !== null && typeof place.key !== "number" && hiddenAt(parent, place.key))
-      return null;
-    (reversed ??= []).push(segment(parent, place.key, current.raw));
+    if (!pathless) {
+      if (unsentPlace(parent, place.key)) {
+        unsentHolder = parent;
+        return false;
+      }
+      (reversed ??= []).push(segment(parent, place.key, current.raw));
+    }
     current = parent;
   }
   return;
@@ -1984,7 +1970,7 @@ function findAll(node, tail, firstOnly, events) {
       }
       if (visiting.has(parent))
         continue;
-      if (events && parent.hidden !== null && typeof place.key !== "number" && hiddenAt(parent, place.key))
+      if (events && unsentPlace(parent, place.key))
         continue;
       segments.push(segment(parent, place.key, current.raw));
       const root = parent.root;
@@ -2025,11 +2011,17 @@ function locate(node, tail) {
       proxyStats.detachedWrites++;
       return;
     }
+    if (single === false) {
+      countUnsent(unsentHolder);
+      unsentHolder = undefined;
+      return;
+    }
     return single.root.emit === undefined ? undefined : single;
   }
   const found = findAll(node, tail, false, true);
   if (found.length === 0) {
-    proxyStats.detachedWrites++;
+    if (!isAttached(node))
+      proxyStats.detachedWrites++;
     return;
   }
   let root = found[0].root;
@@ -2329,7 +2321,7 @@ function refuseAccessors(event, removed, container, after) {
       for (const item of Set.prototype.values.call(value))
         pending.push(item);
     }
-    const keys = Reflect.ownKeys(value);
+    const keys = Object.getOwnPropertyNames(value);
     for (let i = 0;i < keys.length; i++) {
       const item = enumerableData(value, keys[i]);
       if (item !== NOT_ENUMERABLE)
@@ -3526,11 +3518,11 @@ function wrapArray(arr, node) {
           return true;
         return writeThroughSetter(target, prop, value, receiver, forwards, oldValue);
       }
-      const shownBefore = !named || had && (current === undefined ? node.hidden?.has(prop) !== true : current.enumerable === true);
-      let shown = named && had ? shownBefore : true;
+      const shownBefore = !named || had && (current === undefined ? node.hidden?.has(prop) !== true : shownKey(prop, current.enumerable === true));
+      let shown = !named || (had ? shownBefore : typeof prop !== "symbol");
       if (descriptor !== undefined) {
         if (named)
-          shown = "enumerable" in descriptor ? descriptor.enumerable === true : shownBefore;
+          shown = "enumerable" in descriptor ? shownKey(prop, descriptor.enumerable === true) : shownBefore;
         if (refusedDefine(target, prop, value, descriptor, current))
           return false;
       }
@@ -3540,7 +3532,7 @@ function wrapArray(arr, node) {
       const truncated = prop === "length" && Number(value) < target.length ? target.slice(Number(value)) : undefined;
       const grows = prop === "length" && Number(value) > Number(oldValue);
       const sent = shown || shownBefore;
-      const located = grows ? locate(node) : sent ? locate(node, prop) : unsent();
+      const located = grows ? locate(node) : sent ? locate(node, prop) : unsent(node);
       const event = located === undefined || grows ? undefined : shown ? { action: "set", path: located.paths[0], oldValue, newValue: value } : { action: "delete", path: located.paths[0], oldValue };
       const held = event !== undefined && shown ? heldItems(value, oldValue) : undefined;
       const copied = copyPayload(event, located, target, held);
@@ -3553,8 +3545,10 @@ function wrapArray(arr, node) {
       const oldLength = target.length;
       const result = descriptor !== undefined ? Reflect.defineProperty(target, prop, descriptor.value === value ? descriptor : { ...descriptor, value }) : Reflect.set(target, prop, value);
       if (result) {
-        if (descriptor !== undefined && !(shown && shownBefore))
+        if ((had && !shownBefore) === shown)
           noteHidden(node, prop, !shown);
+        if (current !== undefined && descriptor !== undefined && !("value" in current))
+          accessorMayBeGone(node);
         if (truncated !== undefined) {
           relinkArray(node, target, target.length, truncated);
         } else if (prop !== "length") {
@@ -3610,7 +3604,7 @@ function wrapArray(arr, node) {
     },
     deleteProperty(target, prop) {
       const oldValue = target[prop];
-      const enumerable = isEnumerable.call(target, prop);
+      const enumerable = shownKey(prop, isEnumerable.call(target, prop));
       const hadProperty = enumerable || hasOwn.call(target, prop);
       const located = hadProperty && (enumerable || arrayIndex(prop) >= 0) ? locate(node, prop) : undefined;
       const event = located && { action: "delete", path: located.paths[0], oldValue };
@@ -3623,6 +3617,7 @@ function wrapArray(arr, node) {
       if (hadProperty && result) {
         if (!enumerable)
           noteHidden(node, prop, false);
+        accessorMayBeGone(node);
         if (isObject3(oldValue))
           detachPlace(oldValue, node, placeKey(prop));
         beginWrite();
@@ -3669,8 +3664,9 @@ function wrapArray(arr, node) {
       const oldLength = target.length;
       const result = Reflect.defineProperty(target, prop, descriptor);
       if (result) {
-        node.dataOnly = false;
-        noteHidden(node, prop, !isEnumerable.call(target, prop));
+        if (node.dataOnly === true)
+          node.dataOnly = false;
+        noteHidden(node, prop, !shownKey(prop, isEnumerable.call(target, prop)));
         beginWrite();
         try {
           const index = arrayIndex(prop);
@@ -4362,17 +4358,17 @@ function wrapObject(obj, node, options) {
           return true;
         return writeThroughSetter(target, prop, value, receiver, forwards, oldValue);
       }
-      const shownBefore = had && (current === undefined ? node.hidden?.has(prop) !== true : current.enumerable === true);
-      let shown = had ? shownBefore : true;
+      const shownBefore = had && (current === undefined ? node.hidden?.has(prop) !== true : shownKey(prop, current.enumerable === true));
+      let shown = had ? shownBefore : typeof prop !== "symbol";
       if (descriptor !== undefined) {
-        shown = "enumerable" in descriptor ? descriptor.enumerable === true : shownBefore;
+        shown = "enumerable" in descriptor ? shownKey(prop, descriptor.enumerable === true) : shownBefore;
         if (refusedDefine(target, prop, value, descriptor, current))
           return false;
       }
       if (had && (oldValue === value || !options?.async && isObject6(oldValue) && isObject6(value) && deepEqual(oldValue, value)) && (descriptor === undefined || shown === shownBefore && definesFlagsAlone(target, prop, oldValue, value, descriptor, current)))
         return descriptor === undefined || Reflect.defineProperty(target, prop, { ...descriptor, value: oldValue });
       const sent = shown || shownBefore;
-      const located = sent ? locate(node, prop) : unsent();
+      const located = sent ? locate(node, prop) : unsent(node);
       const event = located === undefined ? undefined : shown ? { action: "set", path: located.paths[0], oldValue, newValue: value } : { action: "delete", path: located.paths[0], oldValue };
       const held = located && heldItems(value, oldValue);
       const copied = copyPayload(event, located, target, held);
@@ -4386,8 +4382,10 @@ function wrapObject(obj, node, options) {
       }
       const result = descriptor === undefined ? Reflect.set(target, prop, value) : had && current === undefined && valueOnly(descriptor) && Reflect.set(target, prop, value) || Reflect.defineProperty(target, prop, descriptor.value === value ? descriptor : { ...descriptor, value });
       if (result) {
-        if (descriptor !== undefined && !(shown && shownBefore))
+        if ((had && !shownBefore) === shown)
           noteHidden(node, prop, !shown);
+        if (current !== undefined && descriptor !== undefined && !("value" in current))
+          accessorMayBeGone(node);
         if (isObject6(oldValue))
           detachPlace(oldValue, node, prop);
         if (isObject6(value))
@@ -4414,7 +4412,7 @@ function wrapObject(obj, node, options) {
     },
     deleteProperty(target, prop) {
       const oldValue = target[prop];
-      const shown = isEnumerable.call(target, prop);
+      const shown = shownKey(prop, isEnumerable.call(target, prop));
       const hadProperty = shown || hasOwn.call(target, prop);
       const located = shown ? locate(node, prop) : undefined;
       const event = located && {
@@ -4431,6 +4429,7 @@ function wrapObject(obj, node, options) {
       if (hadProperty && result) {
         if (!shown)
           noteHidden(node, prop, false);
+        accessorMayBeGone(node);
         if (isObject6(oldValue))
           detachPlace(oldValue, node, prop);
         beginWrite();
@@ -4471,8 +4470,9 @@ function wrapObject(obj, node, options) {
       const had = hasOwn.call(target, prop);
       const result = Reflect.defineProperty(target, prop, descriptor);
       if (result) {
-        node.dataOnly = false;
-        noteHidden(node, prop, !isEnumerable.call(target, prop));
+        if (node.dataOnly === true)
+          node.dataOnly = false;
+        noteHidden(node, prop, !shownKey(prop, isEnumerable.call(target, prop)));
         beginWrite();
         try {
           if (!had)

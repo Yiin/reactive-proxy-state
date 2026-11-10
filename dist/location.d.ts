@@ -23,7 +23,8 @@ import type { EmitFunction, Path, StateEvent } from "./types";
 export declare const enum ContainerKind {
     Plain = 0,
     Map = 1,
-    Set = 2
+    Set = 2,
+    Array = 3
 }
 export interface LocationRoot {
     emit: EmitFunction | undefined;
@@ -90,17 +91,21 @@ export interface LocationNode {
     lostLink: boolean;
     /**
      * The object had no own accessor when its proxy first looked (see
-     * `ownDescriptor`), and no define through the proxy added one since;
-     * undefined before that look.
+     * `ownDescriptor`), and no define through the proxy added one since:
+     * true. False when it has one, null when it has more than 64 keys (a
+     * descriptor per write), undefined before that look. A delete, or a
+     * define that makes an accessor data, of an object with an accessor sets
+     * it back to undefined, so the next write looks again.
      */
-    dataOnly: boolean | undefined;
+    dataOnly: boolean | null | undefined;
     /**
-     * The object's hidden own keys (not enumerable; an array's items and `length`
-     * aside), as the proxy saw them at its first look (see `lookAtKeys`) and
-     * its writes and defines changed them since: null when there is none,
-     * undefined before that look. A replica does not hold a hidden key, so a
-     * place under one leads to no root (see `locate`). A map or a set has
-     * none: its places are its entries.
+     * The object's hidden own keys (not enumerable, or a symbol; an array's
+     * items and `length` aside), as the proxy saw them at its first look (see
+     * `lookAtKeys`) and its writes and defines changed them since: null when
+     * there is none, undefined before that look. A replica holds the
+     * enumerable string keys alone, as JSON does, so it does not hold a hidden
+     * key, and a place under one leads to no root (see `locate`). A map or a
+     * set has none: its places are its entries.
      */
     hidden: Set<PropertyKey> | null | undefined;
     /**
@@ -140,9 +145,22 @@ export declare function ensureLocationNode(raw: object): LocationNode;
  * first looked has none until a define through the proxy adds one, and no
  * descriptor is made per write. An accessor or a hidden key added raw is
  * outside the supported input. An object with more than 64 own keys reads
- * the descriptor at each write.
+ * the descriptor at each write, and so does one with an accessor, until a
+ * delete or a define that makes an accessor data has it look again.
  */
 export declare function ownDescriptor(target: object, prop: PropertyKey, node: LocationNode): PropertyDescriptor | undefined;
+/**
+ * Does a replica hold an own key `key` with the enumerable flag
+ * `enumerable`? It holds the enumerable string keys, as JSON does. (An
+ * array's index is sent whatever its flags; no caller asks for one.)
+ */
+export declare function shownKey(key: PropertyKey, enumerable: boolean): boolean;
+/**
+ * The object of `node` may have lost its last accessor (a delete, or a
+ * define that made one data): its next write looks at its keys again (see
+ * `dataOnly`).
+ */
+export declare function accessorMayBeGone(node: LocationNode): void;
 /**
  * A write or define through the proxy left `prop` of the object of `node`
  * hidden, or not: `node.hidden` follows, once the proxy looked (see
@@ -193,10 +211,12 @@ export declare function inheritedSetter(target: object, prop: PropertyKey): Prop
  */
 export declare function forwardsTo(receiver: any, target: object): boolean;
 /**
- * A write of a hidden key sends nothing, so it looks up no paths (see
- * `locate`). It is still a write: a listener's write counts it.
+ * A write of a hidden key of the object of `node` sends nothing, so it
+ * looks up no paths (see `locate`). It is still a write: a listener's write
+ * counts it, and so does `detachedWrites` when the object left the tree
+ * (see `countUnsent`).
  */
-export declare function unsent(): undefined;
+export declare function unsent(node: LocationNode): undefined;
 /**
  * The value a write of a hidden key of the object of `node` replaced, for
  * `attachValue`, when the object is in the tree (see `isAttached`). A sent
@@ -215,22 +235,28 @@ export interface Target {
 }
 /**
  * Where an event about `node` (plus `tail`) goes: every current place of the
- * object, under one root. Undefined when the object is detached or that root
- * has no emit function. A place under a hidden key is not one: a write
- * inside an object only hidden keys hold is detached and sends nothing (see
- * `hidden`).
+ * object, under one root. Undefined when the object is detached, when every
+ * place passes a place a replica does not follow (a hidden key, or an
+ * array's name; see `unsentPlace`), or when that root has no emit function.
+ * A write inside an object only such places hold sends nothing.
  *
  * An object under two roots (a replica built on raw objects it shares with
  * its source) emits only to its scope, the root it was first read under, so
- * applying an event to the replica cannot echo back to the source.
+ * applying an event to the replica cannot echo back to the source. The rule
+ * picks among the roots the object has a sent path under: a scope whose
+ * paths all pass a hidden key, like a scope that no longer holds the
+ * object, has none, and the write goes to the other root. That root holds
+ * the object, so its replicas need the write.
  *
- * A write that finds no root is counted in `proxyStats.detachedWrites`.
+ * A write whose object is in no tree is counted in
+ * `proxyStats.detachedWrites`; one that only unsent places hold is in the
+ * tree, and is not (see `countUnsent`).
  */
 export declare function locate(node: LocationNode, tail?: PropertyKey): Target | undefined;
 /**
  * Is the object somewhere under a root (with or without an emit function)?
- * A place under a hidden key counts: the object keeps its places and its
- * proxy there.
+ * A place a replica does not follow (see `unsentPlace`) counts: the object
+ * keeps its places and its proxy there.
  */
 export declare function isAttached(node: LocationNode): boolean;
 /**
