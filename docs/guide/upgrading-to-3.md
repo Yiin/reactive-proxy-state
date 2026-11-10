@@ -390,3 +390,20 @@ A name that `parseInt` reads a number from (`"01"`) still reads as an item, and 
 An object whose last accessor is deleted, or made data by a define, reads no property descriptor per write after one look at its keys; 3.0.18 kept reading one.
 
 Every other write sends the same events as in 3.0.18.
+
+## 3.0.20: proxies hold less memory
+
+Every object proxy now shares one set of traps, and so does every array proxy.
+A proxy keeps only its own fields: where its object sits, its options and itself.
+Until 3.0.19 each proxy had its own handler with four functions, about 300 bytes more on Node.
+
+Reading 200,000 items of `{ a, b: { c } }` keeps this much heap per item:
+
+| Runtime     | 3.0.11  | 3.0.19  | 3.0.20  |
+| ----------- | ------- | ------- | ------- |
+| Node 26     | 1,651 B | 1,843 B | 1,235 B |
+| Bun 1.3.9   | 1,289 B | 1,481 B | 1,001 B |
+
+`benchmarks/proxy-memory.mjs` measures it; pass `array` to measure `{ a, b: [c] }` items.
+
+Events, effects and every other behaviour are the same as in 3.0.19.
