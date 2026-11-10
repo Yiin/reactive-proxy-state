@@ -3682,7 +3682,7 @@ function wrapMap(map, node) {
   if (globalSeen.has(map))
     return globalSeen.get(map);
   const methodCache = newMethodCache();
-  let ownMembers;
+  let ownMembers = false;
   const watch = watchIndex(map);
   const proxy = new Proxy(map, {
     get(target, prop, receiver) {
@@ -3697,8 +3697,6 @@ function wrapMap(map, node) {
         track(target, "size");
         return target.size;
       }
-      if (ownMembers === undefined)
-        ownMembers = Reflect.ownKeys(target).length > 0;
       if (ownMembers && hasOwn.call(target, prop))
         return collectionMember(target, prop, Reflect.get(target, prop, receiver));
       if (prop === "set") {
@@ -3961,7 +3959,7 @@ function wrapSet(set, node) {
   if (globalSeen.has(set))
     return globalSeen.get(set);
   const methodCache = newMethodCache();
-  let ownMembers;
+  let ownMembers = false;
   const watch = watchIndex(set);
   const proxy = new Proxy(set, {
     get(target, prop, receiver) {
@@ -3976,8 +3974,6 @@ function wrapSet(set, node) {
         track(target, "size");
         return target.size;
       }
-      if (ownMembers === undefined)
-        ownMembers = Reflect.ownKeys(target).length > 0;
       if (ownMembers && hasOwn.call(target, prop))
         return collectionMember(target, prop, Reflect.get(target, prop, receiver));
       if (prop === "add") {

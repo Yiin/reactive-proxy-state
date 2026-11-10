@@ -217,7 +217,7 @@ In 3.0.11 it sent nothing, and a method read before the define hid the defined o
 A define of an accessor reruns the effects that read the key, and sends no event.
 A define of flags alone, as `Object.freeze` makes for each key, changes no value: it reruns nothing and sends nothing.
 
-A Map or Set proxy reads an own property in place of its method, also when the property was defined after the proxy read the method.
+A Map or Set proxy reads a property defined through it, with `Object.defineProperty` or `=`, in place of its method, also after the proxy read the method.
 In 3.0.11, `set.add = fn` left `set.add()` adding values.
 
 The proxies cache only the methods of `Array.prototype`, `Map.prototype` and `Set.prototype`.

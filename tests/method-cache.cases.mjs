@@ -284,7 +284,9 @@ export function methodCacheCases(lib) {
     };
   }
 
-  cases["an own method of a fresh Map or Set is read in place of the proxy's"] = () => {
+  // An own property of a Map or Set made before its proxy stands in place of
+  // a method only where the proxy reads the method from the collection, as here.
+  cases["an own get of a fresh Map and an own union of a fresh Set are read in place of the proxy's"] = () => {
     const map = new Map([["a", 1]]);
     map.get = () => "own get";
     const set = new Set([1]);

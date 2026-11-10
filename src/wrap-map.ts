@@ -75,9 +75,10 @@ export function wrapMap<K, V>(map: Map<K, V>, node: LocationNode): Map<K, V> {
   if (globalSeen.has(map)) return globalSeen.get(map);
 
   const methodCache = newMethodCache();
-  // does the map have own properties? Read at the first read past the
-  // cache; a define through the proxy adds one
-  let ownMembers: boolean | undefined;
+  // was a property defined through the proxy? Only then can an own
+  // property stand in place of a method. (Checking every map made array
+  // reads of cached methods 20% slower on Bun.)
+  let ownMembers = false;
   // the proxy keeps the collection's index by token, once it has one
   const watch = watchIndex(map);
 
@@ -96,7 +97,6 @@ export function wrapMap<K, V>(map: Map<K, V>, node: LocationNode): Map<K, V> {
         return target.size;
       }
       // an own property in place of a method is read as it is
-      if (ownMembers === undefined) ownMembers = Reflect.ownKeys(target).length > 0;
       if (ownMembers && hasOwn.call(target, prop)) return collectionMember(target, prop, Reflect.get(target, prop, receiver));
 
       if (prop === "set") {
