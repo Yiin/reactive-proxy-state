@@ -1815,8 +1815,17 @@ function setterOf(target, prop, own, node) {
   return;
 }
 function forwardsTo(receiver, target) {
-  return receiver !== target && receiver !== null && typeof receiver === "object" && receiver["__v_raw" /* RAW */] === target && Object.getPrototypeOf(receiver) === Object.getPrototypeOf(target);
+  if (receiver === target || receiver === null || typeof receiver !== "object" || receiver["__v_raw" /* RAW */] !== target)
+    return false;
+  let proto = Object.getPrototypeOf(receiver);
+  for (let hops = 0;proto !== null; hops++) {
+    if (hops === MAX_RECEIVER_CHAIN || proto["__v_raw" /* RAW */] === target)
+      return false;
+    proto = Object.getPrototypeOf(proto);
+  }
+  return true;
 }
+var MAX_RECEIVER_CHAIN = 64;
 function hasNoOwnAccessor(target) {
   const keys = Reflect.ownKeys(target);
   if (keys.length > 64)
@@ -4157,6 +4166,17 @@ function createAsyncEmit(emit) {
     }
   };
 }
+function enumerableAfter(target, prop, descriptor) {
+  const current = Reflect.getOwnPropertyDescriptor(target, prop);
+  if (descriptor === undefined)
+    return current === undefined || current.enumerable === true;
+  if ("enumerable" in descriptor)
+    return descriptor.enumerable === true;
+  return current !== undefined && current.enumerable === true;
+}
+function valueOnly(descriptor) {
+  return !("writable" in descriptor) && !("enumerable" in descriptor) && !("configurable" in descriptor);
+}
 var FLUSH_CHUNK = 1024;
 function reactive(obj, emit, path = [], options) {
   if (obj["__v_skip" /* SKIP */]) {
@@ -4224,7 +4244,10 @@ function createProxy(raw, node, options) {
   return proxy;
 }
 function wrapObject(obj, node, options) {
-  const proxy = new Proxy(obj, {
+  let forwarders;
+  let landing;
+  let landingProp;
+  const handler = {
     get(target, prop, receiver) {
       if (prop === "__v_raw" /* RAW */) {
         return target;
@@ -4238,24 +4261,32 @@ function wrapObject(obj, node, options) {
         return value;
       return wrapChild(value, node, prop, options);
     },
-    set(target, prop, value, receiver) {
-      const forwards = receiver === proxy || forwardsTo(receiver, target);
+    set(target, prop, value, receiver, descriptor) {
       const had = hasOwn.call(target, prop);
-      const setter = setterOf(target, prop, had, node);
-      if (!forwards && setter === undefined)
-        return Reflect.set(target, prop, value, receiver);
+      const setter = had && node.dataOnly === true ? undefined : setterOf(target, prop, had, node);
+      if (receiver !== proxy && setter === undefined && !(had && forwarders?.get(receiver)?.has(prop) === true)) {
+        const previous = landing;
+        const previousProp = landingProp;
+        landing = receiver;
+        landingProp = prop;
+        try {
+          return Reflect.set(target, prop, value, receiver);
+        } finally {
+          landing = previous;
+          landingProp = previousProp;
+        }
+      }
       if (isObject6(value))
         value = unwrapForStore(value);
       const oldValue = target[prop];
-      if (setter !== undefined) {
+      if (setter !== undefined && descriptor === undefined) {
+        const forwards = receiver === proxy || forwardsTo(receiver, target);
         if (forwards && setter.get !== undefined && (oldValue === value || !options?.async && isObject6(oldValue) && isObject6(value) && deepEqual(oldValue, value)))
           return true;
         return writeThroughSetter(target, prop, value, receiver, forwards, oldValue);
       }
-      if (oldValue === value && had)
-        return true;
-      if (!options?.async && isObject6(oldValue) && isObject6(value) && had && deepEqual(oldValue, value))
-        return true;
+      if (had && (oldValue === value || !options?.async && isObject6(oldValue) && isObject6(value) && deepEqual(oldValue, value)))
+        return descriptor === undefined || Reflect.defineProperty(target, prop, { ...descriptor, value: oldValue });
       const located = locate(node, prop);
       const event = located && {
         action: "set",
@@ -4267,12 +4298,11 @@ function wrapObject(obj, node, options) {
       const copied = copyPayload(event, located, target, held);
       if (copied === 0 /* Reaches */) {
         const after = shallowCopy(target);
-        const descriptor = Reflect.getOwnPropertyDescriptor(target, prop);
-        if (descriptor === undefined || descriptor.enumerable)
+        if (enumerableAfter(target, prop, descriptor))
           setData(after, prop, value);
         copyPayloadReaching(event, located, target, after);
       }
-      const result = Reflect.set(target, prop, value, receiver);
+      const result = descriptor === undefined ? Reflect.set(target, prop, value) : had && node.dataOnly === true && valueOnly(descriptor) && Reflect.set(target, prop, value) || Reflect.defineProperty(target, prop, descriptor.value === value ? descriptor : { ...descriptor, value });
       if (result) {
         if (isObject6(oldValue))
           detachPlace(oldValue, node, prop);
@@ -4332,8 +4362,45 @@ function wrapObject(obj, node, options) {
         }
       }
       return result;
+    },
+    defineProperty(target, prop, descriptor) {
+      if ("value" in descriptor) {
+        if (landing !== undefined) {
+          if (landingProp === prop && valueOnly(descriptor) && hasOwn.call(target, prop)) {
+            forwarders ??= new WeakMap;
+            let keys = forwarders.get(landing);
+            if (keys === undefined)
+              forwarders.set(landing, keys = new Set);
+            keys.add(prop);
+          }
+          landing = undefined;
+        }
+        return handler.set(target, prop, descriptor.value, proxy, descriptor);
+      }
+      if (!("get" in descriptor) && !("set" in descriptor)) {
+        const current = Reflect.getOwnPropertyDescriptor(target, prop);
+        if (current !== undefined && (("value" in current) || !("writable" in descriptor)))
+          return Reflect.defineProperty(target, prop, descriptor);
+        return handler.set(target, prop, undefined, proxy, descriptor);
+      }
+      const had = hasOwn.call(target, prop);
+      const result = Reflect.defineProperty(target, prop, descriptor);
+      if (result) {
+        node.dataOnly = undefined;
+        beginWrite();
+        try {
+          if (!had)
+            triggerKeyChange(target);
+          else
+            trigger(target, prop);
+        } finally {
+          endWrite();
+        }
+      }
+      return result;
     }
-  });
+  };
+  const proxy = new Proxy(obj, handler);
   globalSeen.set(obj, proxy);
   proxyStats.created++;
   proxyStats.objects++;

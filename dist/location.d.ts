@@ -136,11 +136,18 @@ export declare function ensureLocationNode(raw: object): LocationNode;
  */
 export declare function setterOf(target: object, prop: PropertyKey, own: boolean, node: LocationNode): PropertyDescriptor | undefined;
 /**
- * Does a write that reached the proxy of `target` with `receiver` as its
- * receiver land on `target`? An outer proxy over the proxy, at any depth,
- * forwards: it gives `target` as its raw object and has its prototype.
- * `Object.create(proxy)`, the raw object itself and any other object do
- * not: the write lands on that receiver, as on a plain object.
+ * Does a setter write that reached the proxy of `target` with `receiver`
+ * as its receiver land on `target`? An outer proxy over the proxy, at any
+ * depth and with any traps that do not replace the write (a membrane's
+ * `getPrototypeOf` or `getOwnPropertyDescriptor`), forwards: it gives
+ * `target` as its raw object, and no object on its prototype chain does.
+ * `Object.create(proxy)` (also of an outer proxy, at any depth), the raw
+ * object itself and any other object do not: the setter runs with that
+ * receiver as `this`, as on a plain object. A data write needs no such
+ * check: it lands where the receiver sends it, and on `target` it ends in
+ * the proxy's `defineProperty` trap. A prototype chain longer than
+ * `MAX_RECEIVER_CHAIN` (only a proxy's `getPrototypeOf` can make one
+ * endless) counts as an object that inherits from the proxy.
  */
 export declare function forwardsTo(receiver: any, target: object): boolean;
 /** Where an event goes: one root and every path of the object under it. */

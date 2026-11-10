@@ -586,6 +586,26 @@ export function objectDefineCases(lib) {
     assert.deepEqual(result.runs, [3]);
   };
 
+  // Only a proxy's getPrototypeOf can make an endless prototype chain: the
+  // receiver check stops and runs the setter as for a child.
+  cases["a setter write through an outer proxy with an endless prototype chain ends"] = () => {
+    class Model {
+      get foo() {
+        return this.bar;
+      }
+      set foo(value) {
+        this.bar = value;
+      }
+    }
+    const endless = new Proxy({}, { getPrototypeOf: () => endless });
+    const result = record(lib, Object.assign(new Model(), { bar: 1 }), [["bar"]], (obj) => {
+      const outer = new Proxy(obj, { getPrototypeOf: () => endless });
+      outer.foo = 2;
+      outer.foo = 2;
+    });
+    assert.deepEqual([result.events, result.runs], [["set obj.bar 2"], [2]]);
+  };
+
   // Not remembered: another receiver lands on itself, a child on itself.
   cases["a receiver that does not forward is never remembered"] = () => {
     const result = record(lib, { a: 1 }, [["a"]], (obj, state) => {
