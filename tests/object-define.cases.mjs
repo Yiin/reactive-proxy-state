@@ -505,12 +505,13 @@ export function objectDefineCases(lib) {
       for (const value of [2, 3]) {
         outer.a = value;
         plainHiding.a = value;
+        assert.deepEqual(Object.getOwnPropertyDescriptor(toRaw(obj), "a"), Object.getOwnPropertyDescriptor(plain, "a"));
+        assert.equal(Object.getOwnPropertyDescriptor(plain, "a").enumerable, true);
         Object.defineProperty(toRaw(obj), "a", { enumerable: false });
         Object.defineProperty(plain, "a", { enumerable: false });
       }
     });
     assert.deepEqual([result.events, result.runs], [["set obj.a 2", "set obj.a 3"], [3]]);
-    assert.deepEqual(Object.getOwnPropertyDescriptor(result.raw, "a"), Object.getOwnPropertyDescriptor(plain, "a"));
   };
 
   cases["a remembered outer proxy writes a key deleted and added again, or made read-only, as the plain write"] = () => {
@@ -529,6 +530,60 @@ export function objectDefineCases(lib) {
     });
     assert.deepEqual(result.events, ["set obj.a 2", "set obj.a 3", "delete obj.a undefined", "set obj.a 4", "set obj.a 5"]);
     assert.deepEqual([result.runs, result.raw], [[6], { a: 5 }]);
+  };
+
+  // A receiver's trap that defines another key on the object while the
+  // write is on its way (here: a log) does not make that key remembered.
+  cases["a define made by a receiver's trap on the way is not taken for the receiver's write"] = () => {
+    const result = record(lib, { a: 1, log: 0 }, [["a", "log"]], (obj) => {
+      const logging = new Proxy(obj, {
+        getOwnPropertyDescriptor(target, key) {
+          if (key === "a") Object.defineProperty(obj, "log", { value: toRaw(obj).log + 1 });
+          return Reflect.getOwnPropertyDescriptor(target, key);
+        },
+        defineProperty: (target, key, descriptor) => key !== "log" && Reflect.defineProperty(target, key, descriptor),
+      });
+      logging.a = 2;
+      logging.a = 3;
+      assert.equal(Reflect.set(logging, "log", 9), false);
+    });
+    assert.deepEqual(result.events, ["set obj.log 1", "set obj.a 2", "set obj.log 2", "set obj.a 3"]);
+    assert.deepEqual(result.raw, { a: 3, log: 2 });
+  };
+
+  // A define with a value alone keeps the define's defaults: a new key is
+  // read-only, hidden and fixed; an accessor becomes data without its setter running.
+  cases["a define with a value alone defines, it does not assign"] = () => {
+    let calls = 0;
+    const raw = Object.defineProperty({ a: 1 }, "acc", { get: () => 0, set: () => calls++, configurable: true, enumerable: true });
+    const result = record(lib, raw, [["c", "acc"]], (obj) => {
+      Object.defineProperty(obj, "c", { value: 1 });
+      Object.defineProperty(obj, "acc", { value: 2 });
+    });
+    assert.deepEqual([result.events, calls], [["set obj.c 1", "set obj.acc 2"], 0]);
+    assert.deepEqual(Object.getOwnPropertyDescriptor(result.raw, "c"), { value: 1, writable: false, enumerable: false, configurable: false });
+    assert.deepEqual(Object.getOwnPropertyDescriptor(result.raw, "acc"), { value: 2, writable: false, enumerable: true, configurable: true });
+  };
+
+  // An object marked as data only by its first write is scanned again after
+  // an accessor is defined through its proxy: the setter rule applies.
+  cases["a setter defined through the proxy after a write follows the setter rule"] = () => {
+    const result = record(lib, { a: 1, x: 0 }, [["g", "x"]], (obj) => {
+      obj.a = 2;
+      Object.defineProperty(obj, "g", {
+        get() {
+          return this.x;
+        },
+        set(value) {
+          this.x = value;
+        },
+        configurable: true,
+      });
+      obj.g = 5;
+      obj.g = 5;
+    });
+    assert.deepEqual(result.events, ["set obj.a 2", "set obj.x 5"]);
+    assert.deepEqual(result.runs, [3]);
   };
 
   // Not remembered: another receiver lands on itself, a child on itself.
