@@ -177,6 +177,36 @@ export function review317Cases(lib) {
     assert.deepEqual(events, []);
   };
 
+  // An array's item is sent whatever its flags, and so are writes inside it.
+  cases["a write inside a hidden array item is sent"] = () => {
+    const { state, remote, events, warnings } = setup(lib);
+    Object.defineProperty(state.rows, "0", { enumerable: false });
+    state.rows[0].id = 5;
+    state.rows[0].tags = ["a"];
+    state.rows[0].tags.push("b");
+    assert.deepEqual(events, ["set rows.0.id 5", 'set rows.0.tags ["a"]', "array-push rows.0.tags"]);
+    assert.deepEqual(warnings, []);
+    assert.deepEqual(remote.rows[0], { id: 5, tags: ["a", "b"] });
+  };
+
+  // A hidden write is a write: a listener's write past the depth limit is
+  // refused before it writes, also of a hidden key.
+  cases["a listener's hidden write past the depth limit is refused like any write"] = () => {
+    const raw = { n: 0, obj: Object.defineProperty({}, "h", hiddenData(0)) };
+    const state = lib.reactive(raw, (event) => {
+      if (event.path[0] !== "n") return;
+      state.obj.h = raw.obj.h + 1;
+      state.n = raw.n + 1;
+    });
+    try {
+      state.n = 1;
+    } catch {
+      // the refusal reaches the first write
+    }
+    assert.ok(raw.n > 2);
+    assert.equal(raw.obj.h, raw.n - 1);
+  };
+
   // F1. 3.0.17 compared the stored and the defined value by `!==`, and
   // refused a fixed define of NaN.
   cases["a fixed define of NaN succeeds as on a plain object, new and over a fixed NaN key"] = () => {
@@ -214,6 +244,8 @@ export function review317Cases(lib) {
   cases["a hidden key deleted and written again by = is shown, on objects and arrays"] = () => {
     const { state, remote, events } = setup(lib);
     for (const container of [state.obj, state.list]) {
+      // a write of a key it has makes the proxy look at its keys first
+      container.a = 4;
       container.a = 5;
       Object.defineProperty(container, "h", hiddenData(1));
       container.h = 2;
@@ -226,8 +258,8 @@ export function review317Cases(lib) {
       container.h = 6;
     }
     assert.deepEqual(events, [
-      "set obj.a 5", "set obj.h 3", "set obj.h 4", "delete obj.h", "set obj.h 5", "set obj.h 6",
-      "set list.a 5", "set list.h 3", "set list.h 4", "delete list.h", "set list.h 5", "set list.h 6",
+      "set obj.a 4", "set obj.a 5", "set obj.h 3", "set obj.h 4", "delete obj.h", "set obj.h 5", "set obj.h 6",
+      "set list.a 4", "set list.a 5", "set list.h 3", "set list.h 4", "delete list.h", "set list.h 5", "set list.h 6",
     ]);
     sameJson(lib, remote, state);
   };

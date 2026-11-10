@@ -27,6 +27,8 @@ test("the published 3.0.17 fails the cases of its review", async () => {
 const passedIn317 = new Set<string>([
   "a hidden accessor made data by writable alone sends nothing and reruns its readers",
   "a hidden key deleted and written again by = is shown, on objects and arrays",
+  "a listener's hidden write past the depth limit is refused like any write",
+  "a write inside a hidden array item is sent",
   "an array name that holds an object reads it raw, hidden or not",
   "an outer proxy that hides the key on the way: a new key sends nothing, a shown key sends delete",
 ]);
