@@ -252,3 +252,28 @@ Its writes send their events, and the write of the setter's own key sends none.
 3.0.11 also sent the setter's key as a value.
 
 A getter defined through the proxy over a function the proxy read before runs once per read, not twice.
+
+## 3.0.14: a write through an inherited setter reruns the readers of its key
+
+A setter on the array's prototype chain, such as a setter of an `Array` subclass, can keep its value where no proxy sees it, such as a closure.
+3.0.13 did not rerun the effects that read the key through its getter, unless the setter wrote through the proxy.
+3.0.14 reruns them after the setter runs, as 3.0.11 and 3.0.12 did.
+It still sends no event for the key.
+The setter's own writes and the rerun make one batch: an effect that reads the key and what the setter writes runs once per write.
+In 3.0.13, a setter that wrote two keys reran a reader of both twice.
+
+A write through another receiver, such as an outer proxy, that calls a setter of the array now acts as the same write on the proxy.
+When the getter already gives the value, the setter does not run.
+3.0.13 ran an own setter for such a write, so a write of `undefined` to a key the setter creates sent an event that the direct write did not send.
+
+`list.__proto__ = proto` runs the `__proto__` setter of `Object.prototype`.
+Since 3.0.13 it changes the array's prototype and sends no event, because a replica cannot apply a prototype.
+3.0.11 and 3.0.12 sent `set list.__proto__`, and a replica that applied it replaced the prototype of its array with a plain object.
+The effects that read `list.__proto__` rerun.
+
+A write with the raw array as receiver, `Reflect.set(state.list, 0, 9, toRaw(state.list))`, is a raw write.
+Since 3.0.13 it changes the array and sends nothing, as a write through `toRaw()` does.
+3.0.11 sent an event for it.
+
+A value written through an outer proxy is unwrapped once, where the write lands.
+3.0.13 unwrapped it twice, which walked an array value's items twice.
