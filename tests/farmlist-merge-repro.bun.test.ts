@@ -114,7 +114,10 @@ describe('spread-assign on reactive proxy causes linear degradation', () => {
     const median = (values: number[]) => [...values].sort((a, b) => a - b)[Math.floor(values.length / 2)]
     const firstMs = median(cycleTimes.slice(0, 5))
     const lastMs = median(cycleTimes.slice(-5))
-    const ratio = lastMs / firstMs
+    // A cycle now takes well under a millisecond, where timer noise alone
+    // gave 0.04 ms against 0.2 ms (vangrd-srjbj.27). Medians count from 1 ms:
+    // the nesting bug took cycles to tens of milliseconds.
+    const ratio = Math.max(lastMs, 1) / Math.max(firstMs, 1)
 
     console.log('\n=== Spread-Assign Degradation ===')
     console.log(`  Cycle times: [${cycleTimes.map(t => t.toFixed(1)).join(', ')}]`)
