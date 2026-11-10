@@ -8,6 +8,7 @@ import {
   deepEqual,
   globalSeen,
   hasOwn,
+  isEnumerable,
   proxyStats,
   setData,
   toRaw,
@@ -402,8 +403,7 @@ function wrapObject<T extends object>(obj: T, node: LocationNode, options?: Reac
       const oldValue = (target as any)[prop];
       const hadProperty = Object.prototype.hasOwnProperty.call(target, prop);
       // a replica does not hold a hidden key (see `set`)
-      const current = hadProperty ? ownDescriptor(target, prop, node) : undefined;
-      const located = hadProperty && (current === undefined || current.enumerable === true) ? locate(node, prop) : undefined;
+      const located = hadProperty && (node.plainData === true || isEnumerable.call(target, prop)) ? locate(node, prop) : undefined;
       const event: StateEvent | undefined = located && {
         action: "delete",
         path: located.paths[0],

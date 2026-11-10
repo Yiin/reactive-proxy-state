@@ -332,3 +332,29 @@ Another proxy of the state as receiver, `Reflect.set(state.a, "x", 1, state.b)`,
 An object proxy remembers an outer proxy for each own key whose write through it landed, and writes that key directly from then on.
 Such a write costs less than in 3.0.14.
 An outer proxy whose `defineProperty` or `getOwnPropertyDescriptor` trap later answers differently for that key is outside the supported input; its `set` trap still runs on every write.
+
+## 3.0.17: hidden keys stay hidden
+
+A replica holds the enumerable keys alone, as JSON and spread do.
+A define that keeps or makes a key hidden now writes it and reruns the effects that read it, and sends nothing.
+3.0.16 sent `set` for it, so the replica got a key the state hides.
+`markRaw(state.obj)` sent `set obj.__v_skip true`; now it sends nothing.
+`Object.defineProperty(state.obj, "a", { value: 1 })` on a new key makes a hidden key, as natively, and sends nothing; add `enumerable: true` to send it.
+A define that hides an enumerable key sends `delete`, and one that shows a hidden key sends `set`, also with flags alone.
+A write by `=` and a `delete` of a hidden key send nothing; 3.0.16 sent them.
+The same holds for an array's names; an index is sent whatever its flags.
+
+An object proxy no longer remembers outer proxies.
+Every trap of an outer proxy runs on every write, as on a plain object, and the 3.0.16 caveat about traps that answer differently later is gone.
+A write through an outer proxy costs what it cost in 3.0.15.
+
+A define that leaves a key non-configurable and read-only with a proxy as its value now returns `false` before it writes, and `Object.defineProperty` throws a `TypeError`.
+3.0.16 wrote the raw object, sent the event, and then the engine threw.
+A define of such a key with an equal object or with `-0` stores the defined value, as natively.
+
+A define calls no getter: a value defined over an accessor replaces it without reading it.
+3.0.16 read the old value through the getter, so a getter that threw stopped the define.
+
+An array proxy's `set` trap takes four parameters, as an object proxy's does since 3.0.16, which makes array writes faster.
+
+Every other write sends the same events as in 3.0.16.

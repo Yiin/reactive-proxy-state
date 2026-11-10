@@ -3,6 +3,7 @@ import {
   arrayIndex,
   deepEqual,
   hasOwn,
+  isEnumerable,
   newMethodCache,
   unwrapForStore,
   wrapperCache,
@@ -843,9 +844,8 @@ export function wrapArray<T extends any[]>(arr: T, node: LocationNode): T {
       const oldValue = (target as any)[prop];
       const hadProperty = Object.prototype.hasOwnProperty.call(target, prop);
       // a replica does not hold a hidden name (see `set`)
-      const current =
-        hadProperty && arrayIndex(prop) < 0 && prop !== "length" ? ownDescriptor(target, prop, node) : undefined;
-      const located = hadProperty && (current === undefined || current.enumerable === true) ? locate(node, prop) : undefined;
+      const located =
+        hadProperty && (arrayIndex(prop) >= 0 || isEnumerable.call(target, prop)) ? locate(node, prop) : undefined;
       const event: StateEvent | undefined = located && { action: "delete", path: located.paths[0], oldValue };
       if (copyPayload(event, located, target) === Copied.Reaches) {
         const after = target.slice();

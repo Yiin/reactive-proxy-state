@@ -765,7 +765,7 @@ const cloneWork: any[] = [];
 const FILL_DEPTH = 256;
 /** @internal */
 export const hasOwn = Object.prototype.hasOwnProperty;
-const isEnumerable = Object.prototype.propertyIsEnumerable;
+export const isEnumerable = Object.prototype.propertyIsEnumerable;
 
 /** A proxy's wrapped methods by name. @internal */
 export type MethodCache = { [key: string | symbol]: Function | undefined };
