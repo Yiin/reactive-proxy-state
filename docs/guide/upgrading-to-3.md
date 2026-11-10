@@ -313,3 +313,22 @@ A setter reached through such a receiver, on an array or an object, runs with th
 It runs also when its getter already gives the value, and its writes land on that receiver.
 The effects that read its key rerun when the getter gives another value afterwards, for example when the setter changes a closure.
 3.0.14 skipped the setter when the getter gave the value, and reran those effects after every such write to an array.
+
+## 3.0.16: object writes from any receiver
+
+An object proxy now has a `defineProperty` trap, as array proxies have since 3.0.13.
+`Object.defineProperty(state.obj, "a", { value: 1 })` is sent like `state.obj.a = 1`, and the effects that read `a` rerun.
+Flags alone on a key the object does not have are sent like a write of `undefined`.
+3.0.15 and earlier changed the object and sent nothing, so a replica missed the value.
+An accessor defined through the proxy still sends nothing; the effects that read its key now rerun.
+
+A write through an outer proxy whose traps answer for the proxy, such as a membrane's `getPrototypeOf` or `getOwnPropertyDescriptor`, is now sent once, like the same write on the proxy.
+3.0.15 changed the object and sent nothing when the outer proxy had a `getPrototypeOf` trap.
+A setter reached through such an outer proxy follows the rule for the proxy itself: it skips a value its getter already gives.
+
+Another proxy of the state as receiver, `Reflect.set(state.a, "x", 1, state.b)`, now gets the write and sends `set b.x`.
+3.0.15 put `x` on the raw `b` and sent nothing; 3.0.14 sent `set a.x`.
+
+An object proxy remembers an outer proxy for each own key whose write through it landed, and writes that key directly from then on.
+Such a write costs less than in 3.0.14.
+An outer proxy whose `defineProperty` or `getOwnPropertyDescriptor` trap later answers differently for that key is outside the supported input; its `set` trap still runs on every write.

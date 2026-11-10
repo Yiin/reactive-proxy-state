@@ -119,6 +119,11 @@ function enumerableAfter(target: object, prop: PropertyKey, descriptor: Property
   return current !== undefined && current.enumerable === true;
 }
 
+/** Is `descriptor` a value alone, as a plain write to a key the object has defines it? */
+function valueOnly(descriptor: PropertyDescriptor): boolean {
+  return !("writable" in descriptor) && !("enumerable" in descriptor) && !("configurable" in descriptor);
+}
+
 /** Delivered events an async flush keeps before it drops them from its queue. */
 const FLUSH_CHUNK = 1024
 
@@ -237,6 +242,17 @@ function createProxy(raw: any, node: LocationNode, options?: ReactiveOptions): a
 }
 
 function wrapObject<T extends object>(obj: T, node: LocationNode, options?: ReactiveOptions): T {
+  // Receivers that forward to this proxy, each with the own keys whose
+  // write through it landed here as the plain write of a value (an outer
+  // proxy, a membrane). A later write of such a key through it is the
+  // direct write: the trip through the receiver and the `defineProperty`
+  // trap cost more than the write itself. A receiver whose traps answer
+  // differently for that key later (a handler changed, a trap that starts
+  // to refuse) is outside the supported input. `landing` and `landingProp`:
+  // the receiver and key of the foreign write in progress.
+  let forwarders: WeakMap<object, Set<string | symbol>> | undefined;
+  let landing: object | undefined;
+  let landingProp: string | symbol | undefined;
   const handler = {
     get(target: T, prop: string | symbol, receiver: any): any {
       // Special handling for reactive flags
@@ -269,7 +285,21 @@ function wrapObject<T extends object>(obj: T, node: LocationNode, options?: Reac
       // on this object, it ends in the `defineProperty` trap below, which
       // sends it once; on any other object it sends nothing here. A write
       // that calls a setter goes on below, on every route.
-      if (receiver !== proxy && setter === undefined) return Reflect.set(target, prop, value, receiver);
+      // A receiver whose write of this own key landed here before as the
+      // plain write of a value is not asked again: the write goes on below
+      // as the direct one (see `forwarders`).
+      if (receiver !== proxy && setter === undefined && !(had && forwarders?.get(receiver)?.has(prop) === true)) {
+        const previous = landing;
+        const previousProp = landingProp;
+        landing = receiver;
+        landingProp = prop;
+        try {
+          return Reflect.set(target, prop, value, receiver);
+        } finally {
+          landing = previous;
+          landingProp = previousProp;
+        }
+      }
 
       // Spreading a reactive proxy (`{ ...proxy }`) embeds proxy wrappers
       // in the plain result — unwrap to prevent unbounded nesting.
@@ -328,10 +358,12 @@ function wrapObject<T extends object>(obj: T, node: LocationNode, options?: Reac
       // The write goes to the target: through the proxy it would end in the
       // proxy's `defineProperty` trap. A define keeps its descriptor unless
       // the value was unwrapped.
+      // A define of the value alone on an own data key is that write.
       const result =
-        descriptor !== undefined
-          ? Reflect.defineProperty(target, prop, descriptor.value === value ? descriptor : { ...descriptor, value })
-          : Reflect.set(target, prop, value);
+        descriptor === undefined
+          ? Reflect.set(target, prop, value)
+          : (had && node.dataOnly === true && valueOnly(descriptor) && Reflect.set(target, prop, value)) ||
+            Reflect.defineProperty(target, prop, descriptor.value === value ? descriptor : { ...descriptor, value });
 
       // only emit and trigger if the set was successful
       if (result) {
@@ -406,7 +438,22 @@ function wrapObject<T extends object>(obj: T, node: LocationNode, options?: Reac
       // replace the write, or this proxy as `Reflect.set`'s receiver).
       // Until 3.0.15 an object proxy had no such trap: those writes
       // changed the object and sent nothing.
-      if ("value" in descriptor) return handler.set(target, prop, descriptor.value, proxy, descriptor);
+      if ("value" in descriptor) {
+        // The plain write of a value to a key the object has, through the
+        // receiver of the foreign write in progress: remember the receiver
+        // for the key. Any other define on the way (a trap of the receiver
+        // that defines something else) clears the write in progress.
+        if (landing !== undefined) {
+          if (landingProp === prop && valueOnly(descriptor) && hasOwn.call(target, prop)) {
+            forwarders ??= new WeakMap();
+            let keys = forwarders.get(landing);
+            if (keys === undefined) forwarders.set(landing, (keys = new Set()));
+            keys.add(prop);
+          }
+          landing = undefined;
+        }
+        return handler.set(target, prop, descriptor.value, proxy, descriptor);
+      }
       if (!("get" in descriptor) && !("set" in descriptor)) {
         // new flags alone on a key the object has change no value
         // (`Object.freeze` ends here for each key), unless `writable` makes

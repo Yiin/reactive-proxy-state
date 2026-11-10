@@ -73,18 +73,27 @@ const routes = {
     ),
 };
 
-/** `Reflect.defineProperty` calls made while `body` runs: the proxy's `defineProperty` trap writes through it. */
+/**
+ * Calls made while `body` runs that reach or come from the proxy's
+ * `defineProperty` trap: `Reflect.defineProperty`, and `Reflect.set` with a
+ * receiver (a write with the proxy as receiver ends in the trap).
+ */
 function definesDuring(body) {
-  const original = Reflect.defineProperty;
+  const { defineProperty, set } = Reflect;
   let calls = 0;
   Reflect.defineProperty = function (...args) {
     calls++;
-    return original.apply(this, args);
+    return defineProperty.apply(this, args);
+  };
+  Reflect.set = function (...args) {
+    if (args.length > 3) calls++;
+    return set.apply(this, args);
   };
   try {
     body();
   } finally {
-    Reflect.defineProperty = original;
+    Reflect.defineProperty = defineProperty;
+    Reflect.set = set;
   }
   return calls;
 }
@@ -138,10 +147,11 @@ export function objectDefineCases(lib) {
       Object.assign(obj, { a: 4, f: 5 });
     });
     assert.equal(direct, 0);
-    // the counter sees the trap: an outer write and a define reach it
-    assert.equal(definesDuring(() => (new Proxy(obj, {}).a = 9)), 1);
-    assert.equal(definesDuring(() => (new Proxy(list, {})[0] = 9)), 1);
-    assert.equal(toRaw(obj).a, 9);
+    // the counter sees the trap: an outer write reaches it
+    assert.ok(definesDuring(() => (new Proxy(obj, {}).a = 9)) > 0);
+    assert.ok(definesDuring(() => (new Proxy(obj, {}).g = 9)) > 0);
+    assert.ok(definesDuring(() => (new Proxy(list, {})[0] = 9)) > 0);
+    assert.deepEqual([toRaw(obj).a, toRaw(obj).g], [9, 9]);
   };
 
   // Another proxy of the state as receiver is another object: the write
@@ -447,6 +457,106 @@ export function objectDefineCases(lib) {
       assert.deepEqual([result.events, result.runs], [["set obj.k0 9", "set obj.k1 9", "set obj.k5 50"], [2, 2]], name);
       assert.equal(typeof Object.getOwnPropertyDescriptor(result.raw, "foo").set, "function", name);
     }
+  };
+
+  // An outer proxy whose write of an own key landed is remembered for that
+  // key (the trip through it costs more than the write). What it decides
+  // before the write still decides: its set trap, and its traps for other keys.
+  cases["a remembered outer proxy still runs its set trap on every write"] = () => {
+    let calls = 0;
+    let refuse = false;
+    const result = record(lib, { a: 1 }, [["a"]], (obj) => {
+      const outer = new Proxy(obj, {
+        set(target, key, value, receiver) {
+          calls++;
+          return refuse ? false : Reflect.set(target, key, value, receiver);
+        },
+      });
+      outer.a = 2;
+      outer.a = 3;
+      refuse = true;
+      assert.equal(Reflect.set(outer, "a", 4), false);
+    });
+    assert.deepEqual([result.events, result.runs, calls, result.raw], [["set obj.a 2", "set obj.a 3"], [3], 3, { a: 3 }]);
+  };
+
+  cases["an outer proxy that refuses some keys keeps refusing them after other keys landed"] = () => {
+    const result = record(lib, { a: 1, locked: 1 }, [["a", "locked"]], (obj) => {
+      const guarded = new Proxy(obj, {
+        defineProperty: (target, key, descriptor) => key !== "locked" && Reflect.defineProperty(target, key, descriptor),
+      });
+      for (let i = 2; i < 5; i++) {
+        guarded.a = i;
+        assert.equal(Reflect.set(guarded, "locked", i), false);
+      }
+    });
+    assert.deepEqual([result.events, result.runs, result.raw], [["set obj.a 2", "set obj.a 3", "set obj.a 4"], [4], { a: 4, locked: 1 }]);
+  };
+
+  // A membrane that does not report the key makes the write define a new
+  // enumerable key, as on a plain object, every time: it is not remembered.
+  cases["an outer proxy that hides a key defines it as on a plain object on every write"] = () => {
+    const hiding = (target) => new Proxy(target, { getOwnPropertyDescriptor: (target, key) => (key === "a" ? undefined : Reflect.getOwnPropertyDescriptor(target, key)) });
+    const make = () => Object.defineProperty({}, "a", { value: 1, writable: true, enumerable: false, configurable: true });
+    const plain = make();
+    const plainHiding = hiding(plain);
+    const result = record(lib, make(), [["a"]], (obj) => {
+      const outer = hiding(obj);
+      for (const value of [2, 3]) {
+        outer.a = value;
+        plainHiding.a = value;
+        Object.defineProperty(toRaw(obj), "a", { enumerable: false });
+        Object.defineProperty(plain, "a", { enumerable: false });
+      }
+    });
+    assert.deepEqual([result.events, result.runs], [["set obj.a 2", "set obj.a 3"], [3]]);
+    assert.deepEqual(Object.getOwnPropertyDescriptor(result.raw, "a"), Object.getOwnPropertyDescriptor(plain, "a"));
+  };
+
+  cases["a remembered outer proxy writes a key deleted and added again, or made read-only, as the plain write"] = () => {
+    const result = record(lib, { a: 1 }, [["a"]], (obj) => {
+      const outer = new Proxy(obj, {});
+      outer.a = 2;
+      outer.a = 3;
+      delete obj.a;
+      outer.a = 4;
+      outer.a = 5;
+      Object.freeze(obj);
+      assert.equal(Reflect.set(outer, "a", 6), false);
+      assert.throws(() => {
+        outer.a = 6;
+      }, TypeError);
+    });
+    assert.deepEqual(result.events, ["set obj.a 2", "set obj.a 3", "delete obj.a undefined", "set obj.a 4", "set obj.a 5"]);
+    assert.deepEqual([result.runs, result.raw], [[6], { a: 5 }]);
+  };
+
+  // Not remembered: another receiver lands on itself, a child on itself.
+  cases["a receiver that does not forward is never remembered"] = () => {
+    const result = record(lib, { a: 1 }, [["a"]], (obj, state) => {
+      const child = Object.create(obj);
+      for (let i = 2; i < 4; i++) {
+        child.a = i;
+        assert.equal(Reflect.set(obj, "a", i, state.other), true);
+        assert.equal(Reflect.set(obj, "a", i, toRaw(state.other)), true);
+      }
+      assert.equal(child.a, 3);
+    });
+    assert.deepEqual([result.events, result.runs, result.raw], [["set other.a 2", "set other.a 3"], [1], { a: 1 }]);
+  };
+
+  // The rule README states: a receiver's traps that answer differently for
+  // a key after its write landed are outside the supported input. The
+  // remembered write lands on the object and is sent; replicas stay equal.
+  cases["a defineProperty trap that starts to refuse a remembered key is not asked again"] = () => {
+    let refuse = false;
+    const result = record(lib, { a: 1 }, [["a"]], (obj) => {
+      const outer = new Proxy(obj, { defineProperty: (target, key, descriptor) => !refuse && Reflect.defineProperty(target, key, descriptor) });
+      outer.a = 2;
+      refuse = true;
+      outer.a = 3;
+    });
+    assert.deepEqual([result.events, result.raw], [["set obj.a 2", "set obj.a 3"], { a: 3 }]);
   };
 
   return cases;

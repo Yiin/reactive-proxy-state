@@ -58,18 +58,8 @@ export const routes = {
     outer[key] = value;
     return true;
   },
-  membrane: (container, key, value) =>
-    Reflect.set(
-      new Proxy(container, {
-        getPrototypeOf: () => null,
-        getOwnPropertyDescriptor(target, key) {
-          const descriptor = Reflect.getOwnPropertyDescriptor(target, key);
-          return descriptor && { ...descriptor };
-        },
-      }),
-      key,
-      value
-    ),
+  // one membrane per container, so that later writes go through a membrane a write landed through
+  membrane: (container, key, value) => Reflect.set(membraneOf(container), key, value),
   defineProperty: (container, key, value) =>
     Reflect.defineProperty(
       container,
@@ -88,6 +78,22 @@ export const routes = {
   other: (container, key, value, outer, raw, children, other) => Reflect.set(container, key, value, other),
   raw: (container, key, value, outer, raw) => Reflect.set(container, key, value, raw),
 };
+const membranes = new WeakMap();
+function membraneOf(container) {
+  let membrane = membranes.get(container);
+  if (membrane === undefined) {
+    membrane = new Proxy(container, {
+      getPrototypeOf: () => null,
+      getOwnPropertyDescriptor(target, key) {
+        const descriptor = Reflect.getOwnPropertyDescriptor(target, key);
+        return descriptor && { ...descriptor };
+      },
+    });
+    membranes.set(container, membrane);
+  }
+  return membrane;
+}
+
 /** Routes whose receiver does not forward to the proxy. */
 const nonForwarding = new Set(["child", "other", "raw"]);
 
