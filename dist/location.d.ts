@@ -89,12 +89,20 @@ export interface LocationNode {
      */
     lostLink: boolean;
     /**
-     * Every own key of the object was enumerable data (no accessor, no
-     * hidden key; an array's `length` aside) when its proxy first looked
-     * (see `ownDescriptor`); undefined before that, and after a define
-     * through the proxy.
+     * The object had no own accessor when its proxy first looked (see
+     * `ownDescriptor`), and no define through the proxy added one since;
+     * undefined before that look.
      */
-    plainData: boolean | undefined;
+    dataOnly: boolean | undefined;
+    /**
+     * The object's hidden own keys (not enumerable; an array's items and `length`
+     * aside), as the proxy saw them at its first look (see `lookAtKeys`) and
+     * its writes and defines changed them since: null when there is none,
+     * undefined before that look. A replica does not hold a hidden key, so a
+     * place under one leads to no root (see `locate`). A map or a set has
+     * none: its places are its entries.
+     */
+    hidden: Set<PropertyKey> | null | undefined;
     /**
      * How many places name this node as their container: every `Place` made
      * with it counts, and each place dropped from its object's `places` stops
@@ -126,14 +134,21 @@ export declare function getLocationNode(raw: object): LocationNode | undefined;
 export declare function ensureLocationNode(raw: object): LocationNode;
 /**
  * The own descriptor of `prop`, a key `target` (raw; its node is `node`)
- * has, or undefined when every own key of the object is enumerable data.
- * A write through a proxy adds only such keys, so an object that had no
- * other key when its proxy first looked has none, and no descriptor is
- * made per write. A define through the proxy looks again. An accessor or a
- * hidden key added raw is outside the supported input. An object with more
- * than 64 own keys is not scanned and reads the descriptor each time.
+ * has, or undefined when the object has no own accessor: its key is data
+ * then, and `node.hidden` tells whether it is hidden. A write through a
+ * proxy adds only data, so an object that had no accessor when its proxy
+ * first looked has none until a define through the proxy adds one, and no
+ * descriptor is made per write. An accessor or a hidden key added raw is
+ * outside the supported input. An object with more than 64 own keys reads
+ * the descriptor at each write.
  */
 export declare function ownDescriptor(target: object, prop: PropertyKey, node: LocationNode): PropertyDescriptor | undefined;
+/**
+ * A write or define through the proxy left `prop` of the object of `node`
+ * hidden, or not: `node.hidden` follows, once the proxy looked (see
+ * `lookAtKeys`).
+ */
+export declare function noteHidden(node: LocationNode, prop: PropertyKey, hidden: boolean): void;
 /**
  * Must the define of `value` (unwrapped) with `descriptor` be refused
  * before it writes? It stores the raw object of a proxy the caller
@@ -152,7 +167,7 @@ export declare function definesFlagsAlone(target: object, prop: PropertyKey, old
  * The value a define replaces at `prop`, read as `Object.defineProperty`
  * reads it: from the key's data, calling no getter. `current` is the key's
  * descriptor, or undefined for a key the object `had` as enumerable data
- * (see `ownDescriptor`) or for a new key.
+ * with no accessor (see `ownDescriptor`) or for a new key.
  */
 export declare function definedOver(target: object, prop: PropertyKey, had: boolean, current: PropertyDescriptor | undefined): unknown;
 /**
@@ -177,6 +192,22 @@ export declare function inheritedSetter(target: object, prop: PropertyKey): Prop
  * endless) counts as an object that inherits from the proxy.
  */
 export declare function forwardsTo(receiver: any, target: object): boolean;
+/**
+ * A write of a hidden key sends nothing, so it looks up no paths (see
+ * `locate`). It is still a write: a listener's write counts it.
+ */
+export declare function unsent(): undefined;
+/**
+ * The value a write of a hidden key of the object of `node` replaced, for
+ * `attachValue`, when the object is in the tree (see `isAttached`). A sent
+ * write takes it from its paths.
+ */
+export declare function replacedInTree(node: LocationNode, oldValue: unknown): unknown;
+/**
+ * New flags alone on an accessor `prop` of `target` (the object of
+ * `node`): the define, and the key's hidden mark when `enumerable` changes it.
+ */
+export declare function definedAccessorFlags(node: LocationNode, target: object, prop: PropertyKey, descriptor: PropertyDescriptor): boolean;
 /** Where an event goes: one root and every path of the object under it. */
 export interface Target {
     root: LocationRoot;
@@ -185,7 +216,9 @@ export interface Target {
 /**
  * Where an event about `node` (plus `tail`) goes: every current place of the
  * object, under one root. Undefined when the object is detached or that root
- * has no emit function.
+ * has no emit function. A place under a hidden key is not one: a write
+ * inside an object only hidden keys hold is detached and sends nothing (see
+ * `hidden`).
  *
  * An object under two roots (a replica built on raw objects it shares with
  * its source) emits only to its scope, the root it was first read under, so
@@ -194,7 +227,11 @@ export interface Target {
  * A write that finds no root is counted in `proxyStats.detachedWrites`.
  */
 export declare function locate(node: LocationNode, tail?: PropertyKey): Target | undefined;
-/** Is the object somewhere under a root (with or without an emit function)? */
+/**
+ * Is the object somewhere under a root (with or without an emit function)?
+ * A place under a hidden key counts: the object keeps its places and its
+ * proxy there.
+ */
 export declare function isAttached(node: LocationNode): boolean;
 /**
  * Send `event` to every path of `target`. Its payload holds copies already

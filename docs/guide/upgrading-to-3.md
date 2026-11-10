@@ -359,3 +359,16 @@ A define calls no getter: a value defined over an accessor replaces it without r
 An array proxy's `set` trap takes four parameters, as an object proxy's does since 3.0.16, which makes index writes a little faster.
 
 Every other write sends the same events as in 3.0.16.
+
+## 3.0.18: objects under hidden keys send nothing
+
+A write inside an object that only hidden keys hold now sends nothing, at any depth, and still reruns the effects that read it.
+3.0.17 sent it with its path, and `updateState` on a replica logged a warning and skipped it.
+An object that a hidden key and a visible key both hold sends each write once, on the visible path; 3.0.17 sent it once per key.
+Once the key is shown again, writes inside the object are sent again.
+
+A non-configurable, read-only define of `NaN` succeeds again, as on a plain object; 3.0.17 returned `false`.
+
+An object with a hidden key no longer reads a property descriptor on each write; 3.0.17 did, also after the hidden key was deleted.
+
+Every other write sends the same events as in 3.0.17.
