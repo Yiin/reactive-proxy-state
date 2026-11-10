@@ -30,12 +30,13 @@ import {
   restoreEvicted,
   copyPayloadReaching,
   shallowCopy,
-  writesThroughSetter,
+  forwardsTo,
+  setterOf,
 } from "./location";
 import { wrapArray } from "./wrap-array";
 import { wrapMap } from "./wrap-map";
 import { wrapSet } from "./wrap-set";
-import { beginWrite, endWrite, track, trigger, triggerKeyChange } from "./watch-effect";
+import { beginWrite, endWrite, track, trigger, triggerKeyChange, writeThroughSetter } from "./watch-effect";
 import { ReactiveFlags } from "./constants";
 
 // avoid repeated typeof checks
@@ -247,33 +248,50 @@ function wrapObject<T extends object>(obj: T, node: LocationNode, options?: Reac
       return wrapChild(value, node, prop, options);
     },
     set(target: T, prop: string | symbol, value: any, receiver: any): boolean {
+      // An outer proxy over this proxy forwards the write here, and it lands
+      // on the object. Another receiver (`Object.create(proxy)`, the raw
+      // object, `Reflect.set` with another object) gets the ordinary write,
+      // as on a plain object: it sends nothing. Until 3.0.14 the proxy sent
+      // an event for a write that landed on such a receiver.
+      const forwards = receiver === proxy || forwardsTo(receiver, target);
+      const had = hasOwn.call(target, prop);
+      const setter = setterOf(target, prop, had, node);
+      if (!forwards && setter === undefined) return Reflect.set(target, prop, value, receiver);
+
       // Spreading a reactive proxy (`{ ...proxy }`) embeds proxy wrappers
       // in the plain result — unwrap to prevent unbounded nesting.
       if (isObject(value)) value = unwrapForStore(value);
 
       const oldValue = (target as any)[prop];
 
+      // A setter, own or inherited, as on an array (see `writeThroughSetter`).
+      // A write that lands on the object changes nothing when the getter
+      // already gives the value; a setter with no getter always runs.
+      // Until 3.0.14 an inherited setter also sent `set` of its key, and a
+      // replica stored the value as data.
+      if (setter !== undefined) {
+        if (
+          forwards &&
+          setter.get !== undefined &&
+          (oldValue === value ||
+            (!options?.async && isObject(oldValue) && isObject(value) && deepEqual(oldValue, value)))
+        )
+          return true;
+        return writeThroughSetter(target, prop, value, receiver, forwards, oldValue);
+      }
+
       // avoid unnecessary triggers if the value hasn't changed. An inherited
       // value is not the object's own: writing it adds the key, and a
       // replica that copies own keys needs the event
       // fast path for primitives
-      if (oldValue === value && hasOwn.call(target, prop)) return true;
+      if (oldValue === value && had) return true;
       // deep equality check for objects/arrays — skip when async emit is
       // enabled because the cost of a redundant deferred emit is far less
       // than a synchronous deep comparison on every property set
-      if (
-        !options?.async &&
-        isObject(oldValue) &&
-        isObject(value) &&
-        hasOwn.call(target, prop) &&
-        deepEqual(oldValue, value)
-      )
-        return true;
+      if (!options?.async && isObject(oldValue) && isObject(value) && had && deepEqual(oldValue, value)) return true;
 
-      // an own setter makes its own writes; the set itself emits nothing
-      const emits = !writesThroughSetter(target, prop, node);
       // the write does not move `target`, so its paths are known before it
-      const located = emits ? locate(node, prop) : undefined;
+      const located = locate(node, prop);
       const event: StateEvent | undefined = located && {
         action: "set",
         path: located.paths[0],
@@ -291,11 +309,10 @@ function wrapObject<T extends object>(obj: T, node: LocationNode, options?: Reac
         if (descriptor === undefined || descriptor.enumerable) setData(after, prop, value);
         copyPayloadReaching(event!, located!, target, after);
       }
-      const had = hasOwn.call(target, prop);
       const result = Reflect.set(target, prop, value, receiver);
 
-      // only emit and trigger if the set was successful and wasn't intercepted by a setter
-      if (result && emits) {
+      // only emit and trigger if the set was successful
+      if (result) {
         // move places before anything can write again (emit may throw)
         if (isObject(oldValue)) detachPlace(oldValue, node, prop);
         if (isObject(value)) attachValue(value, node, prop, copied === Copied.Fresh, located && oldValue, held);

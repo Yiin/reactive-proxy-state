@@ -436,6 +436,35 @@ export function trigger(target: object, key: string | symbol): void {
 }
 
 /**
+ * Write `value` to `prop` of `target` (raw) through its setter, own or
+ * inherited, with `receiver` as `this`: the setter's writes through a
+ * proxy send their events, and the write of `prop` sends none. The setter
+ * runs in one batch with the rerun of the effects that read `prop`, since
+ * its getter can read what no proxy sees (a closure): an effect that reads
+ * the key and what the setter writes runs once. `forwards`: the write
+ * lands on `target` (the proxy or an outer proxy is the receiver), so the
+ * readers always rerun. Else (`Object.create(proxy)`, the raw object) they
+ * rerun only when the getter gives another value than `oldValue`. @internal
+ */
+export function writeThroughSetter(
+  target: object,
+  prop: string | symbol,
+  value: unknown,
+  receiver: unknown,
+  forwards: boolean,
+  oldValue: unknown
+): boolean {
+  startBatch();
+  try {
+    const result = Reflect.set(target, prop, value, receiver);
+    if (result && (forwards || (target as any)[prop] !== oldValue)) trigger(target, prop);
+    return result;
+  } finally {
+    endBatch();
+  }
+}
+
+/**
  * Triggers every effect that read a key of the object `target`, once each:
  * a key was added or deleted, which changes what `JSON.stringify`, spread,
  * `Object.entries`, `Object.values` and a deep `watch` read. There is no

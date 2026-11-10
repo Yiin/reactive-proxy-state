@@ -132,7 +132,7 @@ export interface LocationNode {
   lostLink: boolean;
   /**
    * The object had no own accessor property when its proxy first wrote to
-   * it (see `writesThroughSetter`); undefined before that write.
+   * it (see `setterOf`); undefined before that write.
    */
   dataOnly: boolean | undefined;
   /**
@@ -219,20 +219,47 @@ export function ensureLocationNode(raw: object): LocationNode {
 }
 
 /**
- * Does a write to `prop` of `target` (raw; its node is `node`) call an own
- * setter? Read from the property's descriptor, unless the object had no own
+ * The accessor whose setter a write of `prop` to `target` (raw; its node is
+ * `node`) calls: the target's own, or the first one along its prototype
+ * chain (a class, `Array.prototype`, `Object.prototype`'s `__proto__`).
+ * Undefined when the write stores data. `own`: the target has `prop`.
+ * An own key is read from its descriptor, unless the object had no own
  * accessor when its proxy first wrote to it: a write through a proxy adds
  * only data properties, so then there is none to find, and no descriptor
  * is made per write. An accessor added later (`Object.defineProperty`) is
  * outside the supported input. An object with more than 64 own keys is not
  * scanned and reads the descriptor at every write.
  */
-export function writesThroughSetter(target: object, prop: PropertyKey, node: LocationNode): boolean {
-  let dataOnly = node.dataOnly;
-  if (dataOnly === undefined) dataOnly = node.dataOnly = hasNoOwnAccessor(target);
-  if (dataOnly) return false;
-  const descriptor = Reflect.getOwnPropertyDescriptor(target, prop);
-  return descriptor !== undefined && descriptor.set !== undefined;
+export function setterOf(target: object, prop: PropertyKey, own: boolean, node: LocationNode): PropertyDescriptor | undefined {
+  if (own) {
+    let dataOnly = node.dataOnly;
+    if (dataOnly === undefined) dataOnly = node.dataOnly = hasNoOwnAccessor(target);
+    if (dataOnly) return undefined;
+    const descriptor = Reflect.getOwnPropertyDescriptor(target, prop);
+    return descriptor !== undefined && descriptor.set !== undefined ? descriptor : undefined;
+  }
+  for (let proto = Object.getPrototypeOf(target); proto !== null; proto = Object.getPrototypeOf(proto)) {
+    const descriptor = Reflect.getOwnPropertyDescriptor(proto, prop);
+    if (descriptor !== undefined) return descriptor.set !== undefined ? descriptor : undefined;
+  }
+  return undefined;
+}
+
+/**
+ * Does a write that reached the proxy of `target` with `receiver` as its
+ * receiver land on `target`? An outer proxy over the proxy, at any depth,
+ * forwards: it gives `target` as its raw object and has its prototype.
+ * `Object.create(proxy)`, the raw object itself and any other object do
+ * not: the write lands on that receiver, as on a plain object.
+ */
+export function forwardsTo(receiver: any, target: object): boolean {
+  return (
+    receiver !== target &&
+    receiver !== null &&
+    typeof receiver === "object" &&
+    receiver[ReactiveFlags.RAW] === target &&
+    Object.getPrototypeOf(receiver) === Object.getPrototypeOf(target)
+  );
 }
 
 function hasNoOwnAccessor(target: object): boolean {

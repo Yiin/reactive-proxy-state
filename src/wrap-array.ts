@@ -24,11 +24,12 @@ import {
   locate,
   relinkArray,
   relinkReorder,
-  writesThroughSetter,
+  setterOf,
+  forwardsTo,
   copyPayloadAfter,
   copyPayloadReaching,
 } from "./location";
-import { beginWrite, endWrite, activeEffect, track, trigger, triggerArray, triggerSplice } from "./watch-effect";
+import { beginWrite, endWrite, activeEffect, track, trigger, triggerArray, triggerSplice, writeThroughSetter } from "./watch-effect";
 import { ReactiveFlags } from "./constants";
 
 // avoid repeated typeof checks
@@ -182,19 +183,6 @@ function writeReorder(target: unknown[], reorder: Reorder): void {
 
 /** What the get trap holds before it reads the value. */
 const notRead = Symbol("notRead");
-
-/**
- * Does a write of `prop`, a name, to the array call a setter: its own, or
- * one along its prototype chain (a subclass, `Array.prototype`)?
- */
-function callsSetter(target: unknown[], prop: string | symbol, node: LocationNode): boolean {
-  if (hasOwn.call(target, prop)) return writesThroughSetter(target, prop, node);
-  for (let proto = Object.getPrototypeOf(target); proto !== null; proto = Object.getPrototypeOf(proto)) {
-    const descriptor = Reflect.getOwnPropertyDescriptor(proto, prop);
-    if (descriptor !== undefined) return descriptor.set !== undefined;
-  }
-  return false;
-}
 
 /** Is `prop` a name: no index, no numeric-looking key ("1.5", "01"), not `length`? */
 function isName(prop: string | symbol): boolean {
@@ -670,13 +658,32 @@ export function wrapArray<T extends any[]>(arr: T, node: LocationNode): T {
       // object that inherits from the proxy) gets the ordinary write. When
       // the write lands on this array, it ends in the `defineProperty` trap
       // below, which unwraps the value and sends the event once. 3.0.12 also
-      // sent it here: twice. A write that calls a setter, own or inherited,
-      // goes on below, as on the proxy, with the receiver as `this`.
+      // sent it here: twice. A write that calls a setter goes on below, on
+      // every route. Only a name can call a setter: an index or `length` is
+      // written as data.
       const foreign = receiver !== proxy;
-      if (foreign && !(isName(prop) && callsSetter(target, prop, node))) return Reflect.set(target, prop, value, receiver);
+      const setter = isName(prop) ? setterOf(target, prop, hasOwn.call(target, prop), node) : undefined;
+      if (foreign && setter === undefined) return Reflect.set(target, prop, value, receiver);
       if (isObject(value)) value = unwrapForStore(value);
 
       const oldValue = (target as any)[prop];
+
+      // A define with a value makes the key data: it is written below.
+      if (setter !== undefined && descriptor === undefined) {
+        // The same rule as on an object (see `writeThroughSetter`). A write
+        // that lands on the array changes nothing when the getter already
+        // gives the value; a setter with no getter always runs. A receiver
+        // that does not forward (`Object.create(list)`, the raw array) runs
+        // the setter as on a plain array.
+        const forwards = !foreign || forwardsTo(receiver, target);
+        if (
+          forwards &&
+          setter.get !== undefined &&
+          (oldValue === value || (isObject(oldValue) && isObject(value) && deepEqual(oldValue, value)))
+        )
+          return true;
+        return writeThroughSetter(target, prop, value, receiver, forwards, oldValue);
+      }
 
       // avoid unnecessary triggers if value hasn't changed. Reading past the end of an
       // array also yields undefined, so also require the prop to already exist —
@@ -697,25 +704,6 @@ export function wrapArray<T extends any[]>(arr: T, node: LocationNode): T {
           : undefined;
 
       const index = arrayIndex(prop);
-      // only a name can call a setter: an index or `length` is written as data
-      const throughSetter = foreign || (index < 0 && isName(prop) && callsSetter(target, prop, node));
-      if (throughSetter && descriptor === undefined) {
-        // A setter, own or inherited, runs with the proxy (or the other
-        // receiver) as `this`: its own writes send their events, and the
-        // write of its key sends none. An inherited setter also reruns the
-        // readers of its key, as until 3.0.12: its getter can read what no
-        // proxy sees. One batch: an effect that reads the key and what the
-        // setter writes runs once.
-        if (hasOwn.call(target, prop)) return Reflect.set(target, prop, value, receiver);
-        beginWrite();
-        try {
-          const result = Reflect.set(target, prop, value, receiver);
-          if (result) trigger(target, prop);
-          return result;
-        } finally {
-          endWrite();
-        }
-      }
       // direct length grow (e.g. arr.length = N) — emit ascending per-index sets
       // instead of a bare length event so the remote fills every index and never
       // ends up with a hole.
@@ -847,7 +835,7 @@ export function wrapArray<T extends any[]>(arr: T, node: LocationNode): T {
         return handler.set(target, prop, undefined, proxy, descriptor);
       }
       // an accessor: effects rerun, and no event is sent
-      // (an accessor added later is outside the supported input, see `writesThroughSetter`)
+      // (an accessor added later is outside the supported input, see `setterOf`)
       const oldLength = target.length;
       const result = Reflect.defineProperty(target, prop, descriptor);
       if (result) {
