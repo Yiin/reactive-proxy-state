@@ -146,6 +146,7 @@ export declare function namedKeys(array: object): (string | symbol)[] | undefine
 export declare function arrayIndex(key: string | symbol): number;
 /** `object[key] = value` as an own enumerable data property: no setter runs, and `__proto__` stays a key. */
 export declare function setData(object: object, key: PropertyKey, value: unknown): void;
+export declare const isEnumerable: (v: PropertyKey) => boolean;
 /**
  * Name `member`, a member of `collection` (raw), in a payload whose copy of
  * it is `copy`, or `member` itself when the event sends the object.

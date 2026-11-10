@@ -89,10 +89,12 @@ export interface LocationNode {
      */
     lostLink: boolean;
     /**
-     * The object had no own accessor property when its proxy first wrote to
-     * it (see `setterOf`); undefined before that write.
+     * Every own key of the object was enumerable data (no accessor, no
+     * hidden key; an array's `length` aside) when its proxy first looked
+     * (see `ownDescriptor`); undefined before that, and after a define
+     * through the proxy.
      */
-    dataOnly: boolean | undefined;
+    plainData: boolean | undefined;
     /**
      * How many places name this node as their container: every `Place` made
      * with it counts, and each place dropped from its object's `places` stops
@@ -123,18 +125,29 @@ interface PlaceIndex {
 export declare function getLocationNode(raw: object): LocationNode | undefined;
 export declare function ensureLocationNode(raw: object): LocationNode;
 /**
- * The accessor whose setter a write of `prop` to `target` (raw; its node is
- * `node`) calls: the target's own, or the first one along its prototype
- * chain (a class, `Array.prototype`, `Object.prototype`'s `__proto__`).
- * Undefined when the write stores data. `own`: the target has `prop`.
- * An own key is read from its descriptor, unless the object had no own
- * accessor when its proxy first wrote to it: a write through a proxy adds
- * only data properties, so then there is none to find, and no descriptor
- * is made per write. An accessor added later (`Object.defineProperty`) is
- * outside the supported input. An object with more than 64 own keys is not
- * scanned and reads the descriptor at every write.
+ * The own descriptor of `prop`, a key `target` (raw; its node is `node`)
+ * has, or undefined when every own key of the object is enumerable data.
+ * A write through a proxy adds only such keys, so an object that had no
+ * other key when its proxy first looked has none, and no descriptor is
+ * made per write. A define through the proxy looks again. An accessor or a
+ * hidden key added raw is outside the supported input. An object with more
+ * than 64 own keys is not scanned and reads the descriptor each time.
  */
-export declare function setterOf(target: object, prop: PropertyKey, own: boolean, node: LocationNode): PropertyDescriptor | undefined;
+export declare function ownDescriptor(target: object, prop: PropertyKey, node: LocationNode): PropertyDescriptor | undefined;
+/**
+ * Does a define with `descriptor` of a key whose own descriptor is
+ * `current` (undefined: a new key) leave it non-configurable and
+ * read-only? Then the engine checks that the key holds the descriptor's
+ * value after the trap.
+ */
+export declare function fixedAfter(descriptor: PropertyDescriptor, current: PropertyDescriptor | undefined): boolean;
+/**
+ * The accessor whose setter a write of `prop` to `target` calls, when
+ * `target` does not have `prop`: the first one along its prototype chain
+ * (a class, `Array.prototype`, `Object.prototype`'s `__proto__`).
+ * Undefined when the write stores data.
+ */
+export declare function inheritedSetter(target: object, prop: PropertyKey): PropertyDescriptor | undefined;
 /**
  * Does a setter write that reached the proxy of `target` with `receiver`
  * as its receiver land on `target`? An outer proxy over the proxy, at any
