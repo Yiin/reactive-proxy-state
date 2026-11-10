@@ -132,3 +132,24 @@ test("the receiver property detects the 3.0.15 writes that landed with no event"
     checkReceivers(lib, spec);
   }
 });
+
+test("the receiver property detects the 3.0.16 hidden keys sent to replicas", async () => {
+  const published = await import("./fixtures/published-3.0.16.js");
+  const cases = {
+    "object new hidden key": { kind: "object", items: [1], bar: null, hush: null, effects: [["hush"]], writes: [{ write: { key: "hush", value: 2, op: "hidden" }, route: "direct" }] },
+    "object hidden key written by =": { kind: "object", items: [1], bar: null, hush: 1, effects: [["hush"]], writes: [{ write: { key: "hush", value: 2 }, route: "direct" }] },
+    "object key hidden by flags alone": { kind: "object", items: [1], bar: null, hush: null, effects: [["a"]], writes: [{ write: { key: "a", value: undefined, op: "hide" }, route: "outer" }] },
+    "object hidden key shown": { kind: "object", items: [1], bar: null, hush: 1, effects: [["a"]], writes: [{ write: { key: "hush", value: undefined, op: "show" }, route: "membrane" }] },
+    "array hidden name defined": { kind: "array", items: [1], bar: 1, hush: null, effects: [["bar"]], writes: [{ write: { key: "bar", value: 2, op: "hidden" }, route: "direct" }] },
+    "array hidden name deleted": { kind: "array", items: [1], bar: null, hush: 1, effects: [["hush"]], writes: [{ write: { key: "hush", value: undefined, op: "delete" }, route: "direct" }] },
+  };
+  const keys = ["events", "runs", "children", "source", "replica", "other", "otherReplica", "closures"] as const;
+  for (const [name, spec] of Object.entries(cases)) {
+    const old = runReceivers(published, spec, false);
+    const expected = model(spec);
+    const oldMatches = JSON.stringify(keys.slice(1).map((key) => old[key])) === JSON.stringify(keys.slice(1).map((key) => (expected as any)[key]));
+    const sameEvents = JSON.stringify(old.events) === JSON.stringify(runReceivers(lib, spec, false).events);
+    expect({ name, oldMatches: oldMatches && sameEvents }).toEqual({ name, oldMatches: false });
+    checkReceivers(lib, spec);
+  }
+});

@@ -1,6 +1,7 @@
 // Random writes to an array or object proxy, made through other receivers
 // (3.0.13; a membrane and another proxy of the state in 3.0.16) and through
-// accessors (3.0.14, one setter rule in 3.0.15). A
+// accessors (3.0.14, one setter rule in 3.0.15), and defines that hide or
+// show a key (3.0.17: a replica holds the enumerable keys alone). A
 // write through a receiver that forwards to the proxy lands on the
 // container, so it must send the events and rerun the effects of the same
 // write made directly on the proxy. A model of the write semantics gives
@@ -13,6 +14,8 @@ const indexKeys = ["0", "1", "2", "3", "4", "5"];
 /** An object's own data keys, besides the named keys. */
 const fieldKeys = ["a", "b"];
 const namedKeys = ["bar", "extra"];
+/** A name the container may start with as hidden data (not enumerable), when the spec gives `hush`. */
+const HUSH = "hush";
 /**
  * Accessors, the same on arrays and objects (see `makeContainer`). On the
  * class prototype: `hidden` keeps its value in a closure; `mirror` reads
@@ -23,8 +26,8 @@ const namedKeys = ["bar", "extra"];
  */
 const accessorKeys = ["hidden", "mirror", "sink", "ownHidden", "ownMirror", "ownSink"];
 const getterless = new Set(["sink", "ownSink"]);
-const arrayReadKeys = [...indexKeys, "length", ...namedKeys, ...accessorKeys, ITERATE];
-const objectReadKeys = [...fieldKeys, ...namedKeys, ...accessorKeys];
+const arrayReadKeys = [...indexKeys, "length", ...namedKeys, HUSH, ...accessorKeys, ITERATE];
+const objectReadKeys = [...fieldKeys, ...namedKeys, HUSH, ...accessorKeys];
 
 /** Item values: equal primitives, a hole-like undefined, and deep-equal objects. */
 const valueArbitrary = fc.oneof(
@@ -94,6 +97,27 @@ function membraneOf(container) {
   return membrane;
 }
 
+/**
+ * Defines and deletes made on the proxy, or through an outer proxy or a
+ * membrane (both forward them to the proxy's traps): `hidden` defines the
+ * value as hidden data, `hide` and `show` set `enumerable` alone (with
+ * `writable` and `configurable`, so that a new key stays writable).
+ */
+export const keyOps = {
+  hidden: (target, key, value) =>
+    Reflect.defineProperty(
+      target,
+      key,
+      Object.prototype.hasOwnProperty.call(target, key)
+        ? { value, enumerable: false }
+        : { value, writable: true, enumerable: false, configurable: true }
+    ),
+  hide: (target, key) => Reflect.defineProperty(target, key, { enumerable: false, writable: true, configurable: true }),
+  show: (target, key) => Reflect.defineProperty(target, key, { enumerable: true, writable: true, configurable: true }),
+  delete: (target, key) => Reflect.deleteProperty(target, key),
+};
+const keyOpRoutes = { direct: (container) => container, outer: (container, outer) => outer, membrane: (container) => membraneOf(container) };
+
 /** Routes whose receiver does not forward to the proxy. */
 const nonForwarding = new Set(["child", "other", "raw"]);
 
@@ -112,10 +136,24 @@ const accessorWrite = fc.record({
   route: routeArbitrary(forwardingSetRoutes),
 });
 
+/** A define or delete of a data key (see `keyOps`); an array deletes names only. */
+const keyOpWrite = (keys, deletable) =>
+  fc.oneof(
+    fc.record({
+      write: fc.record({ key: fc.constantFrom(...keys), value: valueArbitrary, op: fc.constantFrom("hidden", "hide", "show") }),
+      route: fc.constantFrom(...Object.keys(keyOpRoutes)),
+    }),
+    fc.record({
+      write: fc.record({ key: fc.constantFrom(...deletable), value: fc.constant(undefined), op: fc.constant("delete") }),
+      route: fc.constantFrom(...Object.keys(keyOpRoutes)),
+    })
+  );
+
 const arrayArbitrary = fc.record({
   kind: fc.constant("array"),
   items: fc.array(valueArbitrary, { maxLength: 5 }),
   bar: fc.option(valueArbitrary, { nil: null }),
+  hush: fc.option(valueArbitrary, { nil: null }),
   effects: fc.array(fc.uniqueArray(fc.constantFrom(...arrayReadKeys), { minLength: 1, maxLength: 4 }), {
     minLength: 1,
     maxLength: 4,
@@ -124,12 +162,13 @@ const arrayArbitrary = fc.record({
     fc.oneof(
       fc.record({
         write: fc.oneof(
-          fc.record({ key: fc.constantFrom(...indexKeys, ...namedKeys), value: valueArbitrary }),
+          fc.record({ key: fc.constantFrom(...indexKeys, ...namedKeys, HUSH), value: valueArbitrary }),
           fc.record({ key: fc.constant("length"), value: fc.integer({ min: 0, max: 6 }) })
         ),
         route: routeArbitrary(forwardingRoutes),
       }),
-      accessorWrite
+      accessorWrite,
+      keyOpWrite([...indexKeys, ...namedKeys, HUSH], [...namedKeys, HUSH])
     ),
     { minLength: 1, maxLength: 12 }
   ),
@@ -140,6 +179,7 @@ const objectArbitrary = fc.record({
   // `a` and `b` from the first two items
   items: fc.array(valueArbitrary, { maxLength: 2 }),
   bar: fc.option(valueArbitrary, { nil: null }),
+  hush: fc.option(valueArbitrary, { nil: null }),
   effects: fc.array(fc.uniqueArray(fc.constantFrom(...objectReadKeys), { minLength: 1, maxLength: 4 }), {
     minLength: 1,
     maxLength: 4,
@@ -147,10 +187,11 @@ const objectArbitrary = fc.record({
   writes: fc.array(
     fc.oneof(
       fc.record({
-        write: fc.record({ key: fc.constantFrom(...fieldKeys, ...namedKeys), value: valueArbitrary }),
+        write: fc.record({ key: fc.constantFrom(...fieldKeys, ...namedKeys, HUSH), value: valueArbitrary }),
         route: routeArbitrary(forwardingRoutes),
       }),
-      accessorWrite
+      accessorWrite,
+      keyOpWrite([...fieldKeys, ...namedKeys, HUSH], [...fieldKeys, ...namedKeys, HUSH])
     ),
     { minLength: 1, maxLength: 12 }
   ),
@@ -228,8 +269,14 @@ function makeContainer(spec) {
     container = Accessors.from(spec.items.map(materialize));
   }
   if (spec.bar !== null) container.bar = materialize(spec.bar);
+  if (spec.hush != null) Object.defineProperty(container, HUSH, { value: materialize(spec.hush), writable: true, enumerable: false, configurable: true });
   Object.defineProperties(container, own);
   return { container, closures };
+}
+
+/** A replica's copy of a value. */
+function copyValue(value) {
+  return value !== null && typeof value === "object" ? { ...value } : value;
 }
 
 /** A spec value as the library gets it: a fresh object for each use. */
@@ -246,10 +293,15 @@ function describeValue(value) {
   return value === undefined ? "undefined" : JSON.stringify(value);
 }
 
+/** Is `key` of `container` on a replica: an array's index, or an own enumerable key? */
+function shownKey(container, key) {
+  return (Array.isArray(container) && indexKeys.includes(key)) || Object.prototype.propertyIsEnumerable.call(container, key);
+}
+
 /**
  * What a replica can hold of `container`, as text: an array's length,
- * items (a hole reads as undefined, as an event fills it) and named keys;
- * an object's own enumerable keys and values.
+ * items (a hole reads as undefined, as an event fills it) and enumerable
+ * named keys; an object's own enumerable keys and values.
  */
 function describe(kind, container) {
   if (kind === "object") {
@@ -260,7 +312,8 @@ function describe(kind, container) {
   }
   const items = [];
   for (let i = 0; i < container.length; i++) items.push(describeValue(container[i]));
-  return `length=${container.length} [${items.join(",")}] bar=${describeValue(container.bar)} extra=${describeValue(container.extra)}`;
+  const names = [...namedKeys, HUSH].filter((key) => shownKey(container, key)).map((key) => `${key}=${describeValue(container[key])}`);
+  return `length=${container.length} [${items.join(",")}] ${names.join(" ")}`;
 }
 
 /** In the model's changed keys: the object got a key, so each reader of a key reruns. */
@@ -349,8 +402,39 @@ export function model(spec) {
       changed.add(ITERATE);
       if (Number(key) >= source.length) changed.add("length");
     }
+    // `=` keeps a key the container has hidden, and adds a new one enumerable
     source[key] = value;
-    if (replicating) replica[key] = value !== null && typeof value === "object" ? { ...value } : value;
+    if (replicating && shownKey(source, key)) replica[key] = copyValue(value);
+  };
+  /**
+   * A define or delete of a data key on the proxy. The library writes a
+   * define's value as `=` does, with the define's flags: a hidden key
+   * changes no replica, a key that a define hides is deleted from it, and
+   * one it shows is set. An array's index is on a replica whatever its
+   * flags. Effects: a new key, a deleted one, or an object's key that is
+   * shown or hidden rerun every reader of the object's keys; else a changed
+   * value (or a name shown or hidden) reruns the key's readers.
+   */
+  const keyOp = (changed, op, key, value) => {
+    const had = Object.prototype.hasOwnProperty.call(source, key);
+    const wasShown = had && shownKey(source, key);
+    const before = had ? source[key] : undefined;
+    const lengthBefore = source.length;
+    keyOps[op](source, key, value);
+    const has = Object.prototype.hasOwnProperty.call(source, key);
+    const shown = has && shownKey(source, key);
+    const after = has ? source[key] : undefined;
+    const valueChanged = had !== has || !sameValue(before, after);
+    if (!valueChanged && shown === wasShown) return;
+    if (spec.kind === "object" && (had !== has || shown !== wasShown)) changed.add(ANY_KEY);
+    changed.add(key);
+    if (indexKeys.includes(key)) {
+      changed.add(ITERATE);
+      if (source.length !== lengthBefore) changed.add("length");
+    }
+    if (!replicating) return;
+    if (shown) replica[key] = copyValue(after);
+    else if (wasShown) delete replica[key];
   };
   const getter = {
     hidden: () => closures.hidden,
@@ -380,7 +464,9 @@ export function model(spec) {
     const changed = new Set();
     childKeys = new Set();
     if (landing === "raw") replicating = false;
-    if (accessorKeys.includes(key)) {
+    if (write.op !== undefined) {
+      keyOp(changed, write.op, key, value);
+    } else if (accessorKeys.includes(key)) {
       const before = getterless.has(key) ? undefined : getter[key]();
       if (landing === "proxy") {
         if (getterless.has(key) || !sameValue(before, value)) {
@@ -463,7 +549,8 @@ export function runReceivers(lib, spec, direct) {
     for (const { write, route } of spec.writes) {
       const used = direct && !nonForwarding.has(route) ? "direct" : route;
       if (route === "raw") replicating = false;
-      results.push(routes[used](proxy, write.key, materialize(write.value), outer, toRaw(proxy), children, other));
+      if (write.op !== undefined) results.push(keyOps[write.op](keyOpRoutes[used](proxy, outer), write.key, materialize(write.value)));
+      else results.push(routes[used](proxy, write.key, materialize(write.value), outer, toRaw(proxy), children, other));
     }
   } finally {
     for (const stop of stops) stop();
