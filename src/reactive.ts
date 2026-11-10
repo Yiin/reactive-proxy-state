@@ -259,7 +259,7 @@ let defining: PropertyDescriptor | undefined;
  * one, made `Object.keys` of a proxy 2.5x slower. A read trap shared by
  * every proxy made reads that return a nested proxy up to 1.8x slower on
  * Bun. Until 3.0.19 each proxy also had its own closures for the three
- * write traps: about 330 bytes more per proxy on Node.
+ * write traps: about 170 bytes more per proxy on Node.
  */
 interface ObjectHandler<T extends object> {
   get(target: T, prop: string | symbol, receiver: any): any;
