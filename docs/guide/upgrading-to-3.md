@@ -215,7 +215,8 @@ An array proxy now handles `Object.defineProperty`.
 A define with a value works like the same write with `=`: it sends the same event and reruns the same effects.
 In 3.0.11 it sent nothing, and a method read before the define hid the defined one: `list.map()` still ran `Array.prototype.map`.
 A define of an accessor reruns the effects that read the key, and sends no event.
-A define of flags alone, as `Object.freeze` makes for each key, changes no value: it reruns nothing and sends nothing.
+A define of flags alone on a key the array has, as `Object.freeze` makes for each key, changes no value: it reruns nothing and sends nothing.
+3.0.13 corrects two cases of this release, see below.
 
 A Map or Set proxy reads a property defined through it, with `Object.defineProperty` or `=`, in place of its method, also after the proxy read the method.
 In 3.0.11, `set.add = fn` left `set.add()` adding values.
@@ -224,4 +225,30 @@ The proxies cache only the methods of `Array.prototype`, `Map.prototype` and `Se
 A function added to `Object.prototype` is read again each time, so its removal is seen.
 A proxy that read a built-in method keeps it: a later replacement on the prototype does not change what that proxy gives.
 
-Every other write sends the same events as in 3.0.11.
+Every other write made on the proxy itself sends the same events as in 3.0.11.
+Writes through another receiver do not: 3.0.13 fixes them.
+
+## 3.0.13: writes through another receiver send each event once
+
+3.0.12 sends every event twice for a write to an array that reaches the proxy through another receiver.
+Such a write also reruns each effect twice.
+Examples are an outer proxy (`new Proxy(state.list, {})[0] = 9`) and `Reflect.set(state.list, 0, 9, outer)`.
+3.0.13 sends each event once and reruns each effect once, as for the same write on the proxy.
+If you use 3.0.12 with a logging or read-only wrapper around state arrays, upgrade.
+
+A write with a receiver that does not forward to the array, such as a plain object or an object made with `Object.create(state.list)`, lands on that receiver, as on a plain array.
+The array does not change, so 3.0.13 sends nothing and reruns nothing.
+3.0.11 and 3.0.12 sent an event for that write, and a replica then held a value the array did not hold.
+An outer proxy's own `defineProperty` trap decides the write: one that refuses it leaves the array as it was.
+
+`Object.defineProperty` with flags alone on a key the array does not have creates the key with the value `undefined`.
+3.0.13 handles it as the write of `undefined`: it sends that event and reruns the effects that read the key, and the length for a new index.
+3.0.12 sent nothing, so a replica stayed shorter than the array.
+The same holds when `writable` alone makes an own accessor a data property.
+
+A setter on the array's prototype chain, such as a setter of an `Array` subclass, now runs with the proxy as `this`, as an own setter does.
+Its writes send their events, and the write of the setter's own key sends none.
+3.0.12 ran it on the raw array, so its writes sent nothing.
+3.0.11 also sent the setter's key as a value.
+
+A getter defined through the proxy over a function the proxy read before runs once per read, not twice.
