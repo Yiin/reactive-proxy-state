@@ -90,7 +90,7 @@ export interface LocationNode {
     lostLink: boolean;
     /**
      * The object had no own accessor property when its proxy first wrote to
-     * it (see `writesThroughSetter`); undefined before that write.
+     * it (see `setterOf`); undefined before that write.
      */
     dataOnly: boolean | undefined;
     /**
@@ -123,15 +123,26 @@ interface PlaceIndex {
 export declare function getLocationNode(raw: object): LocationNode | undefined;
 export declare function ensureLocationNode(raw: object): LocationNode;
 /**
- * Does a write to `prop` of `target` (raw; its node is `node`) call an own
- * setter? Read from the property's descriptor, unless the object had no own
+ * The accessor whose setter a write of `prop` to `target` (raw; its node is
+ * `node`) calls: the target's own, or the first one along its prototype
+ * chain (a class, `Array.prototype`, `Object.prototype`'s `__proto__`).
+ * Undefined when the write stores data. `own`: the target has `prop`.
+ * An own key is read from its descriptor, unless the object had no own
  * accessor when its proxy first wrote to it: a write through a proxy adds
  * only data properties, so then there is none to find, and no descriptor
  * is made per write. An accessor added later (`Object.defineProperty`) is
  * outside the supported input. An object with more than 64 own keys is not
  * scanned and reads the descriptor at every write.
  */
-export declare function writesThroughSetter(target: object, prop: PropertyKey, node: LocationNode): boolean;
+export declare function setterOf(target: object, prop: PropertyKey, own: boolean, node: LocationNode): PropertyDescriptor | undefined;
+/**
+ * Does a write that reached the proxy of `target` with `receiver` as its
+ * receiver land on `target`? An outer proxy over the proxy, at any depth,
+ * forwards: it gives `target` as its raw object and has its prototype.
+ * `Object.create(proxy)`, the raw object itself and any other object do
+ * not: the write lands on that receiver, as on a plain object.
+ */
+export declare function forwardsTo(receiver: any, target: object): boolean;
 /** Where an event goes: one root and every path of the object under it. */
 export interface Target {
     root: LocationRoot;

@@ -29,6 +29,7 @@ var __export = (target, all) => {
 // src/index.ts
 var exports_src = {};
 __export(exports_src, {
+  writeThroughSetter: () => writeThroughSetter,
   watchEffect: () => watchEffect,
   watch: () => watch,
   updateState: () => updateState,
@@ -1547,6 +1548,17 @@ function trigger(target, key) {
     endBatch();
   }
 }
+function writeThroughSetter(target, prop, value, receiver, forwards, oldValue) {
+  startBatch();
+  try {
+    const result = Reflect.set(target, prop, value, receiver);
+    if (result && (forwards || target[prop] !== oldValue))
+      trigger(target, prop);
+    return result;
+  } finally {
+    endBatch();
+  }
+}
 function triggerKeyChange(target) {
   const depsMap = depsOf(targetMap, target);
   if (!depsMap)
@@ -1868,14 +1880,27 @@ function ensureLocationNode(raw) {
   }
   return node;
 }
-function writesThroughSetter(target, prop, node) {
-  let dataOnly = node.dataOnly;
-  if (dataOnly === undefined)
-    dataOnly = node.dataOnly = hasNoOwnAccessor(target);
-  if (dataOnly)
-    return false;
-  const descriptor = Reflect.getOwnPropertyDescriptor(target, prop);
-  return descriptor !== undefined && descriptor.set !== undefined;
+function setterOf(target, prop, own, node) {
+  if (own) {
+    let dataOnly = node.dataOnly;
+    if (dataOnly === undefined)
+      dataOnly = node.dataOnly = hasNoOwnAccessor(target);
+    if (dataOnly)
+      return;
+    const descriptor = Reflect.getOwnPropertyDescriptor(target, prop);
+    return descriptor !== undefined && descriptor.set !== undefined ? descriptor : undefined;
+  }
+  if (!(prop in target))
+    return;
+  for (let proto = Object.getPrototypeOf(target);proto !== null; proto = Object.getPrototypeOf(proto)) {
+    const descriptor = Reflect.getOwnPropertyDescriptor(proto, prop);
+    if (descriptor !== undefined)
+      return descriptor.set !== undefined ? descriptor : undefined;
+  }
+  return;
+}
+function forwardsTo(receiver, target) {
+  return receiver !== target && receiver !== null && typeof receiver === "object" && receiver["__v_raw" /* RAW */] === target && Object.getPrototypeOf(receiver) === Object.getPrototypeOf(target);
 }
 function hasNoOwnAccessor(target) {
   const keys = Reflect.ownKeys(target);
@@ -3077,16 +3102,6 @@ function writeReorder(target, reorder) {
   }
 }
 var notRead = Symbol("notRead");
-function callsSetter(target, prop, node) {
-  if (hasOwn.call(target, prop))
-    return writesThroughSetter(target, prop, node);
-  for (let proto = Object.getPrototypeOf(target);proto !== null; proto = Object.getPrototypeOf(proto)) {
-    const descriptor = Reflect.getOwnPropertyDescriptor(proto, prop);
-    if (descriptor !== undefined)
-      return descriptor.set !== undefined;
-  }
-  return false;
-}
 function isName(prop) {
   return typeof prop === "symbol" || prop !== "length" && isNaN(parseInt(prop));
 }
@@ -3506,30 +3521,23 @@ function wrapArray(arr, node) {
     },
     set(target, prop, value, receiver, descriptor) {
       const foreign = receiver !== proxy;
-      if (foreign && !(isName(prop) && callsSetter(target, prop, node)))
+      const setter = isName(prop) ? setterOf(target, prop, hasOwn.call(target, prop), node) : undefined;
+      if (foreign && setter === undefined)
         return Reflect.set(target, prop, value, receiver);
       if (isObject3(value))
         value = unwrapForStore(value);
       const oldValue = target[prop];
+      if (setter !== undefined && descriptor === undefined) {
+        const forwards = !foreign || forwardsTo(receiver, target);
+        if (forwards && setter.get !== undefined && (oldValue === value || isObject3(oldValue) && isObject3(value) && deepEqual(oldValue, value)))
+          return true;
+        return writeThroughSetter(target, prop, value, receiver, forwards, oldValue);
+      }
       if (oldValue === value && Reflect.has(target, prop) || isObject3(oldValue) && isObject3(value) && deepEqual(oldValue, value))
         return descriptor === undefined || Reflect.defineProperty(target, prop, { ...descriptor, value: oldValue });
       const sameNaN = oldValue !== oldValue && value !== value && Reflect.has(target, prop);
       const truncated = prop === "length" && Number(value) < target.length ? target.slice(Number(value)) : undefined;
       const index = arrayIndex(prop);
-      const throughSetter = foreign || index < 0 && isName(prop) && callsSetter(target, prop, node);
-      if (throughSetter && descriptor === undefined) {
-        if (hasOwn.call(target, prop))
-          return Reflect.set(target, prop, value, receiver);
-        beginWrite();
-        try {
-          const result2 = Reflect.set(target, prop, value, receiver);
-          if (result2)
-            trigger(target, prop);
-          return result2;
-        } finally {
-          endWrite();
-        }
-      }
       const grows = prop === "length" && Number(value) > Number(oldValue);
       const located = grows ? locate(node) : locate(node, prop);
       const event = located === undefined || grows ? undefined : { action: "set", path: located.paths[0], oldValue, newValue: value };
@@ -4316,15 +4324,24 @@ function wrapObject(obj, node, options) {
       return wrapChild(value, node, prop, options);
     },
     set(target, prop, value, receiver) {
+      const forwards = receiver === proxy || forwardsTo(receiver, target);
+      const had = hasOwn.call(target, prop);
+      const setter = setterOf(target, prop, had, node);
+      if (!forwards && setter === undefined)
+        return Reflect.set(target, prop, value, receiver);
       if (isObject6(value))
         value = unwrapForStore(value);
       const oldValue = target[prop];
-      if (oldValue === value && hasOwn.call(target, prop))
+      if (setter !== undefined) {
+        if (forwards && setter.get !== undefined && (oldValue === value || !options?.async && isObject6(oldValue) && isObject6(value) && deepEqual(oldValue, value)))
+          return true;
+        return writeThroughSetter(target, prop, value, receiver, forwards, oldValue);
+      }
+      if (oldValue === value && had)
         return true;
-      if (!options?.async && isObject6(oldValue) && isObject6(value) && hasOwn.call(target, prop) && deepEqual(oldValue, value))
+      if (!options?.async && isObject6(oldValue) && isObject6(value) && had && deepEqual(oldValue, value))
         return true;
-      const emits = !writesThroughSetter(target, prop, node);
-      const located = emits ? locate(node, prop) : undefined;
+      const located = locate(node, prop);
       const event = located && {
         action: "set",
         path: located.paths[0],
@@ -4340,9 +4357,8 @@ function wrapObject(obj, node, options) {
           setData(after, prop, value);
         copyPayloadReaching(event, located, target, after);
       }
-      const had = hasOwn.call(target, prop);
       const result = Reflect.set(target, prop, value, receiver);
-      if (result && emits) {
+      if (result) {
         if (isObject6(oldValue))
           detachPlace(oldValue, node, prop);
         if (isObject6(value))
