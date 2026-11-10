@@ -328,9 +328,9 @@ function hiddenAt(parent: LocationNode, key: unknown): boolean {
  * or a set's entry are followed.
  */
 function unsentPlace(parent: LocationNode, key: unknown): boolean {
-  if (typeof key === "number") return false;
-  if (parent.kind === ContainerKind.Array) return typeof key !== "string" || isNaN(parseInt(key, 10)) || hiddenAt(parent, key);
-  return parent.hidden !== null && hiddenAt(parent, key);
+  // an object's key is never a number
+  if (parent.kind !== ContainerKind.Array) return parent.hidden !== null && hiddenAt(parent, key);
+  return typeof key !== "number" && (typeof key !== "string" || isNaN(parseInt(key, 10)) || hiddenAt(parent, key));
 }
 
 /**
@@ -433,13 +433,30 @@ const MAX_RECEIVER_CHAIN = 64;
 /**
  * A write of a hidden key of the object of `node` sends nothing, so it
  * looks up no paths (see `locate`). It is still a write: a listener's write
- * counts it, and so does `detachedWrites` when the object left the tree.
+ * counts it, and so does `detachedWrites` when the object left the tree
+ * (see `countUnsent`).
  */
 export function unsent(node: LocationNode): undefined {
   checkListenerWrite();
-  if (!isAttached(node)) proxyStats.detachedWrites++;
+  countUnsent(node);
   return undefined;
 }
+
+/**
+ * Count a write that sends nothing in `detachedWrites` when `node`, the
+ * object that has the hidden key (or the array name) the write is under,
+ * left the tree. An object a write, a delete or a removal through the
+ * proxies took out lost its proxy then, with the objects its enumerable
+ * keys hold (see `evictDeep`): only such an object is looked up, so a write
+ * in the tree costs no walk. Not counted: an object a raw write took out,
+ * and one under a hidden key of an object that left.
+ */
+function countUnsent(node: LocationNode): void {
+  if (node.proxy === undefined && !isAttached(node)) proxyStats.detachedWrites++;
+}
+
+/** The object that has the place `chain` stopped at, when it gave false for events. */
+let unsentHolder: LocationNode | undefined;
 
 /**
  * The value a write of a hidden key of the object of `node` replaced, for
@@ -525,21 +542,24 @@ interface Found {
  * Returns that root and the one path (plus `tail`), null when the chain
  * ends detached, or undefined when the general walk must decide (several
  * places, a root that is also placed, or a long chain). Places that no
- * longer hold the object are dropped on the way. For `events`, a place a
- * replica does not follow (see `unsentPlace`) leads to no root: the walk
- * goes on to tell the tree from a detach, and gives false when it reaches
- * the root. The place is kept, for when its key is shown again.
+ * longer hold the object are dropped on the way. Without `events`, the
+ * caller asks only whether the object is in the tree: the walk builds no
+ * path, and gives false at the root. For `events`, a place a replica does
+ * not follow (see `unsentPlace`) leads to no root: the walk stops there
+ * and gives false, in the tree or not, with the object that has that place
+ * in `unsentHolder` (see `countUnsent`). The place is kept, for when its
+ * key is shown again.
  */
 function chain(node: LocationNode, tail: PropertyKey | undefined, events: boolean): Target | null | false | undefined {
   let reversed: string[] | undefined;
-  let unsentAbove = false;
+  const pathless = !events;
   let current = node;
   for (let steps = 0; steps < FAST_CHAIN_LIMIT; steps++) {
     const places = current.places;
     const root = current.root;
     if (root !== undefined) {
       if (places.length !== 0) return undefined;
-      return unsentAbove ? false : { root, paths: [buildPath(root.path, reversed, tail)] };
+      return pathless ? false : { root, paths: [buildPath(root.path, reversed, tail)] };
     }
     if (places.length !== 1) return places.length === 0 ? null : undefined;
     const place = places[0];
@@ -550,9 +570,12 @@ function chain(node: LocationNode, tail: PropertyKey | undefined, events: boolea
       current.places = [];
       return null;
     }
-    if (!unsentAbove) {
-      if (events && unsentPlace(parent, place.key)) unsentAbove = true;
-      else (reversed ??= []).push(segment(parent, place.key, current.raw));
+    if (!pathless) {
+      if (unsentPlace(parent, place.key)) {
+        unsentHolder = parent;
+        return false;
+      }
+      (reversed ??= []).push(segment(parent, place.key, current.raw));
     }
     current = parent;
   }
@@ -646,14 +669,19 @@ function buildPath(base: Path, reversed: string[] | undefined, tail: PropertyKey
  *
  * A write whose object is in no tree is counted in
  * `proxyStats.detachedWrites`; one that only unsent places hold is in the
- * tree, and is not.
+ * tree, and is not (see `countUnsent`).
  */
 export function locate(node: LocationNode, tail?: PropertyKey): Target | undefined {
   checkListenerWrite();
   const single = chain(node, tail, true);
   if (single !== undefined) {
-    if (single === null || single === false) {
-      if (single === null) proxyStats.detachedWrites++;
+    if (single === null) {
+      proxyStats.detachedWrites++;
+      return undefined;
+    }
+    if (single === false) {
+      countUnsent(unsentHolder!);
+      unsentHolder = undefined;
       return undefined;
     }
     return single.root.emit === undefined ? undefined : single;
