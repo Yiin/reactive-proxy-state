@@ -27,6 +27,10 @@ import {
   getLocationNode,
   heldItems,
   locate,
+  noteHidden,
+  unsent,
+  replacedInTree,
+  definedAccessorFlags,
   notePlace,
   restoreEvicted,
   copyPayloadReaching,
@@ -266,8 +270,8 @@ function wrapObject<T extends object>(obj: T, node: LocationNode, options?: Reac
       const descriptor = defining;
       if (descriptor !== undefined) defining = undefined;
       const had = hasOwn.call(target, prop);
-      // the key's descriptor, unless every own key is enumerable data (see `ownDescriptor`)
-      const current = had && node.plainData !== true ? ownDescriptor(target, prop, node) : undefined;
+      // the key's descriptor, unless the object has no accessor (see `ownDescriptor`)
+      const current = had && node.dataOnly !== true ? ownDescriptor(target, prop, node) : undefined;
       const setter = had ? (current !== undefined && current.set !== undefined ? current : undefined) : inheritedSetter(target, prop);
       // Another receiver (an outer proxy of any kind, another proxy as
       // `Reflect.set`'s receiver, `Object.create(proxy)`, the raw object)
@@ -307,8 +311,9 @@ function wrapObject<T extends object>(obj: T, node: LocationNode, options?: Reac
       // `shownBefore` and `shown`, whether it holds the key before and
       // after the write. A write by `=` keeps a key the object has as it
       // was, and adds a new one enumerable; a define sets what its
-      // descriptor says.
-      const shownBefore = had && (current === undefined || current.enumerable === true);
+      // descriptor says. With no descriptor, the key is data, and the
+      // object's hidden keys tell (see `hidden`).
+      const shownBefore = had && (current === undefined ? node.hidden?.has(prop) !== true : current.enumerable === true);
       let shown = had ? shownBefore : true;
       if (descriptor !== undefined) {
         shown = "enumerable" in descriptor ? descriptor.enumerable === true : shownBefore;
@@ -331,11 +336,12 @@ function wrapObject<T extends object>(obj: T, node: LocationNode, options?: Reac
         return descriptor === undefined || Reflect.defineProperty(target, prop, { ...descriptor, value: oldValue });
 
       // the write does not move `target`, so its paths are known before it.
-      // A hidden key is written and its effects rerun, with no event; a key
-      // a define hides is deleted from the replica.
-      const located = locate(node, prop);
+      // A hidden key is written and its effects rerun, with no event, so it
+      // needs no paths; a key a define hides is deleted from the replica.
+      const sent = shown || shownBefore;
+      const located = sent ? locate(node, prop) : unsent();
       const event: StateEvent | undefined =
-        located === undefined || !(shown || shownBefore)
+        located === undefined
           ? undefined
           : shown
             ? { action: "set", path: located.paths[0], oldValue, newValue: value }
@@ -363,11 +369,11 @@ function wrapObject<T extends object>(obj: T, node: LocationNode, options?: Reac
       // only emit and trigger if the set was successful
       if (result) {
         // a define may add a hidden key, or show or hide one
-        if (descriptor !== undefined && !shown) node.plainData = false;
-        else if (descriptor !== undefined && !shownBefore) node.plainData = undefined;
+        if (descriptor !== undefined && !(shown && shownBefore)) noteHidden(node, prop, !shown);
         // move places before anything can write again (emit may throw)
         if (isObject(oldValue)) detachPlace(oldValue, node, prop);
-        if (isObject(value)) attachValue(value, node, prop, copied === Copied.Fresh, located && oldValue, held);
+        if (isObject(value))
+          attachValue(value, node, prop, copied === Copied.Fresh, sent ? located && oldValue : replacedInTree(node, oldValue), held);
 
         beginWrite();
         try {
@@ -411,6 +417,7 @@ function wrapObject<T extends object>(obj: T, node: LocationNode, options?: Reac
 
       // only emit and trigger if the property existed and deletion was successful
       if (hadProperty && result) {
+        if (!shown) noteHidden(node, prop, false);
         if (isObject(oldValue)) detachPlace(oldValue, node, prop);
 
         beginWrite();
@@ -455,7 +462,7 @@ function wrapObject<T extends object>(obj: T, node: LocationNode, options?: Reac
           defining = { ...descriptor, value: current.value };
           return handler.set(target, prop, current.value, proxy);
         }
-        if (current !== undefined && !("writable" in descriptor)) return Reflect.defineProperty(target, prop, descriptor);
+        if (current !== undefined && !("writable" in descriptor)) return definedAccessorFlags(node, target, prop, descriptor);
         // a new key, or an accessor made data: a write of `undefined`
         defining = descriptor;
         return handler.set(target, prop, undefined, proxy);
@@ -465,7 +472,8 @@ function wrapObject<T extends object>(obj: T, node: LocationNode, options?: Reac
       const had = hasOwn.call(target, prop);
       const result = Reflect.defineProperty(target, prop, descriptor);
       if (result) {
-        node.plainData = false;
+        node.dataOnly = false;
+        noteHidden(node, prop, !isEnumerable.call(target, prop));
         beginWrite();
         try {
           if (!had) triggerKeyChange(target);

@@ -31,6 +31,10 @@ import {
   ownDescriptor,
   refusedDefine,
   forwardsTo,
+  noteHidden,
+  unsent,
+  replacedInTree,
+  definedAccessorFlags,
   copyPayloadAfter,
   copyPayloadReaching,
 } from "./location";
@@ -670,8 +674,8 @@ export function wrapArray<T extends any[]>(arr: T, node: LocationNode): T {
       // can call a setter ("1.5" and "01" are written as data, as indexes).
       const named = index < 0 && prop !== "length";
       const had = named && hasOwn.call(target, prop);
-      // the name's descriptor, unless every own key is enumerable data (see `ownDescriptor`)
-      const current = had && node.plainData !== true ? ownDescriptor(target, prop, node) : undefined;
+      // the name's descriptor, unless the array has no accessor (see `ownDescriptor`)
+      const current = had && node.dataOnly !== true ? ownDescriptor(target, prop, node) : undefined;
       const setter =
         !named || !isName(prop)
           ? undefined
@@ -712,7 +716,7 @@ export function wrapArray<T extends any[]>(arr: T, node: LocationNode): T {
 
       // A replica holds the items and the enumerable names, as on an object
       // (see its `set`). An item is sent whatever its flags.
-      const shownBefore = !named || (had && (current === undefined || current.enumerable === true));
+      const shownBefore = !named || (had && (current === undefined ? node.hidden?.has(prop) !== true : current.enumerable === true));
       let shown = named && had ? shownBefore : true;
       if (descriptor !== undefined) {
         if (named) shown = "enumerable" in descriptor ? descriptor.enumerable === true : shownBefore;
@@ -745,12 +749,13 @@ export function wrapArray<T extends any[]>(arr: T, node: LocationNode): T {
       // ends up with a hole.
       const grows = prop === "length" && Number(value) > Number(oldValue);
 
-      // the write does not move `target`, so its paths are known before it
-      const located = grows ? locate(node) : locate(node, prop);
-      // A hidden name is written and its effects rerun, with no event; a
-      // name a define hides is deleted from the replica.
+      // the write does not move `target`, so its paths are known before it.
+      // A hidden name is written and its effects rerun, with no event, so
+      // it needs no paths; a name a define hides is deleted from the replica.
+      const sent = shown || shownBefore;
+      const located = grows ? locate(node) : sent ? locate(node, prop) : unsent();
       const event: StateEvent | undefined =
-        located === undefined || grows || !(shown || shownBefore)
+        located === undefined || grows
           ? undefined
           : shown
             ? { action: "set", path: located.paths[0], oldValue, newValue: value }
@@ -774,15 +779,15 @@ export function wrapArray<T extends any[]>(arr: T, node: LocationNode): T {
 
       if (result) {
         // a define may add a hidden name, or show or hide one
-        if (descriptor !== undefined && !shown) node.plainData = false;
-        else if (descriptor !== undefined && !shownBefore) node.plainData = undefined;
+        if (descriptor !== undefined && !(shown && shownBefore)) noteHidden(node, prop, !shown);
         // move places before anything can write again (emit may throw)
         if (truncated !== undefined) {
           relinkArray(node, target, target.length, truncated);
         } else if (prop !== "length") {
           const key = placeKey(prop);
           if (isObject(oldValue)) detachPlace(oldValue, node, key);
-          if (isObject(value)) attachValue(value, node, key, copied === Copied.Fresh, located && oldValue, held);
+          if (isObject(value))
+            attachValue(value, node, key, copied === Copied.Fresh, sent ? located && oldValue : replacedInTree(node, oldValue), held);
         }
 
         beginWrite();
@@ -846,6 +851,7 @@ export function wrapArray<T extends any[]>(arr: T, node: LocationNode): T {
       const result = Reflect.deleteProperty(target, prop);
 
       if (hadProperty && result) {
+        if (!enumerable) noteHidden(node, prop, false);
         if (isObject(oldValue)) detachPlace(oldValue, node, placeKey(prop));
         beginWrite();
         try {
@@ -889,7 +895,7 @@ export function wrapArray<T extends any[]>(arr: T, node: LocationNode): T {
           defining = { ...descriptor, value: current.value };
           return handler.set(target, prop, current.value, proxy);
         }
-        if (current !== undefined && !("writable" in descriptor)) return Reflect.defineProperty(target, prop, descriptor);
+        if (current !== undefined && !("writable" in descriptor)) return definedAccessorFlags(node, target, prop, descriptor);
         // a new key, or an accessor made data: a write of `undefined`
         defining = descriptor;
         return handler.set(target, prop, undefined, proxy);
@@ -899,7 +905,8 @@ export function wrapArray<T extends any[]>(arr: T, node: LocationNode): T {
       const oldLength = target.length;
       const result = Reflect.defineProperty(target, prop, descriptor);
       if (result) {
-        node.plainData = false;
+        node.dataOnly = false;
+        noteHidden(node, prop, !isEnumerable.call(target, prop));
         beginWrite();
         try {
           const index = arrayIndex(prop);
