@@ -240,257 +240,288 @@ function createProxy(raw: any, node: LocationNode, options?: ReactiveOptions): a
   return proxy;
 }
 
-function wrapObject<T extends object>(obj: T, node: LocationNode, options?: ReactiveOptions): T {
-  // The descriptor of a define the `defineProperty` trap hands to `set`,
-  // which takes it at once. A fifth parameter of `set` would cost every
-  // write an arity fixup, which is about as much as the equal-value check.
-  let defining: PropertyDescriptor | undefined;
-  const handler = {
-    get(target: T, prop: string | symbol, receiver: any): any {
-      // Special handling for reactive flags
-      if (prop === ReactiveFlags.RAW) {
-        return target;
-      }
-      if (prop === ReactiveFlags.IS_REACTIVE) {
-        return true;
-      }
+/**
+ * The descriptor of a define that the `defineProperty` trap hands to `set`.
+ * `set` takes it as its first step, and nothing runs between the store and
+ * that read, so one slot serves every object proxy. A fifth parameter of
+ * `set` would cost every write an arity fixup, which is about as much as
+ * the equal-value check.
+ */
+let defining: PropertyDescriptor | undefined;
 
-      const value = Reflect.get(target, prop, receiver);
+/**
+ * The handler of one object proxy. Its traps are shared by every object
+ * proxy, and the fields are all a proxy holds of its own. Until 3.0.19 each
+ * proxy had its own handler with four closures, about 400 bytes.
+ */
+class ObjectHandler<T extends object> {
+  node: LocationNode;
+  options: ReactiveOptions | undefined;
+  proxy: T | undefined;
 
-      // track property access for dependency tracking
-      track(target, prop);
+  constructor(node: LocationNode, options: ReactiveOptions | undefined) {
+    this.node = node;
+    this.options = options;
+    this.proxy = undefined;
+  }
 
-      // return non-objects directly without wrapping
-      if (!isObject(value)) return value;
+  get(target: T, prop: string | symbol, receiver: any): any {
+    // Special handling for reactive flags
+    if (prop === ReactiveFlags.RAW) {
+      return target;
+    }
+    if (prop === ReactiveFlags.IS_REACTIVE) {
+      return true;
+    }
 
-      // wrap the nested value if it's an object/collection
-      return wrapChild(value, node, prop, options);
-    },
-    set(target: T, prop: string | symbol, value: any, receiver: any): boolean {
-      // the write is `Object.defineProperty` with this descriptor (see below)
-      const descriptor = defining;
-      if (descriptor !== undefined) defining = undefined;
-      const had = hasOwn.call(target, prop);
-      // the key's descriptor, unless the object has no accessor (see `ownDescriptor`)
-      const current = had && node.dataOnly !== true ? ownDescriptor(target, prop, node) : undefined;
-      const setter = had ? (current !== undefined && current.set !== undefined ? current : undefined) : inheritedSetter(target, prop);
-      // Another receiver (an outer proxy of any kind, another proxy as
-      // `Reflect.set`'s receiver, `Object.create(proxy)`, the raw object)
-      // gets the ordinary write, as on a plain object. When the write lands
-      // on this object, it ends in the `defineProperty` trap below, which
-      // sends it once; on any other object it sends nothing here. A write
-      // that calls a setter goes on below, on every route. Every trap of the
-      // receiver runs on every write, as on a plain object.
-      if (receiver !== proxy && setter === undefined) return Reflect.set(target, prop, value, receiver);
+    const value = Reflect.get(target, prop, receiver);
 
-      // Spreading a reactive proxy (`{ ...proxy }`) embeds proxy wrappers
-      // in the plain result — unwrap to prevent unbounded nesting.
-      if (isObject(value)) value = unwrapForStore(value);
+    // track property access for dependency tracking
+    track(target, prop);
 
-      // a define, like `Object.defineProperty`, calls no getter (see `definedOver`)
-      const oldValue = descriptor === undefined ? (target as any)[prop] : definedOver(target, prop, had, current);
+    // return non-objects directly without wrapping
+    if (!isObject(value)) return value;
 
-      // A setter, own or inherited, as on an array (see `writeThroughSetter`).
-      // A write that lands on the object changes nothing when the getter
-      // already gives the value; a setter with no getter always runs. A
-      // receiver that does not forward (`Object.create(obj)`, the raw
-      // object) runs the setter as on a plain object. A define with a value
-      // makes the key data: it is written below.
-      if (setter !== undefined && descriptor === undefined) {
-        const forwards = receiver === proxy || forwardsTo(receiver, target);
-        if (
-          forwards &&
-          setter.get !== undefined &&
-          (oldValue === value ||
-            (!options?.async && isObject(oldValue) && isObject(value) && deepEqual(oldValue, value)))
-        )
-          return true;
-        return writeThroughSetter(target, prop, value, receiver, forwards, oldValue);
-      }
+    // wrap the nested value if it's an object/collection
+    return wrapChild(value, this.node, prop, this.options);
+  }
 
-      // A replica holds the enumerable string keys alone, as JSON does:
-      // `shownBefore` and `shown`, whether it holds the key before and
-      // after the write. A write by `=` keeps a key the object has as it
-      // was, and adds a new one enumerable; a define sets what its
-      // descriptor says. With no descriptor, the key is data, and the
-      // object's hidden keys tell (see `hidden`). A symbol key counts as
-      // shown here, and `locate` sends nothing for it: a check here would
-      // cost every write.
-      const shownBefore = had && (current === undefined ? node.hidden?.has(prop) !== true : current.enumerable === true);
-      let shown = had ? shownBefore : true;
-      if (descriptor !== undefined) {
-        shown = "enumerable" in descriptor ? descriptor.enumerable === true : shownBefore;
-        if (refusedDefine(target, prop, value, descriptor, current)) return false;
-      }
+  set(target: T, prop: string | symbol, value: any, receiver: any): boolean {
+    // the write is `Object.defineProperty` with this descriptor (see below)
+    const descriptor = defining;
+    if (descriptor !== undefined) defining = undefined;
+    const node = this.node;
+    const proxy = this.proxy;
+    const options = this.options;
+    const had = hasOwn.call(target, prop);
+    // the key's descriptor, unless the object has no accessor (see `ownDescriptor`)
+    const current = had && node.dataOnly !== true ? ownDescriptor(target, prop, node) : undefined;
+    const setter = had ? (current !== undefined && current.set !== undefined ? current : undefined) : inheritedSetter(target, prop);
+    // Another receiver (an outer proxy of any kind, another proxy as
+    // `Reflect.set`'s receiver, `Object.create(proxy)`, the raw object)
+    // gets the ordinary write, as on a plain object. When the write lands
+    // on this object, it ends in the `defineProperty` trap below, which
+    // sends it once; on any other object it sends nothing here. A write
+    // that calls a setter goes on below, on every route. Every trap of the
+    // receiver runs on every write, as on a plain object.
+    if (receiver !== proxy && setter === undefined) return Reflect.set(target, prop, value, receiver);
 
-      // avoid unnecessary triggers if the value hasn't changed. An inherited
-      // value is not the object's own: writing it adds the key, and a
-      // replica that copies own keys needs the event. Deep equality is
-      // skipped when async emit is enabled because the cost of a redundant
-      // deferred emit is far less than a synchronous deep comparison on
-      // every property set. A define of the same value sets its flags
-      // alone, unless it shows or hides the key (see `definesFlagsAlone`).
+    // Spreading a reactive proxy (`{ ...proxy }`) embeds proxy wrappers
+    // in the plain result — unwrap to prevent unbounded nesting.
+    if (isObject(value)) value = unwrapForStore(value);
+
+    // a define, like `Object.defineProperty`, calls no getter (see `definedOver`)
+    const oldValue = descriptor === undefined ? (target as any)[prop] : definedOver(target, prop, had, current);
+
+    // A setter, own or inherited, as on an array (see `writeThroughSetter`).
+    // A write that lands on the object changes nothing when the getter
+    // already gives the value; a setter with no getter always runs. A
+    // receiver that does not forward (`Object.create(obj)`, the raw
+    // object) runs the setter as on a plain object. A define with a value
+    // makes the key data: it is written below.
+    if (setter !== undefined && descriptor === undefined) {
+      const forwards = receiver === proxy || forwardsTo(receiver, target);
       if (
-        had &&
-        (oldValue === value || (!options?.async && isObject(oldValue) && isObject(value) && deepEqual(oldValue, value))) &&
-        (descriptor === undefined ||
-          (shown === shownBefore && definesFlagsAlone(target, prop, oldValue, value, descriptor, current)))
+        forwards &&
+        setter.get !== undefined &&
+        (oldValue === value ||
+          (!options?.async && isObject(oldValue) && isObject(value) && deepEqual(oldValue, value)))
       )
-        return descriptor === undefined || Reflect.defineProperty(target, prop, { ...descriptor, value: oldValue });
+        return true;
+      return writeThroughSetter(target, prop, value, receiver, forwards, oldValue);
+    }
 
-      // the write does not move `target`, so its paths are known before it.
-      // A hidden key is written and its effects rerun, with no event, so it
-      // needs no paths; a key a define hides is deleted from the replica.
-      const sent = shown || shownBefore;
-      const located = sent ? locate(node, prop) : unsent(node);
-      const event: StateEvent | undefined =
-        located === undefined
-          ? undefined
-          : shown
-            ? { action: "set", path: located.paths[0], oldValue, newValue: value }
-            : { action: "delete", path: located.paths[0], oldValue };
-      const held = located && heldItems(value, oldValue);
-      // copies the payload, or throws, before the write
-      const copied = copyPayload(event, located, target, held);
-      if (copied === Copied.Reaches) {
-        // the payload reaches `target`: copy it with the write made on a copy of `target`
-        const after = shallowCopy(target);
-        if (shown) setData(after, prop, value);
-        else delete after[prop];
-        copyPayloadReaching(event!, located!, target, after);
-      }
-      // The write goes to the target: through the proxy it would end in the
-      // proxy's `defineProperty` trap. A define keeps its descriptor unless
-      // the value was unwrapped.
-      // A define of the value alone on a key the object has as enumerable data is that write.
-      const result =
-        descriptor === undefined
-          ? Reflect.set(target, prop, value)
-          : (had && current === undefined && valueOnly(descriptor) && Reflect.set(target, prop, value)) ||
-            Reflect.defineProperty(target, prop, descriptor.value === value ? descriptor : { ...descriptor, value });
+    // A replica holds the enumerable string keys alone, as JSON does:
+    // `shownBefore` and `shown`, whether it holds the key before and
+    // after the write. A write by `=` keeps a key the object has as it
+    // was, and adds a new one enumerable; a define sets what its
+    // descriptor says. With no descriptor, the key is data, and the
+    // object's hidden keys tell (see `hidden`). A symbol key counts as
+    // shown here, and `locate` sends nothing for it: a check here would
+    // cost every write.
+    const shownBefore = had && (current === undefined ? node.hidden?.has(prop) !== true : current.enumerable === true);
+    let shown = had ? shownBefore : true;
+    if (descriptor !== undefined) {
+      shown = "enumerable" in descriptor ? descriptor.enumerable === true : shownBefore;
+      if (refusedDefine(target, prop, value, descriptor, current)) return false;
+    }
 
-      // only emit and trigger if the set was successful
-      if (result) {
-        // a define may add a hidden key, or show or hide one
-        if (descriptor !== undefined && !(shown && shownBefore)) noteHidden(node, prop, !shown);
-        // move places before anything can write again (emit may throw)
-        if (isObject(oldValue)) detachPlace(oldValue, node, prop);
-        if (isObject(value))
-          attachValue(value, node, prop, copied === Copied.Fresh, sent ? located && oldValue : replacedInTree(node, oldValue), held);
+    // avoid unnecessary triggers if the value hasn't changed. An inherited
+    // value is not the object's own: writing it adds the key, and a
+    // replica that copies own keys needs the event. Deep equality is
+    // skipped when async emit is enabled because the cost of a redundant
+    // deferred emit is far less than a synchronous deep comparison on
+    // every property set. A define of the same value sets its flags
+    // alone, unless it shows or hides the key (see `definesFlagsAlone`).
+    if (
+      had &&
+      (oldValue === value || (!options?.async && isObject(oldValue) && isObject(value) && deepEqual(oldValue, value))) &&
+      (descriptor === undefined ||
+        (shown === shownBefore && definesFlagsAlone(target, prop, oldValue, value, descriptor, current)))
+    )
+      return descriptor === undefined || Reflect.defineProperty(target, prop, { ...descriptor, value: oldValue });
 
-        beginWrite();
+    // the write does not move `target`, so its paths are known before it.
+    // A hidden key is written and its effects rerun, with no event, so it
+    // needs no paths; a key a define hides is deleted from the replica.
+    const sent = shown || shownBefore;
+    const located = sent ? locate(node, prop) : unsent(node);
+    const event: StateEvent | undefined =
+      located === undefined
+        ? undefined
+        : shown
+          ? { action: "set", path: located.paths[0], oldValue, newValue: value }
+          : { action: "delete", path: located.paths[0], oldValue };
+    const held = located && heldItems(value, oldValue);
+    // copies the payload, or throws, before the write
+    const copied = copyPayload(event, located, target, held);
+    if (copied === Copied.Reaches) {
+      // the payload reaches `target`: copy it with the write made on a copy of `target`
+      const after = shallowCopy(target);
+      if (shown) setData(after, prop, value);
+      else delete after[prop];
+      copyPayloadReaching(event!, located!, target, after);
+    }
+    // The write goes to the target: through the proxy it would end in the
+    // proxy's `defineProperty` trap. A define keeps its descriptor unless
+    // the value was unwrapped.
+    // A define of the value alone on a key the object has as enumerable data is that write.
+    const result =
+      descriptor === undefined
+        ? Reflect.set(target, prop, value)
+        : (had && current === undefined && valueOnly(descriptor) && Reflect.set(target, prop, value)) ||
+          Reflect.defineProperty(target, prop, descriptor.value === value ? descriptor : { ...descriptor, value });
+
+    // only emit and trigger if the set was successful
+    if (result) {
+      // a define may add a hidden key, or show or hide one
+      if (descriptor !== undefined && !(shown && shownBefore)) noteHidden(node, prop, !shown);
+      // move places before anything can write again (emit may throw)
+      if (isObject(oldValue)) detachPlace(oldValue, node, prop);
+      if (isObject(value))
+        attachValue(value, node, prop, copied === Copied.Fresh, sent ? located && oldValue : replacedInTree(node, oldValue), held);
+
+      beginWrite();
+      try {
+        if ((!had && hasOwn.call(target, prop)) || shown !== shownBefore) triggerKeyChange(target);
+        else if (oldValue === oldValue || value === value) trigger(target, prop);
+        if (event !== undefined) dispatch(located!, event);
+      } finally {
         try {
-          if ((!had && hasOwn.call(target, prop)) || shown !== shownBefore) triggerKeyChange(target);
-          else if (oldValue === oldValue || value === value) trigger(target, prop);
-          if (event !== undefined) dispatch(located!, event);
-        } finally {
-          try {
 
-            // Evict the old object tree from proxy caches so GC can collect
-            // stale proxies and their methodCache closures. A part of it that
-            // still sits in the tree keeps its proxy.
-            if (isObject(oldValue)) {
-              evictDeep(oldValue);
-            }
-          } finally {
-            endWrite();
+          // Evict the old object tree from proxy caches so GC can collect
+          // stale proxies and their methodCache closures. A part of it that
+          // still sits in the tree keeps its proxy.
+          if (isObject(oldValue)) {
+            evictDeep(oldValue);
           }
-        }
-      }
-      return result;
-    },
-    deleteProperty(target: T, prop: string | symbol): boolean {
-      const oldValue = (target as any)[prop];
-      // an own enumerable key, the one a replica holds (see `set`; `locate`
-      // sends nothing for a symbol key): one lookup for it, a second only
-      // for a hidden key
-      const shown = isEnumerable.call(target, prop);
-      const hadProperty = shown || hasOwn.call(target, prop);
-      const located = shown ? locate(node, prop) : undefined;
-      const event: StateEvent | undefined = located && {
-        action: "delete",
-        path: located.paths[0],
-        oldValue,
-      };
-      if (copyPayload(event, located, target) === Copied.Reaches) {
-        const after = shallowCopy(target);
-        delete after[prop];
-        copyPayloadReaching(event!, located!, target, after);
-      }
-      const result = Reflect.deleteProperty(target, prop);
-
-      // only emit and trigger if the property existed and deletion was successful
-      if (hadProperty && result) {
-        if (!shown) noteHidden(node, prop, false);
-        accessorMayBeGone(node, true);
-        if (isObject(oldValue)) detachPlace(oldValue, node, prop);
-
-        beginWrite();
-        try {
-          triggerKeyChange(target);
-          if (event !== undefined) dispatch(located!, event);
-        } finally {
-          try {
-
-            // Recursively evict stale proxy for deleted value
-            if (isObject(oldValue)) {
-              evictDeep(oldValue);
-            }
-          } finally {
-            endWrite();
-          }
-        }
-      }
-
-      return result;
-    },
-    defineProperty(target: T, prop: string | symbol, descriptor: PropertyDescriptor): boolean {
-      // A value is written as `set` writes it: the same event, and the same
-      // effects rerun. A write through another receiver that lands on this
-      // object ends here (an outer proxy, with any traps that do not
-      // replace the write, or this proxy as `Reflect.set`'s receiver).
-      // Until 3.0.15 an object proxy had no such trap: those writes
-      // changed the object and sent nothing.
-      if ("value" in descriptor) {
-        defining = descriptor;
-        return accessorMayBeGone(node, handler.set(target, prop, descriptor.value, proxy));
-      }
-      if (!("get" in descriptor) && !("set" in descriptor)) {
-        // new flags alone on a key the object has change no value
-        // (`Object.freeze` ends here for each key), unless `writable` makes
-        // an accessor a data property, or `enumerable` shows or hides the
-        // key: then it is the define of the value it holds
-        const current = Reflect.getOwnPropertyDescriptor(target, prop);
-        if (current !== undefined && "value" in current) {
-          if (!("enumerable" in descriptor) || (descriptor.enumerable === true) === current.enumerable)
-            return Reflect.defineProperty(target, prop, descriptor);
-          defining = { ...descriptor, value: current.value };
-          return handler.set(target, prop, current.value, proxy);
-        }
-        if (current !== undefined && !("writable" in descriptor)) return definedAccessorFlags(node, target, prop, descriptor);
-        // a new key, or an accessor made data: a write of `undefined`
-        defining = descriptor;
-        return accessorMayBeGone(node, handler.set(target, prop, undefined, proxy));
-      }
-      // an accessor: effects rerun, and no event is sent
-      // (an accessor added later is outside the supported input, see `ownDescriptor`)
-      const had = hasOwn.call(target, prop);
-      const result = Reflect.defineProperty(target, prop, descriptor);
-      if (result) {
-        if (node.dataOnly === true) node.dataOnly = false;
-        noteHidden(node, prop, !isEnumerable.call(target, prop));
-        beginWrite();
-        try {
-          if (!had) triggerKeyChange(target);
-          else trigger(target, prop);
         } finally {
           endWrite();
         }
       }
-      return result;
-    },
-  };
+    }
+    return result;
+  }
+
+  deleteProperty(target: T, prop: string | symbol): boolean {
+    const node = this.node;
+    const oldValue = (target as any)[prop];
+    // an own enumerable key, the one a replica holds (see `set`; `locate`
+    // sends nothing for a symbol key): one lookup for it, a second only
+    // for a hidden key
+    const shown = isEnumerable.call(target, prop);
+    const hadProperty = shown || hasOwn.call(target, prop);
+    const located = shown ? locate(node, prop) : undefined;
+    const event: StateEvent | undefined = located && {
+      action: "delete",
+      path: located.paths[0],
+      oldValue,
+    };
+    if (copyPayload(event, located, target) === Copied.Reaches) {
+      const after = shallowCopy(target);
+      delete after[prop];
+      copyPayloadReaching(event!, located!, target, after);
+    }
+    const result = Reflect.deleteProperty(target, prop);
+
+    // only emit and trigger if the property existed and deletion was successful
+    if (hadProperty && result) {
+      if (!shown) noteHidden(node, prop, false);
+      accessorMayBeGone(node, true);
+      if (isObject(oldValue)) detachPlace(oldValue, node, prop);
+
+      beginWrite();
+      try {
+        triggerKeyChange(target);
+        if (event !== undefined) dispatch(located!, event);
+      } finally {
+        try {
+
+          // Recursively evict stale proxy for deleted value
+          if (isObject(oldValue)) {
+            evictDeep(oldValue);
+          }
+        } finally {
+          endWrite();
+        }
+      }
+    }
+
+    return result;
+  }
+
+  defineProperty(target: T, prop: string | symbol, descriptor: PropertyDescriptor): boolean {
+    const node = this.node;
+    // A value is written as `set` writes it: the same event, and the same
+    // effects rerun. A write through another receiver that lands on this
+    // object ends here (an outer proxy, with any traps that do not
+    // replace the write, or this proxy as `Reflect.set`'s receiver).
+    // Until 3.0.15 an object proxy had no such trap: those writes
+    // changed the object and sent nothing.
+    if ("value" in descriptor) {
+      defining = descriptor;
+      return accessorMayBeGone(node, this.set(target, prop, descriptor.value, this.proxy));
+    }
+    if (!("get" in descriptor) && !("set" in descriptor)) {
+      // new flags alone on a key the object has change no value
+      // (`Object.freeze` ends here for each key), unless `writable` makes
+      // an accessor a data property, or `enumerable` shows or hides the
+      // key: then it is the define of the value it holds
+      const current = Reflect.getOwnPropertyDescriptor(target, prop);
+      if (current !== undefined && "value" in current) {
+        if (!("enumerable" in descriptor) || (descriptor.enumerable === true) === current.enumerable)
+          return Reflect.defineProperty(target, prop, descriptor);
+        defining = { ...descriptor, value: current.value };
+        return this.set(target, prop, current.value, this.proxy);
+      }
+      if (current !== undefined && !("writable" in descriptor)) return definedAccessorFlags(node, target, prop, descriptor);
+      // a new key, or an accessor made data: a write of `undefined`
+      defining = descriptor;
+      return accessorMayBeGone(node, this.set(target, prop, undefined, this.proxy));
+    }
+    // an accessor: effects rerun, and no event is sent
+    // (an accessor added later is outside the supported input, see `ownDescriptor`)
+    const had = hasOwn.call(target, prop);
+    const result = Reflect.defineProperty(target, prop, descriptor);
+    if (result) {
+      if (node.dataOnly === true) node.dataOnly = false;
+      noteHidden(node, prop, !isEnumerable.call(target, prop));
+      beginWrite();
+      try {
+        if (!had) triggerKeyChange(target);
+        else trigger(target, prop);
+      } finally {
+        endWrite();
+      }
+    }
+    return result;
+  }
+}
+
+function wrapObject<T extends object>(obj: T, node: LocationNode, options?: ReactiveOptions): T {
+  const handler = new ObjectHandler<T>(node, options);
   const proxy: T = new Proxy(obj, handler);
+  handler.proxy = proxy;
 
   // cache the proxy to handle circular references and improve performance
   globalSeen.set(obj, proxy);
