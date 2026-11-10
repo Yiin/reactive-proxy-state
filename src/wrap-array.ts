@@ -189,11 +189,6 @@ const notRead = Symbol("notRead");
  */
 function callsSetter(target: unknown[], prop: string | symbol, node: LocationNode): boolean {
   if (hasOwn.call(target, prop)) return writesThroughSetter(target, prop, node);
-  return inheritedSetter(target, prop);
-}
-
-/** Does a write of `prop`, a key the array does not own, call a setter on its prototype chain? */
-function inheritedSetter(target: unknown[], prop: string | symbol): boolean {
   for (let proto = Object.getPrototypeOf(target); proto !== null; proto = Object.getPrototypeOf(proto)) {
     const descriptor = Reflect.getOwnPropertyDescriptor(proto, prop);
     if (descriptor !== undefined) return descriptor.set !== undefined;
@@ -675,11 +670,10 @@ export function wrapArray<T extends any[]>(arr: T, node: LocationNode): T {
       // object that inherits from the proxy) gets the ordinary write. When
       // the write lands on this array, it ends in the `defineProperty` trap
       // below, which unwraps the value and sends the event once. 3.0.12 also
-      // sent it here: twice. A write that calls a setter on the prototype
-      // chain goes on below, as on the proxy, with the receiver as `this`.
+      // sent it here: twice. A write that calls a setter, own or inherited,
+      // goes on below, as on the proxy, with the receiver as `this`.
       const foreign = receiver !== proxy;
-      if (foreign && !(isName(prop) && !hasOwn.call(target, prop) && inheritedSetter(target, prop)))
-        return Reflect.set(target, prop, value, receiver);
+      if (foreign && !(isName(prop) && callsSetter(target, prop, node))) return Reflect.set(target, prop, value, receiver);
       if (isObject(value)) value = unwrapForStore(value);
 
       const oldValue = (target as any)[prop];
@@ -712,7 +706,7 @@ export function wrapArray<T extends any[]>(arr: T, node: LocationNode): T {
         // readers of its key, as until 3.0.12: its getter can read what no
         // proxy sees. One batch: an effect that reads the key and what the
         // setter writes runs once.
-        if (!foreign && hasOwn.call(target, prop)) return Reflect.set(target, prop, value, proxy);
+        if (hasOwn.call(target, prop)) return Reflect.set(target, prop, value, receiver);
         beginWrite();
         try {
           const result = Reflect.set(target, prop, value, receiver);

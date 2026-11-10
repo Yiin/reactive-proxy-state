@@ -39,3 +39,26 @@ test("the receiver property detects the 3.0.12 duplicate events", async () => {
   expect(through.runs).not.toEqual(modelRuns(spec));
   expect(runReceivers(lib, spec, false)).toEqual(runReceivers(lib, spec, true));
 });
+
+test("the receiver property detects the 3.0.13 accessor writes", async () => {
+  const published = await import("./fixtures/published-3.0.13.js");
+  // `hidden` keeps its value in a closure: 3.0.13 reran none of its readers
+  const hidden = {
+    items: [1],
+    bar: null,
+    effects: [["hidden"]],
+    writes: [{ write: { key: "hidden", value: 2 }, route: "direct" }],
+  };
+  // `mirror` writes `bar` and `extra`: 3.0.13 reran a reader of both twice
+  const mirror = {
+    items: [1],
+    bar: null,
+    effects: [["bar", "extra"]],
+    writes: [{ write: { key: "mirror", value: 2 }, route: "outer" }],
+  };
+  for (const spec of [hidden, mirror]) {
+    expect(runReceivers(published, spec, true).runs).not.toEqual(modelRuns(spec));
+    expect(runReceivers(lib, spec, true).runs).toEqual(modelRuns(spec));
+    expect(runReceivers(lib, spec, false)).toEqual(runReceivers(lib, spec, true));
+  }
+});

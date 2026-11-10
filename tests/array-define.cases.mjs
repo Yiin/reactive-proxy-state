@@ -231,6 +231,31 @@ export function arrayDefineCases(lib) {
     }
   };
 
+  // The getter decides that a write changes nothing, on every route, also
+  // when it gives `undefined` for a key the setter would create. 3.0.13
+  // ran an own setter for a write through another receiver.
+  cases["an own setter acts on every route as on the proxy"] = () => {
+    const owning = () => {
+      const raw = [1];
+      Object.defineProperty(raw, "foo", {
+        get() {
+          return this.bar;
+        },
+        set(value) {
+          this.bar = value;
+        },
+        configurable: true,
+      });
+      return raw;
+    };
+    for (const [name, route] of Object.entries(routes)) {
+      const same = record(lib, owning(), ["foo", "bar"], (list) => route(list, "foo", undefined));
+      assert.deepEqual(same, { events: [], runs: 1 }, name);
+      const changed = record(lib, owning(), ["foo", "bar"], (list) => route(list, "foo", 5));
+      assert.deepEqual(changed, { events: ["set list.bar 5"], runs: 2 }, name);
+    }
+  };
+
   cases["an effect that writes an inherited accessor it reads runs once"] = () => {
     let hidden = 0;
     class Hidden extends Array {
