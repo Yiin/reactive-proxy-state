@@ -1,5 +1,6 @@
 // Random writes to an array or object proxy, made through other receivers
-// (3.0.13) and through accessors (3.0.14, one setter rule in 3.0.15). A
+// (3.0.13; a membrane and another proxy of the state in 3.0.16) and through
+// accessors (3.0.14, one setter rule in 3.0.15). A
 // write through a receiver that forwards to the proxy lands on the
 // container, so it must send the events and rerun the effects of the same
 // write made directly on the proxy. A model of the write semantics gives
@@ -32,12 +33,15 @@ const valueArbitrary = fc.oneof(
 );
 
 /**
- * Ways to write `container[key] = value`. The first seven forward to the
- * proxy, so the write lands on the container. `child` writes to a fresh
- * `Object.create(container)`, and `raw` gives the raw container as the
- * receiver: such a write lands on that receiver, as on a plain container.
- * A raw write changes the container and no replica (README, "Raw
- * writes"): the replica stops at the first one.
+ * Ways to write `container[key] = value`. The first eight forward to the
+ * proxy, so the write lands on the container. `membrane` is an outer proxy
+ * whose `getPrototypeOf` hides the prototype and whose
+ * `getOwnPropertyDescriptor` gives copies, as a membrane does. `child`
+ * writes to a fresh `Object.create(container)`, `other` gives another
+ * proxy of the state (`state.other`, an object) as the receiver, and `raw`
+ * gives the raw container: such a write lands on that receiver, as on a
+ * plain container. A raw write changes the container and no replica
+ * (README, "Raw writes"): the replica stops at the first one.
  */
 export const routes = {
   direct: (container, key, value) => Reflect.set(container, key, value),
@@ -54,6 +58,18 @@ export const routes = {
     outer[key] = value;
     return true;
   },
+  membrane: (container, key, value) =>
+    Reflect.set(
+      new Proxy(container, {
+        getPrototypeOf: () => null,
+        getOwnPropertyDescriptor(target, key) {
+          const descriptor = Reflect.getOwnPropertyDescriptor(target, key);
+          return descriptor && { ...descriptor };
+        },
+      }),
+      key,
+      value
+    ),
   defineProperty: (container, key, value) =>
     Reflect.defineProperty(
       container,
@@ -69,21 +85,21 @@ export const routes = {
     children.push(Object.keys(child).sort().join(","));
     return result;
   },
+  other: (container, key, value, outer, raw, children, other) => Reflect.set(container, key, value, other),
   raw: (container, key, value, outer, raw) => Reflect.set(container, key, value, raw),
 };
 /** Routes whose receiver does not forward to the proxy. */
-const nonForwarding = new Set(["child", "raw"]);
+const nonForwarding = new Set(["child", "other", "raw"]);
 
 // A define with a value replaces an accessor with data: it is no way to
-// write through the accessor. On an object a define is not synchronized at
-// all (README, "Descriptor and prototype changes").
+// write through the accessor.
 const setRoutes = Object.keys(routes).filter((route) => route !== "defineProperty");
 const forwardingSetRoutes = setRoutes.filter((route) => !nonForwarding.has(route));
 const forwardingRoutes = Object.keys(routes).filter((route) => !nonForwarding.has(route));
 
 /** A route: mostly forwarding ones, so that most cases end with a replica equal to the container. */
 const routeArbitrary = (forwarding) =>
-  fc.oneof({ arbitrary: fc.constantFrom(...forwarding), weight: 8 }, { arbitrary: fc.constantFrom("child", "raw"), weight: 1 });
+  fc.oneof({ arbitrary: fc.constantFrom(...forwarding), weight: 8 }, { arbitrary: fc.constantFrom(...nonForwarding), weight: 1 });
 
 const accessorWrite = fc.record({
   write: fc.record({ key: fc.constantFrom(...accessorKeys), value: valueArbitrary }),
@@ -126,7 +142,7 @@ const objectArbitrary = fc.record({
     fc.oneof(
       fc.record({
         write: fc.record({ key: fc.constantFrom(...fieldKeys, ...namedKeys), value: valueArbitrary }),
-        route: routeArbitrary(forwardingSetRoutes),
+        route: routeArbitrary(forwardingRoutes),
       }),
       accessorWrite
     ),
@@ -257,7 +273,8 @@ export function writesRaw(spec) {
  * direct write and every forwarding route) it changes the container and the
  * replica, unless it changes nothing (the same value at a key the container
  * has, or a deep-equal object). On the raw container it changes the
- * container only. On a fresh child it changes neither.
+ * container only. On a fresh child it changes neither. On the other proxy
+ * of the state it changes that object and its replica, by the same rule.
  *
  * Through the proxy an index write that changes the array reruns the
  * readers of that index and of the whole array, and of `length` when it
@@ -282,6 +299,9 @@ export function model(spec) {
   const children = [];
   let childKeys;
   let replicating = true;
+  // `state.other`, a plain object, and its replica
+  const other = {};
+  const otherReplica = {};
   const reads = (read, changed) =>
     changed.has(read) ||
     changed.has(ANY_KEY) || (read === "mirror" && changed.has("bar")) || (read === "ownMirror" && changed.has("extra"));
@@ -290,6 +310,13 @@ export function model(spec) {
   const writeData = (changed, landing, key, value) => {
     if (landing === "child") {
       childKeys.add(key);
+      return;
+    }
+    if (landing === "other") {
+      // effects read only the container
+      if (Object.prototype.hasOwnProperty.call(other, key) && sameValue(other[key], value)) return;
+      other[key] = value;
+      if (replicating) otherReplica[key] = value !== null && typeof value === "object" ? { ...value } : value;
       return;
     }
     if (landing === "raw") {
@@ -342,7 +369,7 @@ export function model(spec) {
 
   for (const { write, route } of spec.writes) {
     const { key } = write;
-    const landing = route === "raw" ? "raw" : route === "child" ? "child" : "proxy";
+    const landing = nonForwarding.has(route) ? route : "proxy";
     const value = key === "length" ? write.value : materialize(write.value);
     const changed = new Set();
     childKeys = new Set();
@@ -372,6 +399,8 @@ export function model(spec) {
     children,
     source: describe(spec.kind, source),
     replica: describe(spec.kind, replica),
+    other: describe("object", other),
+    otherReplica: describe("object", otherReplica),
     closures: JSON.stringify(closures),
   };
 }
@@ -391,8 +420,9 @@ export function runReceivers(lib, spec, direct) {
   const { reactive, watchEffect, updateState, toRaw } = lib;
   const kind = spec.kind ?? "array";
   const { container, closures } = makeContainer({ ...spec, kind });
-  const raw = { container };
+  const raw = { container, other: {} };
   const remote = {
+    other: {},
     container:
       kind === "object"
         ? structuredClone({ ...container })
@@ -410,6 +440,7 @@ export function runReceivers(lib, spec, direct) {
   });
   const proxy = state.container;
   const outer = new Proxy(proxy, {});
+  const other = state.other;
   const runs = spec.effects.map(() => 0);
   const stops = spec.effects.map((reads, i) =>
     watchEffect(() => {
@@ -426,7 +457,7 @@ export function runReceivers(lib, spec, direct) {
     for (const { write, route } of spec.writes) {
       const used = direct && !nonForwarding.has(route) ? "direct" : route;
       if (route === "raw") replicating = false;
-      results.push(routes[used](proxy, write.key, materialize(write.value), outer, toRaw(proxy), children));
+      results.push(routes[used](proxy, write.key, materialize(write.value), outer, toRaw(proxy), children, other));
     }
   } finally {
     for (const stop of stops) stop();
@@ -438,6 +469,8 @@ export function runReceivers(lib, spec, direct) {
     children,
     source: describe(kind, toRaw(proxy)),
     replica: describe(kind, remote.container),
+    other: describe("object", toRaw(other)),
+    otherReplica: describe("object", remote.other),
     closures: JSON.stringify(closures),
   };
 }

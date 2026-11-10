@@ -248,21 +248,32 @@ export function setterOf(target: object, prop: PropertyKey, own: boolean, node: 
 }
 
 /**
- * Does a write that reached the proxy of `target` with `receiver` as its
- * receiver land on `target`? An outer proxy over the proxy, at any depth,
- * forwards: it gives `target` as its raw object and has its prototype.
- * `Object.create(proxy)`, the raw object itself and any other object do
- * not: the write lands on that receiver, as on a plain object.
+ * Does a setter write that reached the proxy of `target` with `receiver`
+ * as its receiver land on `target`? An outer proxy over the proxy, at any
+ * depth and with any traps that do not replace the write (a membrane's
+ * `getPrototypeOf` or `getOwnPropertyDescriptor`), forwards: it gives
+ * `target` as its raw object, and no object on its prototype chain does.
+ * `Object.create(proxy)` (also of an outer proxy, at any depth), the raw
+ * object itself and any other object do not: the setter runs with that
+ * receiver as `this`, as on a plain object. A data write needs no such
+ * check: it lands where the receiver sends it, and on `target` it ends in
+ * the proxy's `defineProperty` trap. A prototype chain longer than
+ * `MAX_RECEIVER_CHAIN` (only a proxy's `getPrototypeOf` can make one
+ * endless) counts as an object that inherits from the proxy.
  */
 export function forwardsTo(receiver: any, target: object): boolean {
-  return (
-    receiver !== target &&
-    receiver !== null &&
-    typeof receiver === "object" &&
-    receiver[ReactiveFlags.RAW] === target &&
-    Object.getPrototypeOf(receiver) === Object.getPrototypeOf(target)
-  );
+  if (receiver === target || receiver === null || typeof receiver !== "object" || receiver[ReactiveFlags.RAW] !== target)
+    return false;
+  let proto = Object.getPrototypeOf(receiver);
+  for (let hops = 0; proto !== null; hops++) {
+    if (hops === MAX_RECEIVER_CHAIN || proto[ReactiveFlags.RAW] === target) return false;
+    proto = Object.getPrototypeOf(proto);
+  }
+  return true;
 }
+
+/** The longest prototype chain `forwardsTo` walks. */
+const MAX_RECEIVER_CHAIN = 64;
 
 function hasNoOwnAccessor(target: object): boolean {
   const keys = Reflect.ownKeys(target);

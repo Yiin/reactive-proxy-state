@@ -10,12 +10,13 @@ function checkReceivers(bundle: any, spec: any): boolean {
   const through = runReceivers(bundle, spec, false);
   expect(through).toEqual(direct);
   const expected = model(spec);
-  const { runs, children, source, replica, closures } = direct;
-  expect({ runs, children, source, replica, closures }).toEqual(expected);
+  const { runs, children, source, replica, other, otherReplica, closures } = direct;
+  expect({ runs, children, source, replica, other, otherReplica, closures }).toEqual(expected);
   expect(direct.results.every((result: boolean) => result === true)).toBe(true);
   // a raw write changes the container and no replica (README, "Raw writes")
   if (writesRaw(spec)) return false;
   expect(direct.replica).toBe(direct.source);
+  expect(direct.otherReplica).toBe(direct.other);
   return true;
 }
 
@@ -101,6 +102,32 @@ test("the receiver property detects the 3.0.14 setter and receiver gaps", async 
     const oldMatches =
       JSON.stringify([old.runs, old.children, old.source, old.replica, old.closures]) ===
       JSON.stringify([expected.runs, expected.children, expected.source, expected.replica, expected.closures]);
+    expect({ name, oldMatches }).toEqual({ name, oldMatches: false });
+    checkReceivers(lib, spec);
+  }
+});
+
+// Each case fails on published 3.0.15 and passes now.
+test("the receiver property detects the 3.0.15 writes that landed with no event", async () => {
+  const published = await import("./fixtures/published-3.0.15.js");
+  const cases = {
+    // an outer proxy with a `getPrototypeOf` trap wrote the object and sent nothing
+    "object membrane data write": { kind: "object", items: [1], bar: null, effects: [["a"]], writes: [{ write: { key: "a", value: 2 }, route: "membrane" }] },
+    // ... and the same for a key the object did not have
+    "object membrane new key": { kind: "object", items: [], bar: null, effects: [["bar"]], writes: [{ write: { key: "bar", value: 2 }, route: "membrane" }] },
+    // a membrane setter write ran the setter for a value its getter already gave
+    "array membrane setter, the getter's value": { kind: "array", items: [1], bar: 1, effects: [["extra"]], writes: [{ write: { key: "mirror", value: 1 }, route: "membrane" }] },
+    // another proxy of the state as receiver: the write landed on its raw object with no event
+    "object other proxy as receiver": { kind: "object", items: [1], bar: null, effects: [["a"]], writes: [{ write: { key: "a", value: 2 }, route: "other" }] },
+    "array other proxy as receiver": { kind: "array", items: [1], bar: null, effects: [["0"]], writes: [{ write: { key: "0", value: 2 }, route: "other" }] },
+    // `Object.defineProperty` with a value on an object sent nothing
+    "object define": { kind: "object", items: [1], bar: null, effects: [["a"]], writes: [{ write: { key: "a", value: 2 }, route: "defineProperty" }] },
+  };
+  for (const [name, spec] of Object.entries(cases)) {
+    const old = runReceivers(published, spec, false);
+    const expected = model(spec);
+    const keys = ["runs", "children", "source", "replica", "other", "otherReplica", "closures"] as const;
+    const oldMatches = JSON.stringify(keys.map((key) => old[key])) === JSON.stringify(keys.map((key) => expected[key]));
     expect({ name, oldMatches }).toEqual({ name, oldMatches: false });
     checkReceivers(lib, spec);
   }
