@@ -784,11 +784,10 @@ export function wrapArray<T extends any[]>(arr: T, node: LocationNode): T {
         // a define may add a hidden name, or show or hide one
         if (descriptor !== undefined && !shown) node.plainData = false;
         else if (descriptor !== undefined && !shownBefore) node.plainData = undefined;
-        // move places before anything can write again (emit may throw); a
-        // define that shows or hides a name keeps the value where it is
+        // move places before anything can write again (emit may throw)
         if (truncated !== undefined) {
           relinkArray(node, target, target.length, truncated);
-        } else if (prop !== "length" && oldValue !== value) {
+        } else if (prop !== "length") {
           const key = placeKey(prop);
           if (isObject(oldValue)) detachPlace(oldValue, node, key);
           if (isObject(value)) attachValue(value, node, key, copied === Copied.Fresh, located && oldValue, held);

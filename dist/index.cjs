@@ -3590,7 +3590,7 @@ function wrapArray(arr, node) {
           node.plainData = undefined;
         if (truncated !== undefined) {
           relinkArray(node, target, target.length, truncated);
-        } else if (prop !== "length" && oldValue !== value) {
+        } else if (prop !== "length") {
           const key = placeKey(prop);
           if (isObject3(oldValue))
             detachPlace(oldValue, node, key);
@@ -4421,10 +4421,9 @@ function wrapObject(obj, node, options) {
           node.plainData = false;
         else if (descriptor !== undefined && !shownBefore)
           node.plainData = undefined;
-        const kept = had && oldValue === value;
-        if (isObject6(oldValue) && !kept)
+        if (isObject6(oldValue))
           detachPlace(oldValue, node, prop);
-        if (isObject6(value) && !kept)
+        if (isObject6(value))
           attachValue(value, node, prop, copied === 2 /* Fresh */, located && oldValue, held);
         beginWrite();
         try {
@@ -4436,7 +4435,7 @@ function wrapObject(obj, node, options) {
             dispatch(located, event);
         } finally {
           try {
-            if (isObject6(oldValue) && !kept) {
+            if (isObject6(oldValue)) {
               evictDeep(oldValue);
             }
           } finally {

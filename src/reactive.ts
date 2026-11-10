@@ -372,11 +372,9 @@ function wrapObject<T extends object>(obj: T, node: LocationNode, options?: Reac
         // a define may add a hidden key, or show or hide one
         if (descriptor !== undefined && !shown) node.plainData = false;
         else if (descriptor !== undefined && !shownBefore) node.plainData = undefined;
-        // move places before anything can write again (emit may throw); a
-        // define that shows or hides a key keeps the value where it is
-        const kept = had && oldValue === value;
-        if (isObject(oldValue) && !kept) detachPlace(oldValue, node, prop);
-        if (isObject(value) && !kept) attachValue(value, node, prop, copied === Copied.Fresh, located && oldValue, held);
+        // move places before anything can write again (emit may throw)
+        if (isObject(oldValue)) detachPlace(oldValue, node, prop);
+        if (isObject(value)) attachValue(value, node, prop, copied === Copied.Fresh, located && oldValue, held);
 
         beginWrite();
         try {
@@ -389,7 +387,7 @@ function wrapObject<T extends object>(obj: T, node: LocationNode, options?: Reac
             // Evict the old object tree from proxy caches so GC can collect
             // stale proxies and their methodCache closures. A part of it that
             // still sits in the tree keeps its proxy.
-            if (isObject(oldValue) && !kept) {
+            if (isObject(oldValue)) {
               evictDeep(oldValue);
             }
           } finally {
