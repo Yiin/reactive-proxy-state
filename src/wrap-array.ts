@@ -180,6 +180,22 @@ function writeReorder(target: unknown[], reorder: Reorder): void {
   }
 }
 
+/** What the get trap holds before it reads the value. */
+const notRead = Symbol("notRead");
+
+/**
+ * Does a write of `prop`, a name, to the array call a setter: its own, or
+ * one along its prototype chain (a subclass, `Array.prototype`)?
+ */
+function callsSetter(target: unknown[], prop: string | symbol, node: LocationNode): boolean {
+  if (hasOwn.call(target, prop)) return writesThroughSetter(target, prop, node);
+  for (let proto = Object.getPrototypeOf(target); proto !== null; proto = Object.getPrototypeOf(proto)) {
+    const descriptor = Reflect.getOwnPropertyDescriptor(proto, prop);
+    if (descriptor !== undefined) return descriptor.set !== undefined;
+  }
+  return false;
+}
+
 /** What a splice that removes nothing removed. */
 const noItems: readonly unknown[] = [];
 
@@ -299,10 +315,15 @@ export function wrapArray<T extends any[]>(arr: T, node: LocationNode): T {
 
       const cached = methodCache[prop];
       if (cached !== undefined) return cached;
-      // a function read before that is not Array.prototype's (see below)
+      // a function read before that is not Array.prototype's (see below).
+      // The value read here is the one the tail uses: a getter runs once.
+      let read: unknown = notRead;
       if (otherReaders !== undefined) {
         const kept = otherReaders.get(prop);
-        if (kept !== undefined && kept[0] === Reflect.get(target, prop, receiver)) return kept[1];
+        if (kept !== undefined) {
+          read = Reflect.get(target, prop, receiver);
+          if (kept[0] === read) return kept[1];
+        }
       }
 
       // handle specific array mutation methods that require custom logic and event emission
@@ -607,7 +628,7 @@ export function wrapArray<T extends any[]>(arr: T, node: LocationNode): T {
         }
       }
 
-      const value = Reflect.get(target, prop, receiver);
+      const value = read !== notRead ? read : Reflect.get(target, prop, receiver);
 
       // other numeric-looking keys ("1.5", "01") are tracked like indexes
       const isNumericIndex = typeof prop === "string" && !isNaN(parseInt(prop, 10));
@@ -641,6 +662,11 @@ export function wrapArray<T extends any[]>(arr: T, node: LocationNode): T {
     // `descriptor`: the write is `Object.defineProperty` with a value (see below)
     set(target: T, prop: string | symbol, value: any, receiver: any, descriptor?: PropertyDescriptor): boolean {
       if (isObject(value)) value = unwrapForStore(value);
+      // Another receiver (an outer proxy, `Reflect.set` with a receiver, an
+      // object that inherits from the proxy) gets the ordinary write. When
+      // the write lands on this array, it ends in the `defineProperty` trap
+      // below, which sends the event once. 3.0.12 also sent it here: twice.
+      if (receiver !== proxy) return Reflect.set(target, prop, value, receiver);
 
       const oldValue = (target as any)[prop];
 
@@ -669,7 +695,7 @@ export function wrapArray<T extends any[]>(arr: T, node: LocationNode): T {
         (typeof prop === "string" && !isNaN(parseInt(prop)));
       // emit event and trigger effects only if the set was successful and wasn't intercepted by a setter
       // (unless it's a direct numeric index set, which doesn't have a descriptor.set; `length` never has one)
-      const throughSetter = !isNumericIndex && prop !== "length" && writesThroughSetter(target, prop, node);
+      const throughSetter = !isNumericIndex && prop !== "length" && callsSetter(target, prop, node);
       const emits = descriptor !== undefined || !throughSetter;
       // direct length grow (e.g. arr.length = N) — emit ascending per-index sets
       // instead of a bare length event so the remote fills every index and never
@@ -691,15 +717,15 @@ export function wrapArray<T extends any[]>(arr: T, node: LocationNode): T {
         copyPayloadReaching(event!, located!, target, after);
       }
       const oldLength = target.length;
-      // An own setter runs with the proxy as `this`. Any other write through
-      // the proxy goes to the target: through `receiver` it would end in the
+      // A setter, own or inherited, runs with the proxy as `this`. Any other
+      // write goes to the target: through the proxy it would end in the
       // proxy's `defineProperty` trap.
       const result =
         descriptor !== undefined
           ? Reflect.defineProperty(target, prop, { ...descriptor, value })
-          : receiver === proxy && !throughSetter
-            ? Reflect.set(target, prop, value)
-            : Reflect.set(target, prop, value, receiver);
+          : throughSetter
+            ? Reflect.set(target, prop, value, proxy)
+            : Reflect.set(target, prop, value);
 
       if (result && emits) {
         // move places before anything can write again (emit may throw)
@@ -793,8 +819,16 @@ export function wrapArray<T extends any[]>(arr: T, node: LocationNode): T {
     defineProperty(target: T, prop: string | symbol, descriptor: PropertyDescriptor): boolean {
       // a value is written as `set` writes it: the same event, and the same effects rerun
       if ("value" in descriptor) return handler.set(target, prop, descriptor.value, proxy, descriptor);
-      // new flags alone change no value (`Object.freeze` ends here for each key)
-      if (!("get" in descriptor) && !("set" in descriptor)) return Reflect.defineProperty(target, prop, descriptor);
+      if (!("get" in descriptor) && !("set" in descriptor)) {
+        // new flags alone on a key the array has change no value
+        // (`Object.freeze` ends here for each key), unless `writable` makes
+        // an accessor a data property
+        const current = Reflect.getOwnPropertyDescriptor(target, prop);
+        if (current !== undefined && ("value" in current || !("writable" in descriptor)))
+          return Reflect.defineProperty(target, prop, descriptor);
+        // a new key, or an accessor made data: a write of `undefined`
+        return handler.set(target, prop, undefined, proxy, descriptor);
+      }
       // an accessor: effects rerun, and no event is sent
       // (an accessor added later is outside the supported input, see `writesThroughSetter`)
       const oldLength = target.length;
