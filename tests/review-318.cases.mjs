@@ -247,6 +247,33 @@ export function review318Cases(lib) {
     sameJson(lib, remote, state);
   };
 
+  cases["a symbol name an array already has sends nothing, after the array looked at its keys"] = () => {
+    const { state, remote, events, warnings } = setup(lib, { tagged: Object.assign([1], { label: "x" }) });
+    const s = Symbol("s");
+    // a write of a name the array has makes it look at its keys
+    state.tagged.label = "y";
+    events.length = 0;
+    state.tagged[s] = 1;
+    state.tagged[s] = 2;
+    delete state.tagged[s];
+    assert.deepEqual([events, warnings], [[], []]);
+    sameJson(lib, remote, state);
+  };
+
+  cases["an accessor defined at a symbol key is hidden: a write inside its object sends nothing"] = () => {
+    const { state, remote, events, warnings } = setup(lib);
+    const s = Symbol("s");
+    const inner = { n: 1 };
+    // the object looks at its keys at its first write
+    state.obj.a = 2;
+    events.length = 0;
+    Object.defineProperty(state.obj, s, { get: () => inner, enumerable: true, configurable: true });
+    state.obj[s].n = 2;
+    assert.deepEqual([events, warnings], [[], []]);
+    assert.equal(inner.n, 2);
+    sameJson(lib, remote, state);
+  };
+
   cases["a hidden symbol key sends nothing"] = () => {
     const { state, remote, events, warnings } = setup(lib);
     const s = Symbol("hidden");
@@ -354,10 +381,14 @@ export function review318Cases(lib) {
     for (let i = 0; i < 80; i++) wide["k" + i] = i;
     Object.defineProperty(wide, "h", hiddenData({ n: 1 }));
     wide.v = { n: 1 };
+    const t = Symbol("t");
+    wide[t] = { n: 1 };
     const { state, remote, events, warnings } = setup(lib, { wide });
     state.wide.h.n = 2;
     state.wide.v.n = 2;
     state.wide[Symbol("s")] = { n: 1 };
+    // a symbol key the object had at its first look
+    state.wide[t].n = 2;
     state.wide.k1 = 5;
     assert.deepEqual(events, ["set wide.v.n 2", "set wide.k1 5"]);
     assert.deepEqual(warnings, []);
