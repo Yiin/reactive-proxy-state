@@ -3559,8 +3559,9 @@ function wrapArray(arr, node) {
     },
     deleteProperty(target, prop) {
       const oldValue = target[prop];
-      const hadProperty = Object.prototype.hasOwnProperty.call(target, prop);
-      const located = hadProperty && (arrayIndex(prop) >= 0 || isEnumerable.call(target, prop)) ? locate(node, prop) : undefined;
+      const enumerable = isEnumerable.call(target, prop);
+      const hadProperty = enumerable || hasOwn.call(target, prop);
+      const located = hadProperty && (enumerable || arrayIndex(prop) >= 0) ? locate(node, prop) : undefined;
       const event = located && { action: "delete", path: located.paths[0], oldValue };
       if (copyPayload(event, located, target) === 0 /* Reaches */) {
         const after = target.slice();
@@ -4365,8 +4366,9 @@ function wrapObject(obj, node, options) {
     },
     deleteProperty(target, prop) {
       const oldValue = target[prop];
-      const hadProperty = Object.prototype.hasOwnProperty.call(target, prop);
-      const located = hadProperty && (node.plainData === true || isEnumerable.call(target, prop)) ? locate(node, prop) : undefined;
+      const shown = isEnumerable.call(target, prop);
+      const hadProperty = shown || hasOwn.call(target, prop);
+      const located = shown ? locate(node, prop) : undefined;
       const event = located && {
         action: "delete",
         path: located.paths[0],

@@ -161,6 +161,10 @@ export function review316Cases(lib) {
     assert.deepEqual([...toRaw(list)], [9, 2]);
     assert.deepEqual([remote.list.shown, [...remote.list]], [3, [9, 2]]);
     assert.equal(Object.keys(remote.list).includes("meta"), false);
+    // an index is sent whatever its flags: also its delete
+    assert.equal(delete list[1], true);
+    assert.equal(events.at(-1), "delete list.1");
+    assert.equal(1 in remote.list, false);
   };
 
   // F2 and F3. Every trap of a receiver runs on every write, as on a plain

@@ -410,9 +410,11 @@ function wrapObject<T extends object>(obj: T, node: LocationNode, options?: Reac
     },
     deleteProperty(target: T, prop: string | symbol): boolean {
       const oldValue = (target as any)[prop];
-      const hadProperty = Object.prototype.hasOwnProperty.call(target, prop);
-      // a replica does not hold a hidden key (see `set`)
-      const located = hadProperty && (node.plainData === true || isEnumerable.call(target, prop)) ? locate(node, prop) : undefined;
+      // an own enumerable key, the one a replica holds (see `set`): one
+      // lookup for it, a second only for a hidden key
+      const shown = isEnumerable.call(target, prop);
+      const hadProperty = shown || hasOwn.call(target, prop);
+      const located = shown ? locate(node, prop) : undefined;
       const event: StateEvent | undefined = located && {
         action: "delete",
         path: located.paths[0],

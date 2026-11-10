@@ -853,10 +853,10 @@ export function wrapArray<T extends any[]>(arr: T, node: LocationNode): T {
     },
     deleteProperty(target: T, prop: string | symbol): boolean {
       const oldValue = (target as any)[prop];
-      const hadProperty = Object.prototype.hasOwnProperty.call(target, prop);
-      // a replica does not hold a hidden name (see `set`)
-      const located =
-        hadProperty && (arrayIndex(prop) >= 0 || isEnumerable.call(target, prop)) ? locate(node, prop) : undefined;
+      // an own enumerable key, or an index: what a replica holds (see `set`)
+      const enumerable = isEnumerable.call(target, prop);
+      const hadProperty = enumerable || hasOwn.call(target, prop);
+      const located = hadProperty && (enumerable || arrayIndex(prop) >= 0) ? locate(node, prop) : undefined;
       const event: StateEvent | undefined = located && { action: "delete", path: located.paths[0], oldValue };
       if (copyPayload(event, located, target) === Copied.Reaches) {
         const after = target.slice();
