@@ -3442,7 +3442,7 @@ function wrapArray(arr, node) {
         copyPayloadReaching(event, located, target, after);
       }
       const oldLength = target.length;
-      const result = descriptor !== undefined ? Reflect.defineProperty(target, prop, { ...descriptor, value }) : throughSetter ? Reflect.set(target, prop, value, proxy) : Reflect.set(target, prop, value);
+      const result = descriptor !== undefined ? Reflect.defineProperty(target, prop, descriptor.value === value ? descriptor : { ...descriptor, value }) : throughSetter ? Reflect.set(target, prop, value, proxy) : Reflect.set(target, prop, value);
       if (result && emits) {
         if (truncated !== undefined) {
           relinkArray(node, target, target.length, truncated);
