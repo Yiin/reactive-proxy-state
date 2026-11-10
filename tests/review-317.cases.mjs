@@ -210,6 +210,28 @@ export function review317Cases(lib) {
     assert.equal(events.length, 12);
   };
 
+  // The hidden keys an object proxy keeps follow its deletes and defines.
+  cases["a hidden key deleted and written again by = is shown, on objects and arrays"] = () => {
+    const { state, remote, events } = setup(lib);
+    for (const container of [state.obj, state.list]) {
+      container.a = 5;
+      Object.defineProperty(container, "h", hiddenData(1));
+      container.h = 2;
+      delete container.h;
+      container.h = 3;
+      container.h = 4;
+      Object.defineProperty(container, "h", { enumerable: false });
+      container.h = 5;
+      Object.defineProperty(container, "h", { enumerable: true });
+      container.h = 6;
+    }
+    assert.deepEqual(events, [
+      "set obj.a 5", "set obj.h 3", "set obj.h 4", "delete obj.h", "set obj.h 5", "set obj.h 6",
+      "set list.a 5", "set list.h 3", "set list.h 4", "delete list.h", "set list.h 5", "set list.h 6",
+    ]);
+    sameJson(lib, remote, state);
+  };
+
   cases["a define of a new enumerable key does not make the next write look at the keys again"] = () => {
     const { state } = setup(lib, { obj: { a: 1 } });
     state.obj.a = 2;
