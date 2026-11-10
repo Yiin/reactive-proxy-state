@@ -3003,6 +3003,9 @@ function callsSetter(target, prop, node) {
   }
   return false;
 }
+function isName(prop) {
+  return typeof prop === "symbol" || prop !== "length" && isNaN(parseInt(prop));
+}
 var noItems = [];
 function readerOf(target, method) {
   return function() {
@@ -3418,21 +3421,33 @@ function wrapArray(arr, node) {
       return value;
     },
     set(target, prop, value, receiver, descriptor) {
+      const foreign = receiver !== proxy;
+      if (foreign && !(isName(prop) && callsSetter(target, prop, node)))
+        return Reflect.set(target, prop, value, receiver);
       if (isObject3(value))
         value = unwrapForStore(value);
-      if (receiver !== proxy)
-        return Reflect.set(target, prop, value, receiver);
       const oldValue = target[prop];
       if (oldValue === value && Reflect.has(target, prop) || isObject3(oldValue) && isObject3(value) && deepEqual(oldValue, value))
         return descriptor === undefined || Reflect.defineProperty(target, prop, { ...descriptor, value: oldValue });
       const sameNaN = oldValue !== oldValue && value !== value && Reflect.has(target, prop);
       const truncated = prop === "length" && Number(value) < target.length ? target.slice(Number(value)) : undefined;
       const index = arrayIndex(prop);
-      const isNumericIndex = typeof prop === "number" || index >= 0 || typeof prop === "string" && !isNaN(parseInt(prop));
-      const throughSetter = !isNumericIndex && prop !== "length" && callsSetter(target, prop, node);
-      const emits = descriptor !== undefined || !throughSetter;
+      const throughSetter = foreign || index < 0 && isName(prop) && callsSetter(target, prop, node);
+      if (throughSetter && descriptor === undefined) {
+        if (hasOwn.call(target, prop))
+          return Reflect.set(target, prop, value, receiver);
+        beginWrite();
+        try {
+          const result2 = Reflect.set(target, prop, value, receiver);
+          if (result2)
+            trigger(target, prop);
+          return result2;
+        } finally {
+          endWrite();
+        }
+      }
       const grows = prop === "length" && Number(value) > Number(oldValue);
-      const located = emits ? grows ? locate(node) : locate(node, prop) : undefined;
+      const located = grows ? locate(node) : locate(node, prop);
       const event = located === undefined || grows ? undefined : { action: "set", path: located.paths[0], oldValue, newValue: value };
       const held = event !== undefined ? heldItems(value, oldValue) : undefined;
       const copied = copyPayload(event, located, target, held);
@@ -3442,8 +3457,8 @@ function wrapArray(arr, node) {
         copyPayloadReaching(event, located, target, after);
       }
       const oldLength = target.length;
-      const result = descriptor !== undefined ? Reflect.defineProperty(target, prop, descriptor.value === value ? descriptor : { ...descriptor, value }) : throughSetter ? Reflect.set(target, prop, value, proxy) : Reflect.set(target, prop, value);
-      if (result && emits) {
+      const result = descriptor !== undefined ? Reflect.defineProperty(target, prop, descriptor.value === value ? descriptor : { ...descriptor, value }) : Reflect.set(target, prop, value);
+      if (result) {
         if (truncated !== undefined) {
           relinkArray(node, target, target.length, truncated);
         } else if (prop !== "length") {
