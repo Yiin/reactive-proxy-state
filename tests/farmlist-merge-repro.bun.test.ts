@@ -17,7 +17,7 @@
  * Run: bun test tests/farmlist-merge-repro.bun.test.ts
  */
 import { describe, test, expect, beforeEach } from 'bun:test'
-import { reactive, getProxyStats, resetProxyStats } from '../src'
+import { reactive, getProxyStats, resetProxyStats, isReactive, toRaw } from '../src'
 
 // ---------------------------------------------------------------------------
 // Fixtures matching production farm list shape
@@ -71,7 +71,7 @@ beforeEach(() => {
 })
 
 describe('spread-assign on reactive proxy causes linear degradation', () => {
-  test('6 farm lists (351 slots total): time per cycle grows linearly', () => {
+  test('6 farm lists (351 slots total): stored lists stay raw and live proxies stay flat', () => {
     const state = {
       farmLists: [
         createFarmList(1, 25),
@@ -89,6 +89,8 @@ describe('spread-assign on reactive proxy causes linear degradation', () => {
     JSON.stringify(proxy)
 
     const cycleTimes: number[] = []
+    // live proxies (made minus evicted) after each cycle and its reads
+    const liveProxies: number[] = []
     const CYCLES = 20
 
     for (let cycle = 0; cycle < CYCLES; cycle++) {
@@ -104,30 +106,28 @@ describe('spread-assign on reactive proxy causes linear degradation', () => {
       }
 
       cycleTimes.push(performance.now() - t0)
+      // the next access reads every list again (a page render)
+      JSON.stringify(proxy)
+      const stats = getProxyStats()
+      liveProxies.push(stats.created - stats.staleEvicted)
     }
 
-    const stats = getProxyStats()
-    // Median of the first/last 5 cycles, not single cycles: one GC pause or
-    // warmup outlier on a shared CI runner flips a single-cycle ratio past
-    // the bound, while real linear degradation (the ~14x bug this guards
-    // against) survives any median.
     const median = (values: number[]) => [...values].sort((a, b) => a - b)[Math.floor(values.length / 2)]
-    const firstMs = median(cycleTimes.slice(0, 5))
-    const lastMs = median(cycleTimes.slice(-5))
-    // A cycle now takes well under a millisecond, where timer noise alone
-    // gave 0.04 ms against 0.2 ms (vangrd-srjbj.27). Medians count from 1 ms:
-    // the nesting bug took cycles to tens of milliseconds.
-    const ratio = Math.max(lastMs, 1) / Math.max(firstMs, 1)
-
     console.log('\n=== Spread-Assign Degradation ===')
     console.log(`  Cycle times: [${cycleTimes.map(t => t.toFixed(1)).join(', ')}]`)
-    console.log(`  First: ${firstMs.toFixed(1)}ms, Last: ${lastMs.toFixed(1)}ms`)
-    console.log(`  Degradation: ${ratio.toFixed(1)}x over ${CYCLES} cycles`)
-    console.log(`  Proxies created: ${stats.created}, evicted: ${stats.staleEvicted}, net: ${stats.created - stats.staleEvicted}`)
+    console.log(`  First: ${median(cycleTimes.slice(0, 5)).toFixed(1)}ms, Last: ${median(cycleTimes.slice(-5)).toFixed(1)}ms`)
+    console.log(`  Live proxies per cycle: [${liveProxies.join(', ')}]`)
 
-    // This SHOULD be < 3x but currently fails — demonstrating the bug
-    // The ratio will be ~14x after 20 cycles
-    expect(ratio).toBeLessThan(3)
+    // The nesting bug wrapped each stored proxy in one more proxy per
+    // cycle: the stored lists held proxies, and the live proxies grew by
+    // about 2,500 per cycle here (a build without the three unwraps gives
+    // 4994, 7487, 9980, ...; vangrd-2rayf). Times are only printed: a cycle now takes well
+    // under a millisecond, where the 14x the bug gave is timer noise.
+    for (const list of toRaw(proxy).farmLists) {
+      expect(isReactive(list.slots)).toBe(false)
+      expect(isReactive(list.targets)).toBe(false)
+    }
+    expect(liveProxies[CYCLES - 1]).toBe(liveProxies[0])
   })
 
   test('minimal case: single list with 82 slots', () => {
