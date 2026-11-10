@@ -20,7 +20,20 @@ const routes = {
   "Reflect.set with an outer proxy as receiver": (container, key, value) =>
     Reflect.set(container, key, value, new Proxy(container, {})),
   "Reflect.set on an outer proxy": (container, key, value) => Reflect.set(new Proxy(container, {}), key, value),
+  "a membrane": (container, key, value) => (membrane(container)[key] = value),
+  "Reflect.set with a membrane as receiver": (container, key, value) => Reflect.set(container, key, value, membrane(container)),
 };
+
+/** An outer proxy as a membrane makes it: it hides the prototype and copies descriptors (3.0.16). */
+function membrane(target) {
+  return new Proxy(target, {
+    getPrototypeOf: () => null,
+    getOwnPropertyDescriptor(target, key) {
+      const descriptor = Reflect.getOwnPropertyDescriptor(target, key);
+      return descriptor && { ...descriptor };
+    },
+  });
+}
 
 /**
  * The accessor `foo`, own or inherited, on an array or an object. `get`
@@ -162,7 +175,7 @@ export function setterRuleCases(lib) {
       assert.deepEqual(Object.keys(remote.c).sort(), ["count", "touched"], name);
     }
     assert.ok(events.every((event) => event === "set c.count" || event === "set c.touched"), events.join(", "));
-    assert.equal(hidden, "Reflect.set on an outer proxy".length);
+    assert.equal(hidden, Object.keys(routes).at(-1).length);
   };
 
   // A setter with no getter has no value to compare: it runs on every
