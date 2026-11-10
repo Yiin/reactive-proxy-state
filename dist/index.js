@@ -1801,10 +1801,24 @@ function ownDescriptor(target, prop, node) {
     plain = node.plainData = hasPlainKeysOnly(target);
   return plain ? undefined : Reflect.getOwnPropertyDescriptor(target, prop);
 }
-function fixedAfter(descriptor, current) {
+function fixedAfter(target, prop, descriptor, current) {
+  if ("configurable" in descriptor && "writable" in descriptor)
+    return !descriptor.configurable && !descriptor.writable;
+  current ??= Reflect.getOwnPropertyDescriptor(target, prop);
   const configurable = "configurable" in descriptor ? descriptor.configurable === true : current?.configurable === true;
   const writable = "writable" in descriptor ? descriptor.writable === true : current?.writable === true;
   return !configurable && !writable;
+}
+function refusedDefine(target, prop, value, descriptor, current) {
+  return value !== descriptor.value && fixedAfter(target, prop, descriptor, current);
+}
+function definesFlagsAlone(target, prop, oldValue, value, descriptor, current) {
+  return (current === undefined || ("value" in current)) && (Object.is(oldValue, value) || !fixedAfter(target, prop, descriptor, current));
+}
+function definedOver(target, prop, had, current) {
+  if (current === undefined)
+    return had ? target[prop] : undefined;
+  return "value" in current ? current.value : undefined;
 }
 function inheritedSetter(target, prop) {
   if (!(prop in target))
@@ -3463,7 +3477,7 @@ function wrapArray(arr, node) {
         return Reflect.set(target, prop, value, receiver);
       if (isObject3(value))
         value = unwrapForStore(value);
-      const oldValue = descriptor === undefined || !named || had && current === undefined ? target[prop] : current !== undefined && ("value" in current) ? current.value : undefined;
+      const oldValue = descriptor === undefined || !named ? target[prop] : definedOver(target, prop, had, current);
       if (setter !== undefined && descriptor === undefined) {
         const forwards = !foreign || forwardsTo(receiver, target);
         if (forwards && setter.get !== undefined && (oldValue === value || isObject3(oldValue) && isObject3(value) && deepEqual(oldValue, value)))
@@ -3475,10 +3489,10 @@ function wrapArray(arr, node) {
       if (descriptor !== undefined) {
         if (named)
           shown = "enumerable" in descriptor ? descriptor.enumerable === true : shownBefore;
-        if (value !== descriptor.value && fixedAfter(descriptor, current ?? Reflect.getOwnPropertyDescriptor(target, prop)))
+        if (refusedDefine(target, prop, value, descriptor, current))
           return false;
       }
-      if ((shown === shownBefore || !had && descriptor === undefined) && (oldValue === value && Reflect.has(target, prop) || isObject3(oldValue) && isObject3(value) && deepEqual(oldValue, value)) && (descriptor === undefined || (current === undefined || ("value" in current)) && (Object.is(oldValue, value) || !fixedAfter(descriptor, current ?? Reflect.getOwnPropertyDescriptor(target, prop)))))
+      if ((shown === shownBefore || !had && descriptor === undefined) && (oldValue === value && Reflect.has(target, prop) || isObject3(oldValue) && isObject3(value) && deepEqual(oldValue, value)) && (descriptor === undefined || definesFlagsAlone(target, prop, oldValue, value, descriptor, current)))
         return descriptor === undefined || Reflect.defineProperty(target, prop, { ...descriptor, value: oldValue });
       const sameNaN = oldValue !== oldValue && value !== value && Reflect.has(target, prop);
       const truncated = prop === "length" && Number(value) < target.length ? target.slice(Number(value)) : undefined;
@@ -4297,7 +4311,7 @@ function wrapObject(obj, node, options) {
         return Reflect.set(target, prop, value, receiver);
       if (isObject6(value))
         value = unwrapForStore(value);
-      const oldValue = descriptor === undefined || had && current === undefined ? target[prop] : current !== undefined && ("value" in current) ? current.value : undefined;
+      const oldValue = descriptor === undefined ? target[prop] : definedOver(target, prop, had, current);
       if (setter !== undefined && descriptor === undefined) {
         const forwards = receiver === proxy || forwardsTo(receiver, target);
         if (forwards && setter.get !== undefined && (oldValue === value || !options?.async && isObject6(oldValue) && isObject6(value) && deepEqual(oldValue, value)))
@@ -4308,10 +4322,10 @@ function wrapObject(obj, node, options) {
       let shown = had ? shownBefore : true;
       if (descriptor !== undefined) {
         shown = "enumerable" in descriptor ? descriptor.enumerable === true : shownBefore;
-        if (value !== descriptor.value && fixedAfter(descriptor, current ?? (had ? Reflect.getOwnPropertyDescriptor(target, prop) : undefined)))
+        if (refusedDefine(target, prop, value, descriptor, current))
           return false;
       }
-      if (had && (oldValue === value || !options?.async && isObject6(oldValue) && isObject6(value) && deepEqual(oldValue, value)) && (descriptor === undefined || shown === shownBefore && (current === undefined || ("value" in current)) && (Object.is(oldValue, value) || !fixedAfter(descriptor, current ?? Reflect.getOwnPropertyDescriptor(target, prop)))))
+      if (had && (oldValue === value || !options?.async && isObject6(oldValue) && isObject6(value) && deepEqual(oldValue, value)) && (descriptor === undefined || shown === shownBefore && definesFlagsAlone(target, prop, oldValue, value, descriptor, current)))
         return descriptor === undefined || Reflect.defineProperty(target, prop, { ...descriptor, value: oldValue });
       const located = locate(node, prop);
       const event = located === undefined || !(shown || shownBefore) ? undefined : shown ? { action: "set", path: located.paths[0], oldValue, newValue: value } : { action: "delete", path: located.paths[0], oldValue };

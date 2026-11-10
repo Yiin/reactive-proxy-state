@@ -236,15 +236,55 @@ export function ownDescriptor(target: object, prop: PropertyKey, node: LocationN
 }
 
 /**
- * Does a define with `descriptor` of a key whose own descriptor is
- * `current` (undefined: a new key) leave it non-configurable and
- * read-only? Then the engine checks that the key holds the descriptor's
- * value after the trap.
+ * Does a define with `descriptor` of `prop` of `target` (raw) leave the key
+ * non-configurable and read-only? Then the engine checks that the key holds
+ * the descriptor's value after the trap. `current`: the key's descriptor,
+ * when the caller has it.
  */
-export function fixedAfter(descriptor: PropertyDescriptor, current: PropertyDescriptor | undefined): boolean {
+function fixedAfter(target: object, prop: PropertyKey, descriptor: PropertyDescriptor, current: PropertyDescriptor | undefined): boolean {
+  if ("configurable" in descriptor && "writable" in descriptor) return !descriptor.configurable && !descriptor.writable;
+  current ??= Reflect.getOwnPropertyDescriptor(target, prop);
   const configurable = "configurable" in descriptor ? descriptor.configurable === true : current?.configurable === true;
   const writable = "writable" in descriptor ? descriptor.writable === true : current?.writable === true;
   return !configurable && !writable;
+}
+
+/**
+ * Must the define of `value` (unwrapped) with `descriptor` be refused
+ * before it writes? It stores the raw object of a proxy the caller
+ * defined, and leaves the key fixed: the engine would throw after the
+ * write (see `fixedAfter`).
+ */
+export function refusedDefine(target: object, prop: PropertyKey, value: unknown, descriptor: PropertyDescriptor, current: PropertyDescriptor | undefined): boolean {
+  return value !== descriptor.value && fixedAfter(target, prop, descriptor, current);
+}
+
+/**
+ * Does the define of a value equal to the one `prop` holds (`oldValue`)
+ * set its flags alone? Not when it makes an accessor data, or fixes a
+ * value that is equal but not the same (an equal object, -0): the defined
+ * value is stored then.
+ */
+export function definesFlagsAlone(
+  target: object,
+  prop: PropertyKey,
+  oldValue: unknown,
+  value: unknown,
+  descriptor: PropertyDescriptor,
+  current: PropertyDescriptor | undefined
+): boolean {
+  return (current === undefined || "value" in current) && (Object.is(oldValue, value) || !fixedAfter(target, prop, descriptor, current));
+}
+
+/**
+ * The value a define replaces at `prop`, read as `Object.defineProperty`
+ * reads it: from the key's data, calling no getter. `current` is the key's
+ * descriptor, or undefined for a key the object `had` as enumerable data
+ * (see `ownDescriptor`) or for a new key.
+ */
+export function definedOver(target: object, prop: PropertyKey, had: boolean, current: PropertyDescriptor | undefined): unknown {
+  if (current === undefined) return had ? (target as any)[prop] : undefined;
+  return "value" in current ? current.value : undefined;
 }
 
 /**

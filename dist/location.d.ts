@@ -135,12 +135,26 @@ export declare function ensureLocationNode(raw: object): LocationNode;
  */
 export declare function ownDescriptor(target: object, prop: PropertyKey, node: LocationNode): PropertyDescriptor | undefined;
 /**
- * Does a define with `descriptor` of a key whose own descriptor is
- * `current` (undefined: a new key) leave it non-configurable and
- * read-only? Then the engine checks that the key holds the descriptor's
- * value after the trap.
+ * Must the define of `value` (unwrapped) with `descriptor` be refused
+ * before it writes? It stores the raw object of a proxy the caller
+ * defined, and leaves the key fixed: the engine would throw after the
+ * write (see `fixedAfter`).
  */
-export declare function fixedAfter(descriptor: PropertyDescriptor, current: PropertyDescriptor | undefined): boolean;
+export declare function refusedDefine(target: object, prop: PropertyKey, value: unknown, descriptor: PropertyDescriptor, current: PropertyDescriptor | undefined): boolean;
+/**
+ * Does the define of a value equal to the one `prop` holds (`oldValue`)
+ * set its flags alone? Not when it makes an accessor data, or fixes a
+ * value that is equal but not the same (an equal object, -0): the defined
+ * value is stored then.
+ */
+export declare function definesFlagsAlone(target: object, prop: PropertyKey, oldValue: unknown, value: unknown, descriptor: PropertyDescriptor, current: PropertyDescriptor | undefined): boolean;
+/**
+ * The value a define replaces at `prop`, read as `Object.defineProperty`
+ * reads it: from the key's data, calling no getter. `current` is the key's
+ * descriptor, or undefined for a key the object `had` as enumerable data
+ * (see `ownDescriptor`) or for a new key.
+ */
+export declare function definedOver(target: object, prop: PropertyKey, had: boolean, current: PropertyDescriptor | undefined): unknown;
 /**
  * The accessor whose setter a write of `prop` to `target` calls, when
  * `target` does not have `prop`: the first one along its prototype chain

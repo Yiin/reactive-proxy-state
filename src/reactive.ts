@@ -32,9 +32,11 @@ import {
   copyPayloadReaching,
   shallowCopy,
   forwardsTo,
-  fixedAfter,
+  definedOver,
+  definesFlagsAlone,
   inheritedSetter,
   ownDescriptor,
+  refusedDefine,
 } from "./location";
 import { wrapArray } from "./wrap-array";
 import { wrapMap } from "./wrap-map";
@@ -280,15 +282,8 @@ function wrapObject<T extends object>(obj: T, node: LocationNode, options?: Reac
       // in the plain result — unwrap to prevent unbounded nesting.
       if (isObject(value)) value = unwrapForStore(value);
 
-      // A define, like `Object.defineProperty`, calls no getter: it
-      // replaces the value the key holds as data, if any (`current` is
-      // undefined for a key of an object of enumerable data alone).
-      const oldValue =
-        descriptor === undefined || (had && current === undefined)
-          ? (target as any)[prop]
-          : current !== undefined && "value" in current
-            ? current.value
-            : undefined;
+      // a define, like `Object.defineProperty`, calls no getter (see `definedOver`)
+      const oldValue = descriptor === undefined ? (target as any)[prop] : definedOver(target, prop, had, current);
 
       // A setter, own or inherited, as on an array (see `writeThroughSetter`).
       // A write that lands on the object changes nothing when the getter
@@ -317,11 +312,7 @@ function wrapObject<T extends object>(obj: T, node: LocationNode, options?: Reac
       let shown = had ? shownBefore : true;
       if (descriptor !== undefined) {
         shown = "enumerable" in descriptor ? descriptor.enumerable === true : shownBefore;
-        // A define that leaves the key fixed (see `fixedAfter`) of a proxy:
-        // the engine would find the raw object where the caller defined the
-        // proxy, and throw after the write. It is refused before.
-        if (value !== descriptor.value && fixedAfter(descriptor, current ?? (had ? Reflect.getOwnPropertyDescriptor(target, prop) : undefined)))
-          return false;
+        if (refusedDefine(target, prop, value, descriptor, current)) return false;
       }
 
       // avoid unnecessary triggers if the value hasn't changed. An inherited
@@ -330,15 +321,12 @@ function wrapObject<T extends object>(obj: T, node: LocationNode, options?: Reac
       // skipped when async emit is enabled because the cost of a redundant
       // deferred emit is far less than a synchronous deep comparison on
       // every property set. A define of the same value sets its flags
-      // alone, unless it shows or hides the key, makes an accessor data, or
-      // fixes a value that is equal but not the same (an equal object, -0).
+      // alone, unless it shows or hides the key (see `definesFlagsAlone`).
       if (
         had &&
         (oldValue === value || (!options?.async && isObject(oldValue) && isObject(value) && deepEqual(oldValue, value))) &&
         (descriptor === undefined ||
-          (shown === shownBefore &&
-            (current === undefined || "value" in current) &&
-            (Object.is(oldValue, value) || !fixedAfter(descriptor, current ?? Reflect.getOwnPropertyDescriptor(target, prop)))))
+          (shown === shownBefore && definesFlagsAlone(target, prop, oldValue, value, descriptor, current)))
       )
         return descriptor === undefined || Reflect.defineProperty(target, prop, { ...descriptor, value: oldValue });
 
