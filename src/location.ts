@@ -238,6 +238,8 @@ export function setterOf(target: object, prop: PropertyKey, own: boolean, node: 
     const descriptor = Reflect.getOwnPropertyDescriptor(target, prop);
     return descriptor !== undefined && descriptor.set !== undefined ? descriptor : undefined;
   }
+  // a new key: one native lookup, not a descriptor per prototype
+  if (!(prop in target)) return undefined;
   for (let proto = Object.getPrototypeOf(target); proto !== null; proto = Object.getPrototypeOf(proto)) {
     const descriptor = Reflect.getOwnPropertyDescriptor(proto, prop);
     if (descriptor !== undefined) return descriptor.set !== undefined ? descriptor : undefined;
