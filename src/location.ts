@@ -131,10 +131,12 @@ export interface LocationNode {
    */
   lostLink: boolean;
   /**
-   * The object had no own accessor property when its proxy first wrote to
-   * it (see `setterOf`); undefined before that write.
+   * Every own key of the object was enumerable data (no accessor, no
+   * hidden key; an array's `length` aside) when its proxy first looked
+   * (see `ownDescriptor`); undefined before that, and after a define
+   * through the proxy.
    */
-  dataOnly: boolean | undefined;
+  plainData: boolean | undefined;
   /**
    * How many places name this node as their container: every `Place` made
    * with it counts, and each place dropped from its object's `places` stops
@@ -206,7 +208,7 @@ export function ensureLocationNode(raw: object): LocationNode {
       relinked: 0,
       relinkedPlaces: 0,
       lostLink: false,
-      dataOnly: undefined,
+      plainData: undefined,
       childPlaces: 0,
       walk: 0,
       touched: 0,
@@ -219,26 +221,40 @@ export function ensureLocationNode(raw: object): LocationNode {
 }
 
 /**
- * The accessor whose setter a write of `prop` to `target` (raw; its node is
- * `node`) calls: the target's own, or the first one along its prototype
- * chain (a class, `Array.prototype`, `Object.prototype`'s `__proto__`).
- * Undefined when the write stores data. `own`: the target has `prop`.
- * An own key is read from its descriptor, unless the object had no own
- * accessor when its proxy first wrote to it: a write through a proxy adds
- * only data properties, so then there is none to find, and no descriptor
- * is made per write. An accessor added later (`Object.defineProperty`) is
- * outside the supported input. An object with more than 64 own keys is not
- * scanned and reads the descriptor at every write.
+ * The own descriptor of `prop`, a key `target` (raw; its node is `node`)
+ * has, or undefined when every own key of the object is enumerable data.
+ * A write through a proxy adds only such keys, so an object that had no
+ * other key when its proxy first looked has none, and no descriptor is
+ * made per write. A define through the proxy looks again. An accessor or a
+ * hidden key added raw is outside the supported input. An object with more
+ * than 64 own keys is not scanned and reads the descriptor each time.
  */
-export function setterOf(target: object, prop: PropertyKey, own: boolean, node: LocationNode): PropertyDescriptor | undefined {
-  if (own) {
-    let dataOnly = node.dataOnly;
-    if (dataOnly === undefined) dataOnly = node.dataOnly = hasNoOwnAccessor(target);
-    if (dataOnly) return undefined;
-    const descriptor = Reflect.getOwnPropertyDescriptor(target, prop);
-    return descriptor !== undefined && descriptor.set !== undefined ? descriptor : undefined;
-  }
-  // a new key: one native lookup, not a descriptor per prototype
+export function ownDescriptor(target: object, prop: PropertyKey, node: LocationNode): PropertyDescriptor | undefined {
+  let plain = node.plainData;
+  if (plain === undefined) plain = node.plainData = hasPlainKeysOnly(target);
+  return plain ? undefined : Reflect.getOwnPropertyDescriptor(target, prop);
+}
+
+/**
+ * Does a define with `descriptor` of a key whose own descriptor is
+ * `current` (undefined: a new key) leave it non-configurable and
+ * read-only? Then the engine checks that the key holds the descriptor's
+ * value after the trap.
+ */
+export function fixedAfter(descriptor: PropertyDescriptor, current: PropertyDescriptor | undefined): boolean {
+  const configurable = "configurable" in descriptor ? descriptor.configurable === true : current?.configurable === true;
+  const writable = "writable" in descriptor ? descriptor.writable === true : current?.writable === true;
+  return !configurable && !writable;
+}
+
+/**
+ * The accessor whose setter a write of `prop` to `target` calls, when
+ * `target` does not have `prop`: the first one along its prototype chain
+ * (a class, `Array.prototype`, `Object.prototype`'s `__proto__`).
+ * Undefined when the write stores data.
+ */
+export function inheritedSetter(target: object, prop: PropertyKey): PropertyDescriptor | undefined {
+  // one native lookup, not a descriptor per prototype
   if (!(prop in target)) return undefined;
   for (let proto = Object.getPrototypeOf(target); proto !== null; proto = Object.getPrototypeOf(proto)) {
     const descriptor = Reflect.getOwnPropertyDescriptor(proto, prop);
@@ -275,12 +291,15 @@ export function forwardsTo(receiver: any, target: object): boolean {
 /** The longest prototype chain `forwardsTo` walks. */
 const MAX_RECEIVER_CHAIN = 64;
 
-function hasNoOwnAccessor(target: object): boolean {
+/** Is every own key of `target` enumerable data, an array's `length` aside? Up to 64 keys. */
+function hasPlainKeysOnly(target: object): boolean {
   const keys = Reflect.ownKeys(target);
   if (keys.length > 64) return false;
+  const array = Array.isArray(target);
   for (let i = 0; i < keys.length; i++) {
     const descriptor = Reflect.getOwnPropertyDescriptor(target, keys[i])!;
     if (descriptor.get !== undefined || descriptor.set !== undefined) return false;
+    if (!descriptor.enumerable && !(array && keys[i] === "length")) return false;
   }
   return true;
 }

@@ -124,7 +124,7 @@ export function arrayDefineCases(lib) {
   cases["writable alone makes an own accessor a data property holding undefined: an event, and effects rerun"] = () => {
     const accessor = () => {
       const raw = [1];
-      Object.defineProperty(raw, "bar", { get: () => 5, configurable: true });
+      Object.defineProperty(raw, "bar", { get: () => 5, configurable: true, enumerable: true });
       return raw;
     };
     const result = record(lib, accessor(), ["bar"], (list) => {

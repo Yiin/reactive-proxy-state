@@ -24,7 +24,9 @@ import {
   locate,
   relinkArray,
   relinkReorder,
-  setterOf,
+  fixedAfter,
+  inheritedSetter,
+  ownDescriptor,
   forwardsTo,
   copyPayloadAfter,
   copyPayloadReaching,
@@ -278,6 +280,10 @@ export function wrapArray<T extends any[]>(arr: T, node: LocationNode): T {
   const methodCache = newMethodCache();
   // readers of functions that are not Array.prototype's, with their function
   let otherReaders: Map<string | symbol, [Function, Function]> | undefined;
+  // The descriptor of a define the `defineProperty` trap hands to `set`,
+  // which takes it at once. A fifth parameter of `set` would cost every
+  // write an arity fixup (see the object proxy).
+  let defining: PropertyDescriptor | undefined;
 
   const handler = {
     get(target: T, prop: string | symbol, receiver: any): any {
@@ -652,21 +658,39 @@ export function wrapArray<T extends any[]>(arr: T, node: LocationNode): T {
       }
       return value;
     },
-    // `descriptor`: the write is `Object.defineProperty` with a value (see below)
-    set(target: T, prop: string | symbol, value: any, receiver: any, descriptor?: PropertyDescriptor): boolean {
+    set(target: T, prop: string | symbol, value: any, receiver: any): boolean {
+      // the write is `Object.defineProperty` with this descriptor (see below)
+      const descriptor = defining;
+      if (descriptor !== undefined) defining = undefined;
+      const index = arrayIndex(prop);
+      // A name: no index, not `length`. Only a name without digits first
+      // can call a setter ("1.5" and "01" are written as data, as indexes).
+      const named = index < 0 && prop !== "length";
+      const had = named && hasOwn.call(target, prop);
+      // the name's descriptor, unless every own key is enumerable data (see `ownDescriptor`)
+      const current = had && node.plainData !== true ? ownDescriptor(target, prop, node) : undefined;
+      const setter =
+        !named || !isName(prop)
+          ? undefined
+          : had
+            ? current !== undefined && current.set !== undefined ? current : undefined
+            : inheritedSetter(target, prop);
       // Another receiver (an outer proxy, `Reflect.set` with a receiver, an
       // object that inherits from the proxy) gets the ordinary write. When
       // the write lands on this array, it ends in the `defineProperty` trap
       // below, which unwraps the value and sends the event once. 3.0.12 also
       // sent it here: twice. A write that calls a setter goes on below, on
-      // every route. Only a name can call a setter: an index or `length` is
-      // written as data.
+      // every route.
       const foreign = receiver !== proxy;
-      const setter = isName(prop) ? setterOf(target, prop, hasOwn.call(target, prop), node) : undefined;
       if (foreign && setter === undefined) return Reflect.set(target, prop, value, receiver);
       if (isObject(value)) value = unwrapForStore(value);
 
-      const oldValue = (target as any)[prop];
+      // A define, like `Object.defineProperty`, calls no getter: it
+      // replaces the value the key holds as data, if any.
+      const own =
+        descriptor === undefined ? current : had ? current ?? Reflect.getOwnPropertyDescriptor(target, prop) : named ? undefined : Reflect.getOwnPropertyDescriptor(target, prop);
+      const oldValue =
+        descriptor === undefined ? (target as any)[prop] : own !== undefined && "value" in own ? own.value : undefined;
 
       // A define with a value makes the key data: it is written below.
       if (setter !== undefined && descriptor === undefined) {
@@ -685,13 +709,33 @@ export function wrapArray<T extends any[]>(arr: T, node: LocationNode): T {
         return writeThroughSetter(target, prop, value, receiver, forwards, oldValue);
       }
 
+      // A replica holds the items and the enumerable names, as on an object
+      // (see its `set`). An item is sent whatever its flags.
+      const shownBefore = !named || (had && (current === undefined || current.enumerable === true));
+      let shown = named && had ? shownBefore : true;
+      // a define that leaves the key fixed (see `fixedAfter`)
+      let fixed = false;
+      if (descriptor !== undefined) {
+        if (named) shown = "enumerable" in descriptor ? descriptor.enumerable === true : shownBefore;
+        fixed = fixedAfter(descriptor, own);
+        // the engine would find the raw object where the caller defined its
+        // proxy, and throw after the write: refuse it before
+        if (fixed && value !== descriptor.value) return false;
+      }
+
       // avoid unnecessary triggers if value hasn't changed. Reading past the end of an
       // array also yields undefined, so also require the prop to already exist —
       // otherwise growing into a brand-new hole with newValue: undefined would be
-      // mistaken for a no-op and silently dropped. A define still sets its flags.
+      // mistaken for a no-op and silently dropped. A define still sets its
+      // flags; one that shows or hides a name, or fixes another value than
+      // the one held, goes on.
       if (
-        (oldValue === value && Reflect.has(target, prop)) ||
-        (isObject(oldValue) && isObject(value) && deepEqual(oldValue, value))
+        (shown === shownBefore || (!had && descriptor === undefined)) &&
+        ((oldValue === value && Reflect.has(target, prop)) ||
+          (isObject(oldValue) && isObject(value) && deepEqual(oldValue, value))) &&
+        (!fixed || Object.is(oldValue, value)) &&
+        // a define that makes an accessor data: the getter is not read
+        (descriptor === undefined || own === undefined || "value" in own)
       )
         return descriptor === undefined || Reflect.defineProperty(target, prop, { ...descriptor, value: oldValue });
       // NaN in place of NaN is sent, as until now, but changes nothing an effect reads
@@ -703,7 +747,6 @@ export function wrapArray<T extends any[]>(arr: T, node: LocationNode): T {
           ? target.slice(Number(value))
           : undefined;
 
-      const index = arrayIndex(prop);
       // direct length grow (e.g. arr.length = N) — emit ascending per-index sets
       // instead of a bare length event so the remote fills every index and never
       // ends up with a hole.
@@ -711,16 +754,20 @@ export function wrapArray<T extends any[]>(arr: T, node: LocationNode): T {
 
       // the write does not move `target`, so its paths are known before it
       const located = grows ? locate(node) : locate(node, prop);
+      // A hidden name is written and its effects rerun, with no event; a
+      // name a define hides is deleted from the replica.
       const event: StateEvent | undefined =
-        located === undefined || grows
+        located === undefined || grows || !(shown || shownBefore)
           ? undefined
-          : { action: "set", path: located.paths[0], oldValue, newValue: value };
-      const held = event !== undefined ? heldItems(value, oldValue) : undefined;
+          : shown
+            ? { action: "set", path: located.paths[0], oldValue, newValue: value }
+            : { action: "delete", path: located.paths[0], oldValue };
+      const held = event !== undefined && shown ? heldItems(value, oldValue) : undefined;
       // copies the payload, or throws, before the write
       const copied = copyPayload(event, located, target, held);
       if (copied === Copied.Reaches) {
         const after = target.slice();
-        Reflect.set(after, prop, value);
+        if (shown) Reflect.set(after, prop, value);
         copyPayloadReaching(event!, located!, target, after);
       }
       const oldLength = target.length;
@@ -733,10 +780,14 @@ export function wrapArray<T extends any[]>(arr: T, node: LocationNode): T {
           : Reflect.set(target, prop, value);
 
       if (result) {
-        // move places before anything can write again (emit may throw)
+        // a define may add a hidden name, or show or hide one
+        if (descriptor !== undefined && !shown) node.plainData = false;
+        else if (descriptor !== undefined && !shownBefore) node.plainData = undefined;
+        // move places before anything can write again (emit may throw); a
+        // define that shows or hides a name keeps the value where it is
         if (truncated !== undefined) {
           relinkArray(node, target, target.length, truncated);
-        } else if (prop !== "length") {
+        } else if (prop !== "length" && oldValue !== value) {
           const key = placeKey(prop);
           if (isObject(oldValue)) detachPlace(oldValue, node, key);
           if (isObject(value)) attachValue(value, node, key, copied === Copied.Fresh, located && oldValue, held);
@@ -791,7 +842,10 @@ export function wrapArray<T extends any[]>(arr: T, node: LocationNode): T {
     deleteProperty(target: T, prop: string | symbol): boolean {
       const oldValue = (target as any)[prop];
       const hadProperty = Object.prototype.hasOwnProperty.call(target, prop);
-      const located = hadProperty ? locate(node, prop) : undefined;
+      // a replica does not hold a hidden name (see `set`)
+      const current =
+        hadProperty && arrayIndex(prop) < 0 && prop !== "length" ? ownDescriptor(target, prop, node) : undefined;
+      const located = hadProperty && (current === undefined || current.enumerable === true) ? locate(node, prop) : undefined;
       const event: StateEvent | undefined = located && { action: "delete", path: located.paths[0], oldValue };
       if (copyPayload(event, located, target) === Copied.Reaches) {
         const after = target.slice();
@@ -823,23 +877,38 @@ export function wrapArray<T extends any[]>(arr: T, node: LocationNode): T {
     },
     defineProperty(target: T, prop: string | symbol, descriptor: PropertyDescriptor): boolean {
       // a value is written as `set` writes it: the same event, and the same effects rerun
-      if ("value" in descriptor) return handler.set(target, prop, descriptor.value, proxy, descriptor);
+      if ("value" in descriptor) {
+        defining = descriptor;
+        return handler.set(target, prop, descriptor.value, proxy);
+      }
       if (!("get" in descriptor) && !("set" in descriptor)) {
         // new flags alone on a key the array has change no value
         // (`Object.freeze` ends here for each key), unless `writable` makes
-        // an accessor a data property
+        // an accessor a data property, or `enumerable` shows or hides a
+        // name: then it is the define of the value it holds
         const current = Reflect.getOwnPropertyDescriptor(target, prop);
-        if (current !== undefined && ("value" in current || !("writable" in descriptor)))
-          return Reflect.defineProperty(target, prop, descriptor);
+        if (current !== undefined && "value" in current) {
+          if (
+            !("enumerable" in descriptor) ||
+            (descriptor.enumerable === true) === current.enumerable ||
+            arrayIndex(prop) >= 0 ||
+            prop === "length"
+          )
+            return Reflect.defineProperty(target, prop, descriptor);
+          defining = { ...descriptor, value: current.value };
+          return handler.set(target, prop, current.value, proxy);
+        }
+        if (current !== undefined && !("writable" in descriptor)) return Reflect.defineProperty(target, prop, descriptor);
         // a new key, or an accessor made data: a write of `undefined`
-        return handler.set(target, prop, undefined, proxy, descriptor);
+        defining = descriptor;
+        return handler.set(target, prop, undefined, proxy);
       }
       // an accessor: effects rerun, and no event is sent
-      // (an accessor added later is outside the supported input, see `setterOf`)
+      // (an accessor added later is outside the supported input, see `ownDescriptor`)
       const oldLength = target.length;
       const result = Reflect.defineProperty(target, prop, descriptor);
       if (result) {
-        node.dataOnly = undefined;
+        node.plainData = false;
         beginWrite();
         try {
           const index = arrayIndex(prop);

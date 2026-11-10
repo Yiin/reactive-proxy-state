@@ -459,10 +459,10 @@ export function objectDefineCases(lib) {
     }
   };
 
-  // An outer proxy whose write of an own key landed is remembered for that
-  // key (the trip through it costs more than the write). What it decides
-  // before the write still decides: its set trap, and its traps for other keys.
-  cases["a remembered outer proxy still runs its set trap on every write"] = () => {
+  // Every trap of an outer proxy runs on every write, as on a plain object.
+  // 3.0.16 remembered the outer proxy per key and skipped its
+  // getOwnPropertyDescriptor and defineProperty traps after the first write.
+  cases["an outer proxy runs its set trap on every write"] = () => {
     let calls = 0;
     let refuse = false;
     const result = record(lib, { a: 1 }, [["a"]], (obj) => {
@@ -514,7 +514,7 @@ export function objectDefineCases(lib) {
     assert.deepEqual([result.events, result.runs], [["set obj.a 2", "set obj.a 3"], [3]]);
   };
 
-  cases["a remembered outer proxy writes a key deleted and added again, or made read-only, as the plain write"] = () => {
+  cases["an outer proxy writes a key deleted and added again, or made read-only, as the plain write"] = () => {
     const result = record(lib, { a: 1 }, [["a"]], (obj) => {
       const outer = new Proxy(obj, {});
       outer.a = 2;
@@ -533,8 +533,8 @@ export function objectDefineCases(lib) {
   };
 
   // A receiver's trap that defines another key on the object while the
-  // write is on its way (here: a log) does not make that key remembered.
-  cases["a define made by a receiver's trap on the way is not taken for the receiver's write"] = () => {
+  // write is on its way (here: a log) sends that define and the write.
+  cases["a define made by a receiver's trap on the way is sent before the receiver's write"] = () => {
     const result = record(lib, { a: 1, log: 0 }, [["a", "log"]], (obj) => {
       const logging = new Proxy(obj, {
         getOwnPropertyDescriptor(target, key) {
@@ -552,7 +552,8 @@ export function objectDefineCases(lib) {
   };
 
   // A define with a value alone keeps the define's defaults: a new key is
-  // read-only, hidden and fixed; an accessor becomes data without its setter running.
+  // read-only, hidden and fixed, so a replica does not get it; an accessor
+  // becomes data without its setter running.
   cases["a define with a value alone defines, it does not assign"] = () => {
     let calls = 0;
     const raw = Object.defineProperty({ a: 1 }, "acc", { get: () => 0, set: () => calls++, configurable: true, enumerable: true });
@@ -560,7 +561,7 @@ export function objectDefineCases(lib) {
       Object.defineProperty(obj, "c", { value: 1 });
       Object.defineProperty(obj, "acc", { value: 2 });
     });
-    assert.deepEqual([result.events, calls], [["set obj.c 1", "set obj.acc 2"], 0]);
+    assert.deepEqual([result.events, result.runs, calls], [["set obj.acc 2"], [3], 0]);
     assert.deepEqual(Object.getOwnPropertyDescriptor(result.raw, "c"), { value: 1, writable: false, enumerable: false, configurable: false });
     assert.deepEqual(Object.getOwnPropertyDescriptor(result.raw, "acc"), { value: 2, writable: false, enumerable: true, configurable: true });
   };
@@ -606,8 +607,8 @@ export function objectDefineCases(lib) {
     assert.deepEqual([result.events, result.runs], [["set obj.bar 2"], [2]]);
   };
 
-  // Not remembered: another receiver lands on itself, a child on itself.
-  cases["a receiver that does not forward is never remembered"] = () => {
+  // Another receiver lands on itself, a child on itself, on every write.
+  cases["a receiver that does not forward gets every write on itself"] = () => {
     const result = record(lib, { a: 1 }, [["a"]], (obj, state) => {
       const child = Object.create(obj);
       for (let i = 2; i < 4; i++) {
@@ -618,20 +619,6 @@ export function objectDefineCases(lib) {
       assert.equal(child.a, 3);
     });
     assert.deepEqual([result.events, result.runs, result.raw], [["set other.a 2", "set other.a 3"], [1], { a: 1 }]);
-  };
-
-  // The rule README states: a receiver's traps that answer differently for
-  // a key after its write landed are outside the supported input. The
-  // remembered write lands on the object and is sent; replicas stay equal.
-  cases["a defineProperty trap that starts to refuse a remembered key is not asked again"] = () => {
-    let refuse = false;
-    const result = record(lib, { a: 1 }, [["a"]], (obj) => {
-      const outer = new Proxy(obj, { defineProperty: (target, key, descriptor) => !refuse && Reflect.defineProperty(target, key, descriptor) });
-      outer.a = 2;
-      refuse = true;
-      outer.a = 3;
-    });
-    assert.deepEqual([result.events, result.raw], [["set obj.a 2", "set obj.a 3"], { a: 3 }]);
   };
 
   return cases;
