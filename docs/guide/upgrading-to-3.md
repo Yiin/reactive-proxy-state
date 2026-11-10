@@ -346,7 +346,8 @@ The same holds for an array's names; an index is sent whatever its flags.
 
 An object proxy no longer remembers outer proxies.
 Every trap of an outer proxy runs on every write, as on a plain object, and the 3.0.16 caveat about traps that answer differently later is gone.
-A write through an outer proxy costs what it cost in 3.0.15.
+A write through an outer proxy costs about what it cost in 3.0.15, and about twice what it cost in 3.0.16.
+A write through a membrane costs more than in 3.0.15, which sent nothing for it.
 
 A define that leaves a key non-configurable and read-only with a proxy as its value now returns `false` before it writes, and `Object.defineProperty` throws a `TypeError`.
 3.0.16 wrote the raw object, sent the event, and then the engine threw.
@@ -355,6 +356,6 @@ A define of such a key with an equal object or with `-0` stores the defined valu
 A define calls no getter: a value defined over an accessor replaces it without reading it.
 3.0.16 read the old value through the getter, so a getter that threw stopped the define.
 
-An array proxy's `set` trap takes four parameters, as an object proxy's does since 3.0.16, which makes array writes faster.
+An array proxy's `set` trap takes four parameters, as an object proxy's does since 3.0.16, which makes index writes a little faster.
 
 Every other write sends the same events as in 3.0.16.
