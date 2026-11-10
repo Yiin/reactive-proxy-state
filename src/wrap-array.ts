@@ -719,10 +719,11 @@ export function wrapArray<T extends any[]>(arr: T, node: LocationNode): T {
       const oldLength = target.length;
       // A setter, own or inherited, runs with the proxy as `this`. Any other
       // write goes to the target: through the proxy it would end in the
-      // proxy's `defineProperty` trap.
+      // proxy's `defineProperty` trap. A define keeps its descriptor unless
+      // the value was unwrapped.
       const result =
         descriptor !== undefined
-          ? Reflect.defineProperty(target, prop, { ...descriptor, value })
+          ? Reflect.defineProperty(target, prop, descriptor.value === value ? descriptor : { ...descriptor, value })
           : throughSetter
             ? Reflect.set(target, prop, value, proxy)
             : Reflect.set(target, prop, value);
