@@ -310,43 +310,37 @@ function wrapObject<T extends object>(obj: T, node: LocationNode, options?: Reac
 
       // A replica holds the enumerable keys alone, as JSON and spread do:
       // `shownBefore` and `shown`, whether it holds the key before and
-      // after the write.
-      let shownBefore: boolean;
-      let shown: boolean;
-      if (descriptor === undefined) {
-        // avoid unnecessary triggers if the value hasn't changed. An
-        // inherited value is not the object's own: writing it adds the key,
-        // and a replica that copies own keys needs the event. Deep equality
-        // is skipped when async emit is enabled because the cost of a
-        // redundant deferred emit is far less than a synchronous deep
-        // comparison on every property set.
-        if (
-          had &&
-          (oldValue === value || (!options?.async && isObject(oldValue) && isObject(value) && deepEqual(oldValue, value)))
-        )
-          return true;
-        // `=` keeps a key the object has as it was, and adds a new one enumerable
-        shownBefore = shown = current === undefined || current.enumerable === true;
-      } else {
-        shownBefore = had && (current === undefined || current.enumerable === true);
+      // after the write. A write by `=` keeps a key the object has as it
+      // was, and adds a new one enumerable; a define sets what its
+      // descriptor says.
+      const shownBefore = had && (current === undefined || current.enumerable === true);
+      let shown = had ? shownBefore : true;
+      if (descriptor !== undefined) {
         shown = "enumerable" in descriptor ? descriptor.enumerable === true : shownBefore;
         // A define that leaves the key fixed (see `fixedAfter`) of a proxy:
         // the engine would find the raw object where the caller defined the
         // proxy, and throw after the write. It is refused before.
         if (value !== descriptor.value && fixedAfter(descriptor, current ?? (had ? Reflect.getOwnPropertyDescriptor(target, prop) : undefined)))
           return false;
-        // The same value: the define sets its flags alone, unless it shows
-        // or hides the key, fixes a value that is equal but not the same
-        // (an equal object, -0), or makes an accessor data.
-        if (
-          had &&
-          shown === shownBefore &&
-          (oldValue === value || (!options?.async && isObject(oldValue) && isObject(value) && deepEqual(oldValue, value))) &&
-          (current === undefined || "value" in current) &&
-          (Object.is(oldValue, value) || !fixedAfter(descriptor, current ?? Reflect.getOwnPropertyDescriptor(target, prop)))
-        )
-          return Reflect.defineProperty(target, prop, { ...descriptor, value: oldValue });
       }
+
+      // avoid unnecessary triggers if the value hasn't changed. An inherited
+      // value is not the object's own: writing it adds the key, and a
+      // replica that copies own keys needs the event. Deep equality is
+      // skipped when async emit is enabled because the cost of a redundant
+      // deferred emit is far less than a synchronous deep comparison on
+      // every property set. A define of the same value sets its flags
+      // alone, unless it shows or hides the key, makes an accessor data, or
+      // fixes a value that is equal but not the same (an equal object, -0).
+      if (
+        had &&
+        (oldValue === value || (!options?.async && isObject(oldValue) && isObject(value) && deepEqual(oldValue, value))) &&
+        (descriptor === undefined ||
+          (shown === shownBefore &&
+            (current === undefined || "value" in current) &&
+            (Object.is(oldValue, value) || !fixedAfter(descriptor, current ?? Reflect.getOwnPropertyDescriptor(target, prop)))))
+      )
+        return descriptor === undefined || Reflect.defineProperty(target, prop, { ...descriptor, value: oldValue });
 
       // the write does not move `target`, so its paths are known before it.
       // A hidden key is written and its effects rerun, with no event; a key

@@ -716,41 +716,32 @@ export function wrapArray<T extends any[]>(arr: T, node: LocationNode): T {
       }
 
       // A replica holds the items and the enumerable names, as on an object
-      // (see its `set`): `shownBefore` and `shown`, whether it holds the key
-      // before and after the write. An item is sent whatever its flags.
-      let shownBefore: boolean;
-      let shown: boolean;
-      if (descriptor === undefined) {
-        // avoid unnecessary triggers if value hasn't changed. Reading past the end of an
-        // array also yields undefined, so also require the prop to already exist —
-        // otherwise growing into a brand-new hole with newValue: undefined would be
-        // mistaken for a no-op and silently dropped.
-        if (
-          (oldValue === value && Reflect.has(target, prop)) ||
-          (isObject(oldValue) && isObject(value) && deepEqual(oldValue, value))
-        )
-          return true;
-        // `=` keeps a name the array has as it was, and adds a new one enumerable
-        shownBefore = shown = current === undefined || current.enumerable === true;
-      } else {
-        shownBefore = !named || (had && (current === undefined || current.enumerable === true));
-        shown = !named || ("enumerable" in descriptor ? descriptor.enumerable === true : shownBefore);
+      // (see its `set`). An item is sent whatever its flags.
+      const shownBefore = !named || (had && (current === undefined || current.enumerable === true));
+      let shown = named && had ? shownBefore : true;
+      if (descriptor !== undefined) {
+        if (named) shown = "enumerable" in descriptor ? descriptor.enumerable === true : shownBefore;
         // A define that leaves the key fixed (see `fixedAfter`) of a proxy:
         // refused before the write, as on an object.
         if (value !== descriptor.value && fixedAfter(descriptor, current ?? Reflect.getOwnPropertyDescriptor(target, prop)))
           return false;
-        // The same value: the define sets its flags alone, unless it shows
-        // or hides a name, fixes a value that is equal but not the same, or
-        // makes an accessor data.
-        if (
-          shown === shownBefore &&
-          ((oldValue === value && Reflect.has(target, prop)) ||
-            (isObject(oldValue) && isObject(value) && deepEqual(oldValue, value))) &&
-          (current === undefined || "value" in current) &&
-          (Object.is(oldValue, value) || !fixedAfter(descriptor, current ?? Reflect.getOwnPropertyDescriptor(target, prop)))
-        )
-          return Reflect.defineProperty(target, prop, { ...descriptor, value: oldValue });
       }
+
+      // avoid unnecessary triggers if value hasn't changed. Reading past the end of an
+      // array also yields undefined, so also require the prop to already exist —
+      // otherwise growing into a brand-new hole with newValue: undefined would be
+      // mistaken for a no-op and silently dropped. A define of the same value
+      // sets its flags alone, unless it shows or hides a name, makes an
+      // accessor data, or fixes a value that is equal but not the same.
+      if (
+        (shown === shownBefore || (!had && descriptor === undefined)) &&
+        ((oldValue === value && Reflect.has(target, prop)) ||
+          (isObject(oldValue) && isObject(value) && deepEqual(oldValue, value))) &&
+        (descriptor === undefined ||
+          ((current === undefined || "value" in current) &&
+            (Object.is(oldValue, value) || !fixedAfter(descriptor, current ?? Reflect.getOwnPropertyDescriptor(target, prop)))))
+      )
+        return descriptor === undefined || Reflect.defineProperty(target, prop, { ...descriptor, value: oldValue });
       // NaN in place of NaN is sent, as until now, but changes nothing an effect reads
       const sameNaN = oldValue !== oldValue && value !== value && Reflect.has(target, prop);
 
