@@ -301,6 +301,8 @@ describe("fuzz with aliasing operations", () => {
     return null;
   }
 
+  // Explicit timeout: the fuzz runs 4.2-5.0s on shared CI runners under
+  // coverage instrumentation, at bun's 5s default.
   test("200 seeds x 200 steps stay in sync", () => {
     const failures: string[] = [];
     for (let index = 0; index < 200; index++) {
@@ -309,7 +311,7 @@ describe("fuzz with aliasing operations", () => {
       if (failure !== null) failures.push(`${seed}: ${failure}`);
     }
     expect(failures).toEqual([]);
-  });
+  }, 30_000);
 });
 
 describe("bulk insertion", () => {
