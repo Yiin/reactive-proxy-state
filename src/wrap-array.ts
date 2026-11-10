@@ -32,6 +32,8 @@ import {
   refusedDefine,
   forwardsTo,
   noteHidden,
+  shownKey,
+  accessorMayBeGone,
   unsent,
   replacedInTree,
   definedAccessorFlags,
@@ -714,12 +716,13 @@ export function wrapArray<T extends any[]>(arr: T, node: LocationNode): T {
         return writeThroughSetter(target, prop, value, receiver, forwards, oldValue);
       }
 
-      // A replica holds the items and the enumerable names, as on an object
-      // (see its `set`). An item is sent whatever its flags.
-      const shownBefore = !named || (had && (current === undefined ? node.hidden?.has(prop) !== true : current.enumerable === true));
-      let shown = named && had ? shownBefore : true;
+      // A replica holds the items and the enumerable string names, as on
+      // an object (see its `set`). An item is sent whatever its flags.
+      const shownBefore =
+        !named || (had && (current === undefined ? node.hidden?.has(prop) !== true : shownKey(prop, current.enumerable === true)));
+      let shown = !named || (had ? shownBefore : typeof prop !== "symbol");
       if (descriptor !== undefined) {
-        if (named) shown = "enumerable" in descriptor ? descriptor.enumerable === true : shownBefore;
+        if (named) shown = "enumerable" in descriptor ? shownKey(prop, descriptor.enumerable === true) : shownBefore;
         if (refusedDefine(target, prop, value, descriptor, current)) return false;
       }
 
@@ -753,7 +756,7 @@ export function wrapArray<T extends any[]>(arr: T, node: LocationNode): T {
       // A hidden name is written and its effects rerun, with no event, so
       // it needs no paths; a name a define hides is deleted from the replica.
       const sent = shown || shownBefore;
-      const located = grows ? locate(node) : sent ? locate(node, prop) : unsent();
+      const located = grows ? locate(node) : sent ? locate(node, prop) : unsent(node);
       const event: StateEvent | undefined =
         located === undefined || grows
           ? undefined
@@ -778,8 +781,11 @@ export function wrapArray<T extends any[]>(arr: T, node: LocationNode): T {
           : Reflect.set(target, prop, value);
 
       if (result) {
-        // a define may add a hidden name, or show or hide one
-        if (descriptor !== undefined && !(shown && shownBefore)) noteHidden(node, prop, !shown);
+        // a define or a new symbol name may add a hidden name, and a define
+        // may show or hide one (see the object's `set`)
+        if ((had && !shownBefore) === shown) noteHidden(node, prop, !shown);
+        // a define with a value makes an accessor data
+        if (current !== undefined && descriptor !== undefined && !("value" in current)) accessorMayBeGone(node);
         // move places before anything can write again (emit may throw)
         if (truncated !== undefined) {
           relinkArray(node, target, target.length, truncated);
@@ -838,8 +844,8 @@ export function wrapArray<T extends any[]>(arr: T, node: LocationNode): T {
     },
     deleteProperty(target: T, prop: string | symbol): boolean {
       const oldValue = (target as any)[prop];
-      // an own enumerable key, or an index: what a replica holds (see `set`)
-      const enumerable = isEnumerable.call(target, prop);
+      // an own enumerable string key, or an index: what a replica holds (see `set`)
+      const enumerable = shownKey(prop, isEnumerable.call(target, prop));
       const hadProperty = enumerable || hasOwn.call(target, prop);
       const located = hadProperty && (enumerable || arrayIndex(prop) >= 0) ? locate(node, prop) : undefined;
       const event: StateEvent | undefined = located && { action: "delete", path: located.paths[0], oldValue };
@@ -852,6 +858,7 @@ export function wrapArray<T extends any[]>(arr: T, node: LocationNode): T {
 
       if (hadProperty && result) {
         if (!enumerable) noteHidden(node, prop, false);
+        accessorMayBeGone(node);
         if (isObject(oldValue)) detachPlace(oldValue, node, placeKey(prop));
         beginWrite();
         try {
@@ -905,8 +912,8 @@ export function wrapArray<T extends any[]>(arr: T, node: LocationNode): T {
       const oldLength = target.length;
       const result = Reflect.defineProperty(target, prop, descriptor);
       if (result) {
-        node.dataOnly = false;
-        noteHidden(node, prop, !isEnumerable.call(target, prop));
+        if (node.dataOnly === true) node.dataOnly = false;
+        noteHidden(node, prop, !shownKey(prop, isEnumerable.call(target, prop)));
         beginWrite();
         try {
           const index = arrayIndex(prop);

@@ -1,0 +1,8 @@
+{
+ "sync object: set of a symbol key": [
+  "action=\"replace\" newValue={\"obj\":{\"a\":1,\"child\":{\"c\":1}#2}#1,\"setter\":{\"stored\":1,\"value\":1}#3,\"instance\":{\"id\":1}#4,\"alias\":{\"first\":{\"c\":1}#6,\"second\":{\"c\":1}#7}#5}#0 path=[]#8"
+ ],
+ "async object: set of a symbol key": [
+  "action=\"replace\" newValue={\"obj\":{\"a\":1,\"child\":{\"c\":1}#2}#1,\"setter\":{\"stored\":1,\"value\":1}#3,\"instance\":{\"id\":1}#4,\"alias\":{\"first\":{\"c\":1}#6,\"second\":{\"c\":1}#7}#5}#0 path=[]#8"
+ ]
+}

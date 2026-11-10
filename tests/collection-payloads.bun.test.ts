@@ -62,7 +62,7 @@ for (const async of [false, true]) {
   });
 
   for (const kind of ["array", "map", "set", "date"]) {
-    test(`enumerable string and symbol properties survive ${kind} copies, async=${async}`, async () => {
+    test(`enumerable string properties survive ${kind} copies and symbol properties do not, async=${async}`, async () => {
       const symbol = Symbol("extra");
       const shared = { n: 1 };
       const value: any = kind === "array" ? [1] : kind === "map" ? new Map([["k", 1]]) : kind === "set" ? new Set([1]) : new Date(1234);
@@ -81,16 +81,16 @@ for (const async of [false, true]) {
       await Promise.resolve();
       for (const copy of [remote.values[0], remote.inserts[0]]) {
         expect(copy.extra).toEqual(shared);
-        expect(copy[symbol]).toEqual(shared);
+        // a replica holds what JSON holds (3.0.19)
+        expect(Object.getOwnPropertySymbols(copy)).toEqual([]);
         expect(Object.hasOwn(copy, "__proto__")).toBe(true);
         expect(copy.__proto__).toEqual(shared);
         expect(copy.extra).not.toBe(shared);
-        expect(copy[symbol]).not.toBe(copy.extra);
       }
     });
   }
 
-  test(`reorder alias copies keep inner array names and symbols, async=${async}`, async () => {
+  test(`reorder alias copies keep inner array names and drop symbols, async=${async}`, async () => {
     const symbol = Symbol("label");
     const item: any = [1];
     item.name = "a";
@@ -106,14 +106,16 @@ for (const async of [false, true]) {
     await Promise.resolve();
     for (const key of ["a", "b"]) {
       expect(remote[key][1].name).toBe("a");
-      expect(remote[key][1][symbol]).toEqual({ n: 1 });
+      expect(Object.getOwnPropertySymbols(remote[key][1])).toEqual([]);
     }
-    expect(remote.a[1][symbol]).not.toBe(remote.b[1][symbol]);
+    expect(remote.a[1]).not.toBe(remote.b[1]);
   });
 }
 
 for (const kind of ["array-symbol", "map-string", "set-symbol", "date-string"]) {
-  test(`the copy limit counts ${kind} properties`, () => {
+  // a copy has no symbol key (3.0.19), so it makes no copies under one
+  const counted = kind.endsWith("string");
+  test(`the copy limit ${counted ? "counts" : "skips"} ${kind} properties`, () => {
     let graph: object = {};
     for (let depth = 0; depth < 16; depth++) {
       const next: any = kind === "array-symbol" ? [] : kind === "map-string" ? new Map() : kind === "set-symbol" ? new Set() : new Date(0);
@@ -122,7 +124,8 @@ for (const kind of ["array-symbol", "map-string", "set-symbol", "date-string"]) 
       next[b] = graph;
       graph = next;
     }
-    expect(() => reactive({ graph }, () => {})).toThrow(SnapshotLimitError);
+    if (counted) expect(() => reactive({ graph }, () => {})).toThrow(SnapshotLimitError);
+    else expect(() => reactive({ graph }, () => {})).not.toThrow();
   });
 }
 
@@ -132,9 +135,12 @@ for (const kind of ["map", "set"]) {
     for (const key of ["forEach", "entries", "values", Symbol.iterator]) collection[key] = { label: String(key) };
     let snapshot: any;
     reactive({ a: collection, b: collection }, (event: any) => { snapshot = event.newValue; });
-    for (const key of ["forEach", "entries", "values", Symbol.iterator]) {
+    for (const key of ["forEach", "entries", "values"]) {
       expect(snapshot.a[key]).toEqual({ label: String(key) });
       expect(snapshot.b[key]).toEqual({ label: String(key) });
     }
+    // a symbol key is not copied (3.0.19): the copy keeps the native iterator
+    expect(Object.hasOwn(snapshot.a, Symbol.iterator)).toBe(false);
+    expect(Object.hasOwn(snapshot.b, Symbol.iterator)).toBe(false);
   });
 }

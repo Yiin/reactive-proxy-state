@@ -23,15 +23,15 @@ for (const async of [false, true]) {
     await Promise.resolve();
     expect(replica.lookup.size).toBe(toRaw(state).lookup.size);
   });
-  test(`initial array copy keeps enumerable symbols, async=${async}`, async () => {
+  test(`initial array copy drops symbol keys, as JSON does (3.0.19), async=${async}`, async () => {
     const key = Symbol('metadata');
     const list: any = [1];
     list[key] = { n: 2 };
     let initial: any;
     reactive({ list }, (event: any) => { initial = event.newValue; }, [], { async });
     await Promise.resolve();
-    expect(Object.hasOwn(initial.list, key)).toBe(true);
-    expect(initial.list[key]).toEqual({ n: 2 });
+    expect(Object.hasOwn(initial.list, key)).toBe(false);
+    expect(initial.list).toEqual([1]);
   });
   for (const kind of ['Map', 'Set']) {
     test(`initial ${kind} copy keeps enumerable properties, async=${async}`, async () => {

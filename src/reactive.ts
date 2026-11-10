@@ -28,6 +28,8 @@ import {
   heldItems,
   locate,
   noteHidden,
+  shownKey,
+  accessorMayBeGone,
   unsent,
   replacedInTree,
   definedAccessorFlags,
@@ -307,16 +309,17 @@ function wrapObject<T extends object>(obj: T, node: LocationNode, options?: Reac
         return writeThroughSetter(target, prop, value, receiver, forwards, oldValue);
       }
 
-      // A replica holds the enumerable keys alone, as JSON and spread do:
+      // A replica holds the enumerable string keys alone, as JSON does:
       // `shownBefore` and `shown`, whether it holds the key before and
       // after the write. A write by `=` keeps a key the object has as it
       // was, and adds a new one enumerable; a define sets what its
-      // descriptor says. With no descriptor, the key is data, and the
-      // object's hidden keys tell (see `hidden`).
-      const shownBefore = had && (current === undefined ? node.hidden?.has(prop) !== true : current.enumerable === true);
-      let shown = had ? shownBefore : true;
+      // descriptor says. A symbol key is never held. With no descriptor,
+      // the key is data, and the object's hidden keys tell (see `hidden`).
+      const shownBefore =
+        had && (current === undefined ? node.hidden?.has(prop) !== true : shownKey(prop, current.enumerable === true));
+      let shown = had ? shownBefore : typeof prop !== "symbol";
       if (descriptor !== undefined) {
-        shown = "enumerable" in descriptor ? descriptor.enumerable === true : shownBefore;
+        shown = "enumerable" in descriptor ? shownKey(prop, descriptor.enumerable === true) : shownBefore;
         if (refusedDefine(target, prop, value, descriptor, current)) return false;
       }
 
@@ -339,7 +342,7 @@ function wrapObject<T extends object>(obj: T, node: LocationNode, options?: Reac
       // A hidden key is written and its effects rerun, with no event, so it
       // needs no paths; a key a define hides is deleted from the replica.
       const sent = shown || shownBefore;
-      const located = sent ? locate(node, prop) : unsent();
+      const located = sent ? locate(node, prop) : unsent(node);
       const event: StateEvent | undefined =
         located === undefined
           ? undefined
@@ -368,8 +371,12 @@ function wrapObject<T extends object>(obj: T, node: LocationNode, options?: Reac
 
       // only emit and trigger if the set was successful
       if (result) {
-        // a define may add a hidden key, or show or hide one
-        if (descriptor !== undefined && !(shown && shownBefore)) noteHidden(node, prop, !shown);
+        // a define or a new symbol key may add a hidden key, and a define
+        // may show or hide one: the key was hidden before, and is after,
+        // unless it is shown
+        if ((had && !shownBefore) === shown) noteHidden(node, prop, !shown);
+        // a define with a value makes an accessor data
+        if (current !== undefined && descriptor !== undefined && !("value" in current)) accessorMayBeGone(node);
         // move places before anything can write again (emit may throw)
         if (isObject(oldValue)) detachPlace(oldValue, node, prop);
         if (isObject(value))
@@ -398,9 +405,9 @@ function wrapObject<T extends object>(obj: T, node: LocationNode, options?: Reac
     },
     deleteProperty(target: T, prop: string | symbol): boolean {
       const oldValue = (target as any)[prop];
-      // an own enumerable key, the one a replica holds (see `set`): one
-      // lookup for it, a second only for a hidden key
-      const shown = isEnumerable.call(target, prop);
+      // an own enumerable string key, the one a replica holds (see `set`):
+      // one lookup for it, a second only for a hidden key
+      const shown = shownKey(prop, isEnumerable.call(target, prop));
       const hadProperty = shown || hasOwn.call(target, prop);
       const located = shown ? locate(node, prop) : undefined;
       const event: StateEvent | undefined = located && {
@@ -418,6 +425,7 @@ function wrapObject<T extends object>(obj: T, node: LocationNode, options?: Reac
       // only emit and trigger if the property existed and deletion was successful
       if (hadProperty && result) {
         if (!shown) noteHidden(node, prop, false);
+        accessorMayBeGone(node);
         if (isObject(oldValue)) detachPlace(oldValue, node, prop);
 
         beginWrite();
@@ -472,8 +480,8 @@ function wrapObject<T extends object>(obj: T, node: LocationNode, options?: Reac
       const had = hasOwn.call(target, prop);
       const result = Reflect.defineProperty(target, prop, descriptor);
       if (result) {
-        node.dataOnly = false;
-        noteHidden(node, prop, !isEnumerable.call(target, prop));
+        if (node.dataOnly === true) node.dataOnly = false;
+        noteHidden(node, prop, !shownKey(prop, isEnumerable.call(target, prop)));
         beginWrite();
         try {
           if (!had) triggerKeyChange(target);

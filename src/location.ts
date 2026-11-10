@@ -49,6 +49,7 @@ export const enum ContainerKind {
   Plain = 0,
   Map = 1,
   Set = 2,
+  Array = 3,
 }
 
 export interface LocationRoot {
@@ -134,17 +135,21 @@ export interface LocationNode {
   lostLink: boolean;
   /**
    * The object had no own accessor when its proxy first looked (see
-   * `ownDescriptor`), and no define through the proxy added one since;
-   * undefined before that look.
+   * `ownDescriptor`), and no define through the proxy added one since:
+   * true. False when it has one, null when it has more than 64 keys (a
+   * descriptor per write), undefined before that look. A delete, or a
+   * define that makes an accessor data, of an object with an accessor sets
+   * it back to undefined, so the next write looks again.
    */
-  dataOnly: boolean | undefined;
+  dataOnly: boolean | null | undefined;
   /**
-   * The object's hidden own keys (not enumerable; an array's items and `length`
-   * aside), as the proxy saw them at its first look (see `lookAtKeys`) and
-   * its writes and defines changed them since: null when there is none,
-   * undefined before that look. A replica does not hold a hidden key, so a
-   * place under one leads to no root (see `locate`). A map or a set has
-   * none: its places are its entries.
+   * The object's hidden own keys (not enumerable, or a symbol; an array's
+   * items and `length` aside), as the proxy saw them at its first look (see
+   * `lookAtKeys`) and its writes and defines changed them since: null when
+   * there is none, undefined before that look. A replica holds the
+   * enumerable string keys alone, as JSON does, so it does not hold a hidden
+   * key, and a place under one leads to no root (see `locate`). A map or a
+   * set has none: its places are its entries.
    */
   hidden: Set<PropertyKey> | null | undefined;
   /**
@@ -201,7 +206,13 @@ export function getLocationNode(raw: object): LocationNode | undefined {
 export function ensureLocationNode(raw: object): LocationNode {
   let node = nodes.get(raw);
   if (node === undefined) {
-    const kind = raw instanceof Map ? ContainerKind.Map : raw instanceof Set ? ContainerKind.Set : ContainerKind.Plain;
+    const kind = Array.isArray(raw)
+      ? ContainerKind.Array
+      : raw instanceof Map
+        ? ContainerKind.Map
+        : raw instanceof Set
+          ? ContainerKind.Set
+          : ContainerKind.Plain;
     node = {
       id: ++nodeCount,
       raw,
@@ -215,7 +226,7 @@ export function ensureLocationNode(raw: object): LocationNode {
       relinkedPlaces: 0,
       lostLink: false,
       dataOnly: undefined,
-      hidden: kind === ContainerKind.Plain ? undefined : null,
+      hidden: kind === ContainerKind.Map || kind === ContainerKind.Set ? null : undefined,
       childPlaces: 0,
       walk: 0,
       touched: 0,
@@ -235,7 +246,8 @@ export function ensureLocationNode(raw: object): LocationNode {
  * first looked has none until a define through the proxy adds one, and no
  * descriptor is made per write. An accessor or a hidden key added raw is
  * outside the supported input. An object with more than 64 own keys reads
- * the descriptor at each write.
+ * the descriptor at each write, and so does one with an accessor, until a
+ * delete or a define that makes an accessor data has it look again.
  */
 export function ownDescriptor(target: object, prop: PropertyKey, node: LocationNode): PropertyDescriptor | undefined {
   if (node.dataOnly === undefined) lookAtKeys(node);
@@ -246,14 +258,14 @@ export function ownDescriptor(target: object, prop: PropertyKey, node: LocationN
  * The first look at the own keys of the object of `node` (a plain object or
  * an array): sets `dataOnly` and `hidden`. Up to 64 keys, it reads each
  * key's descriptor; more keys are only asked whether they are enumerable,
- * and the object counts as one with accessors.
+ * and the object reads a descriptor per write (`dataOnly` null).
  */
 function lookAtKeys(node: LocationNode): void {
   const target = node.raw;
   const keys = Reflect.ownKeys(target);
-  const array = Array.isArray(target);
+  const array = node.kind === ContainerKind.Array;
   const small = keys.length <= 64;
-  let dataOnly = small;
+  let dataOnly: boolean | null = small ? true : null;
   let hidden: Set<PropertyKey> | null = null;
   for (let i = 0; i < keys.length; i++) {
     const key = keys[i];
@@ -262,11 +274,29 @@ function lookAtKeys(node: LocationNode): void {
     if (small) {
       const descriptor = Reflect.getOwnPropertyDescriptor(target, key)!;
       if (descriptor.get !== undefined || descriptor.set !== undefined) dataOnly = false;
-      if (!descriptor.enumerable) (hidden ??= new Set()).add(key);
-    } else if (!isEnumerable.call(target, key)) (hidden ??= new Set()).add(key);
+      if (!descriptor.enumerable || typeof key === "symbol") (hidden ??= new Set()).add(key);
+    } else if (typeof key === "symbol" || !isEnumerable.call(target, key)) (hidden ??= new Set()).add(key);
   }
   node.dataOnly = dataOnly;
   node.hidden = hidden;
+}
+
+/**
+ * Does a replica hold an own key `key` with the enumerable flag
+ * `enumerable`? It holds the enumerable string keys, as JSON does. (An
+ * array's index is sent whatever its flags; no caller asks for one.)
+ */
+export function shownKey(key: PropertyKey, enumerable: boolean): boolean {
+  return enumerable && typeof key !== "symbol";
+}
+
+/**
+ * The object of `node` may have lost its last accessor (a delete, or a
+ * define that made one data): its next write looks at its keys again (see
+ * `dataOnly`).
+ */
+export function accessorMayBeGone(node: LocationNode): void {
+  if (node.dataOnly === false) node.dataOnly = undefined;
 }
 
 /**
@@ -276,7 +306,7 @@ function lookAtKeys(node: LocationNode): void {
  */
 export function noteHidden(node: LocationNode, prop: PropertyKey, hidden: boolean): void {
   const keys = node.hidden;
-  if (keys === undefined || (typeof prop === "string" && Array.isArray(node.raw) && arrayIndex(prop) >= 0)) return;
+  if (keys === undefined || (typeof prop === "string" && node.kind === ContainerKind.Array && arrayIndex(prop) >= 0)) return;
   if (hidden) (keys ?? (node.hidden = new Set())).add(prop);
   else if (keys !== null && keys.delete(prop) && keys.size === 0) node.hidden = null;
 }
@@ -286,6 +316,21 @@ function hiddenAt(parent: LocationNode, key: unknown): boolean {
   if (parent.hidden === undefined) lookAtKeys(parent);
   const hidden = parent.hidden;
   return hidden !== null && hidden !== undefined && hidden.has(key as PropertyKey);
+}
+
+/**
+ * Is the place `key` of `parent` one a replica does not follow: a hidden
+ * key of an object or an array (see `hidden`), or an array's name that a
+ * read gives as the raw value (one `parseInt` reads no number from, as the
+ * array's `get` trap decides)? A replica built from JSON has no names, so a
+ * write inside an object such a name holds is sent on its other places
+ * alone. An array's index, a name that reads as an item ("01"), and a map's
+ * or a set's entry are followed.
+ */
+function unsentPlace(parent: LocationNode, key: unknown): boolean {
+  if (typeof key === "number") return false;
+  if (parent.kind === ContainerKind.Array) return typeof key !== "string" || isNaN(parseInt(key, 10)) || hiddenAt(parent, key);
+  return parent.hidden !== null && hiddenAt(parent, key);
 }
 
 /**
@@ -386,11 +431,13 @@ export function forwardsTo(receiver: any, target: object): boolean {
 const MAX_RECEIVER_CHAIN = 64;
 
 /**
- * A write of a hidden key sends nothing, so it looks up no paths (see
- * `locate`). It is still a write: a listener's write counts it.
+ * A write of a hidden key of the object of `node` sends nothing, so it
+ * looks up no paths (see `locate`). It is still a write: a listener's write
+ * counts it, and so does `detachedWrites` when the object left the tree.
  */
-export function unsent(): undefined {
+export function unsent(node: LocationNode): undefined {
   checkListenerWrite();
+  if (!isAttached(node)) proxyStats.detachedWrites++;
   return undefined;
 }
 
@@ -409,7 +456,7 @@ export function replacedInTree(node: LocationNode, oldValue: unknown): unknown {
  */
 export function definedAccessorFlags(node: LocationNode, target: object, prop: PropertyKey, descriptor: PropertyDescriptor): boolean {
   const result = Reflect.defineProperty(target, prop, descriptor);
-  if (result && "enumerable" in descriptor) noteHidden(node, prop, descriptor.enumerable !== true);
+  if (result && "enumerable" in descriptor) noteHidden(node, prop, !shownKey(prop, descriptor.enumerable === true));
   return result;
 }
 
@@ -478,20 +525,21 @@ interface Found {
  * Returns that root and the one path (plus `tail`), null when the chain
  * ends detached, or undefined when the general walk must decide (several
  * places, a root that is also placed, or a long chain). Places that no
- * longer hold the object are dropped on the way. For `events`, a place
- * under a hidden key (an object's, or an array's name; see `hidden`) leads
- * to no root, as the replica has no such key: it is kept, for when the key
- * is shown again.
+ * longer hold the object are dropped on the way. For `events`, a place a
+ * replica does not follow (see `unsentPlace`) leads to no root: the walk
+ * goes on to tell the tree from a detach, and gives false when it reaches
+ * the root. The place is kept, for when its key is shown again.
  */
-function chain(node: LocationNode, tail: PropertyKey | undefined, events: boolean): Target | null | undefined {
+function chain(node: LocationNode, tail: PropertyKey | undefined, events: boolean): Target | null | false | undefined {
   let reversed: string[] | undefined;
+  let unsentAbove = false;
   let current = node;
   for (let steps = 0; steps < FAST_CHAIN_LIMIT; steps++) {
     const places = current.places;
     const root = current.root;
     if (root !== undefined) {
       if (places.length !== 0) return undefined;
-      return { root, paths: [buildPath(root.path, reversed, tail)] };
+      return unsentAbove ? false : { root, paths: [buildPath(root.path, reversed, tail)] };
     }
     if (places.length !== 1) return places.length === 0 ? null : undefined;
     const place = places[0];
@@ -502,8 +550,10 @@ function chain(node: LocationNode, tail: PropertyKey | undefined, events: boolea
       current.places = [];
       return null;
     }
-    if (events && parent.hidden !== null && typeof place.key !== "number" && hiddenAt(parent, place.key)) return null;
-    (reversed ??= []).push(segment(parent, place.key, current.raw));
+    if (!unsentAbove) {
+      if (events && unsentPlace(parent, place.key)) unsentAbove = true;
+      else (reversed ??= []).push(segment(parent, place.key, current.raw));
+    }
     current = parent;
   }
   return undefined;
@@ -521,9 +571,9 @@ interface FindFrame {
  * Every root path of `node`, plus `tail` when given, by the general walk: a
  * path follows places up to a root, and never meets a node twice. Places
  * that no longer hold the object are dropped on the way. With `firstOnly`,
- * stops at the first path found. For `events`, a place under a hidden key
- * leads to no root (see `chain`). The walk keeps its own stack, so any
- * depth fits, and builds each path once.
+ * stops at the first path found. For `events`, a place a replica does not
+ * follow leads to no root (see `chain`). The walk keeps its own stack, so
+ * any depth fits, and builds each path once.
  */
 function findAll(node: LocationNode, tail: PropertyKey | undefined, firstOnly: boolean, events: boolean): Found[] {
   const out: Found[] = [];
@@ -549,7 +599,7 @@ function findAll(node: LocationNode, tail: PropertyKey | undefined, firstOnly: b
         continue;
       }
       if (visiting.has(parent)) continue;
-      if (events && parent.hidden !== null && typeof place.key !== "number" && hiddenAt(parent, place.key)) continue;
+      if (events && unsentPlace(parent, place.key)) continue;
       segments.push(segment(parent, place.key, current.raw));
       const root = parent.root;
       if (root !== undefined && parent.places.length === 0) {
@@ -581,30 +631,36 @@ function buildPath(base: Path, reversed: string[] | undefined, tail: PropertyKey
 
 /**
  * Where an event about `node` (plus `tail`) goes: every current place of the
- * object, under one root. Undefined when the object is detached or that root
- * has no emit function. A place under a hidden key is not one: a write
- * inside an object only hidden keys hold is detached and sends nothing (see
- * `hidden`).
+ * object, under one root. Undefined when the object is detached, when every
+ * place passes a place a replica does not follow (a hidden key, or an
+ * array's name; see `unsentPlace`), or when that root has no emit function.
+ * A write inside an object only such places hold sends nothing.
  *
  * An object under two roots (a replica built on raw objects it shares with
  * its source) emits only to its scope, the root it was first read under, so
- * applying an event to the replica cannot echo back to the source.
+ * applying an event to the replica cannot echo back to the source. The rule
+ * picks among the roots the object has a sent path under: a scope whose
+ * paths all pass a hidden key, like a scope that no longer holds the
+ * object, has none, and the write goes to the other root. That root holds
+ * the object, so its replicas need the write.
  *
- * A write that finds no root is counted in `proxyStats.detachedWrites`.
+ * A write whose object is in no tree is counted in
+ * `proxyStats.detachedWrites`; one that only unsent places hold is in the
+ * tree, and is not.
  */
 export function locate(node: LocationNode, tail?: PropertyKey): Target | undefined {
   checkListenerWrite();
   const single = chain(node, tail, true);
   if (single !== undefined) {
-    if (single === null) {
-      proxyStats.detachedWrites++;
+    if (single === null || single === false) {
+      if (single === null) proxyStats.detachedWrites++;
       return undefined;
     }
     return single.root.emit === undefined ? undefined : single;
   }
   const found = findAll(node, tail, false, true);
   if (found.length === 0) {
-    proxyStats.detachedWrites++;
+    if (!isAttached(node)) proxyStats.detachedWrites++;
     return undefined;
   }
   let root = found[0].root;
@@ -626,8 +682,8 @@ export function locate(node: LocationNode, tail?: PropertyKey): Target | undefin
 
 /**
  * Is the object somewhere under a root (with or without an emit function)?
- * A place under a hidden key counts: the object keeps its places and its
- * proxy there.
+ * A place a replica does not follow (see `unsentPlace`) counts: the object
+ * keeps its places and its proxy there.
  */
 export function isAttached(node: LocationNode): boolean {
   const single = chain(node, undefined, false);
@@ -1022,7 +1078,8 @@ function refuseAccessors(event: StateEvent, removed: boolean, container: object,
     } else if (value instanceof Set) {
       for (const item of Set.prototype.values.call(value)) pending.push(item);
     }
-    const keys = Reflect.ownKeys(value);
+    // a copy has no symbol key (see `fillObject`)
+    const keys = Object.getOwnPropertyNames(value);
     for (let i = 0; i < keys.length; i++) {
       const item = enumerableData(value, keys[i]);
       if (item !== NOT_ENUMERABLE) pending.push(item);

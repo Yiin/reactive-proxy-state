@@ -55,6 +55,9 @@ test("a copy deeper than the levels filled by calls is the same copy", () => {
       copy = event.newValue;
     });
     for (let i = 0; i < depth; i++) copy = copy.child;
+    // a copy has no symbol key, as JSON (3.0.19): compare it with the rest
+    expect(Object.getOwnPropertySymbols(copy)).toEqual([]);
+    delete inner[Symbol.for("s")];
     expect(shape(copy)).toBe(shape(inner));
     // one copy per place, and the cycle comes back to the copy itself
     expect(copy.self).toBe(copy);

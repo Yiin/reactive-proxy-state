@@ -2,6 +2,7 @@ import { expect, test } from "bun:test";
 import * as lib from "../src/index";
 import recorded from "./fixtures/events-3.0.3.json";
 import intended from "./fixtures/events-3.0.4-intended.json";
+import symbolKeys from "./fixtures/events-3.0.19-intended.json";
 import listenerRecorded from "./fixtures/events-listener-writes-3.0.3.json";
 import listenerIntended from "./fixtures/events-listener-writes-3.0.6-intended.json";
 // @ts-expect-error shared JavaScript recorder
@@ -9,7 +10,7 @@ import { recordEvents, recordListenerWrites } from "./event-stream.ops.mjs";
 
 test("events match published 3.0.3 except the recorded dropped-write fixes", async () => {
   const cases: Record<string, string[]> = await recordEvents(lib);
-  const expected: Record<string, string[]> = { ...recorded, ...intended };
+  const expected: Record<string, string[]> = { ...recorded, ...intended, ...symbolKeys };
   expect(Object.keys(cases).sort()).toEqual(Object.keys(expected).sort());
   for (const [name, events] of Object.entries(expected)) {
     expect({ name, events: cases[name] }).toEqual({ name, events });
@@ -17,6 +18,9 @@ test("events match published 3.0.3 except the recorded dropped-write fixes", asy
   const differences = Object.keys(intended);
   expect(differences).toHaveLength(18);
   expect(differences.every(name => name.includes("getOrInsert") || name.endsWith("object: set of a new key to undefined"))).toBe(true);
+  // 3.0.19: a replica holds what JSON holds, so a symbol key sends nothing
+  expect(Object.keys(symbolKeys).sort()).toEqual(["async object: set of a symbol key", "sync object: set of a symbol key"]);
+  for (const events of Object.values(symbolKeys) as string[][]) expect(events.map(event => event.split(" ")[0])).toEqual(['action="replace"']);
 });
 
 test("listeners that write get published 3.0.3's events, except where effects or queued events now wait", () => {

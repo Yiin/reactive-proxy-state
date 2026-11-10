@@ -9,17 +9,17 @@ function createEventCollector(): { events: StateEvent[], emit: EmitFunction } {
 }
 
 describe("Edge Cases", () => {
-  test("reactive handles Symbol properties", () => {
+  test("reactive writes Symbol properties and sends nothing for them, as JSON holds none (3.0.19)", () => {
     const { events, emit } = createEventCollector();
     const sym = Symbol('test');
     const state = reactive({ [sym]: 'value' }, emit);
     
     state[sym] = 'new value';
     
-    expect(events.length).toBe(2);
-    expect(events[1].action).toBe('set');
-    expect(events[1].path).toEqual(['Symbol(test)']);
-    expect(events[1].newValue).toBe('new value');
+    expect(state[sym]).toBe('new value');
+    expect(events.length).toBe(1);
+    expect(events[0].action).toBe('replace');
+    expect(Object.getOwnPropertySymbols(events[0].newValue)).toEqual([]);
   });
 
   test("reactive handles BigInt values", () => {

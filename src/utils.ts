@@ -332,9 +332,11 @@ export const enum Named {
  * wire that keeps identity (structuredClone, an in-process listener) would
  * then hold one object where the source has several places, and apply each
  * per-place event to it again. Cycles are kept. Every own enumerable data
- * property is copied as an own data property (also `__proto__`), and an
- * array's holes stay holes; `named` says which arrays keep their named
- * properties. Levels deeper than `FILL_DEPTH` take no stack frame, so any
+ * property with a string key is copied as an own data property (also
+ * `__proto__`), and an array's holes stay holes; `named` says which arrays
+ * keep their named properties. A symbol key is not copied: a replica holds
+ * what JSON holds, and no event names a symbol key (see `hidden` in
+ * location.ts). Levels deeper than `FILL_DEPTH` take no stack frame, so any
  * depth fits.
  *
  * Throws a `SnapshotLimitError` (a `RangeError`) when the copy would make more than
@@ -526,7 +528,6 @@ function copyLeaf(value: object): object | undefined {
         if (key === '__proto__') setData(copy, key, entry);
         else copy[key] = entry;
     }
-    if (Object.getOwnPropertySymbols(value).length !== 0) return undefined;
     return copy;
 }
 
@@ -580,19 +581,14 @@ function noteFresh(value: object): void {
 }
 
 /**
- * The enumerable string and symbol keys of `array` other than indexes.
- * Indexes come first among string keys. Undefined when no keys remain.
+ * The enumerable string keys of `array` other than indexes. Indexes come
+ * first among string keys. Undefined when no keys remain.
  */
-export function namedKeys(array: object): (string | symbol)[] | undefined {
+export function namedKeys(array: object): string[] | undefined {
     const keys = Object.keys(array);
     let start = keys.length;
     while (start > 0 && arrayIndex(keys[start - 1]) < 0) start--;
-    const symbols = Object.getOwnPropertySymbols(array);
-    let names: (string | symbol)[] | undefined = start === keys.length ? undefined : keys.slice(start);
-    for (let i = 0; i < symbols.length; i++) {
-        if (isEnumerable.call(array, symbols[i])) (names ??= []).push(symbols[i]);
-    }
-    return names;
+    return start === keys.length ? undefined : keys.slice(start);
 }
 
 /**
@@ -735,10 +731,6 @@ function entriesOf(source: any, identity: object): readonly unknown[] {
         for (const entry of Set.prototype.values.call(source)) entries.push(entry);
     }
     for (const key in source) if (hasOwn.call(source, key)) entries.push(source[key]);
-    const symbolKeys = Object.getOwnPropertySymbols(source);
-    for (let i = 0; i < symbolKeys.length; i++) {
-        if (isEnumerable.call(source, symbolKeys[i])) entries.push(source[symbolKeys[i]]);
-    }
     return entries;
 }
 
@@ -909,8 +901,6 @@ function cloneEntry(value: any, depth: number, named: Named): any {
             if (key === '__proto__') setData(copy, key, child);
             else copy[key] = child;
         }
-        const symbolKeys = Object.getOwnPropertySymbols(value);
-        if (symbolKeys.length !== 0) pushed = fillSymbols(value, identity, copy, depth, named, symbolKeys, pushed);
     } else if (kind === Fill.Array) {
         const length = copy.length;
         for (let i = 0; i < length; i++) {
@@ -1013,31 +1003,6 @@ function fillObject(value: any, identity: object, copy: any, depth: number, name
         if (key === '__proto__') setData(copy, key, child);
         else copy[key] = child;
     }
-    const symbolKeys = Object.getOwnPropertySymbols(value);
-    return symbolKeys.length === 0 ? pushed : fillSymbols(value, identity, copy, depth, named, symbolKeys, pushed);
-}
-
-/** The enumerable symbol properties of an object (see `fillObject`). */
-function fillSymbols(
-    value: any,
-    identity: object,
-    copy: any,
-    depth: number,
-    named: Named,
-    symbolKeys: symbol[],
-    pushed: boolean
-): boolean {
-    const below = depth + 1;
-    for (let i = 0; i < symbolKeys.length; i++) {
-        const symbolKey = symbolKeys[i];
-        if (!isEnumerable.call(value, symbolKey)) continue;
-        const child = value[symbolKey];
-        if (child !== null && typeof child === 'object' && !pushed) {
-            pushed = true;
-            enterPath(identity, copy, depth);
-        }
-        copy[symbolKey] = cloneValue(child, below, named);
-    }
     return pushed;
 }
 
@@ -1132,10 +1097,6 @@ function laterTwins(set: Set<unknown>): Set<unknown> {
 function fillCollectionProperties(value: any, copy: object, depth: number, named: Named): void {
     for (const key in value) {
         if (hasOwn.call(value, key)) setData(copy, key, cloneValue(value[key], depth, named));
-    }
-    const symbols = Object.getOwnPropertySymbols(value);
-    for (let i = 0; i < symbols.length; i++) {
-        if (isEnumerable.call(value, symbols[i])) setData(copy, symbols[i], cloneValue(value[symbols[i]], depth, named));
     }
 }
 

@@ -250,7 +250,9 @@ for (const method of ["map", "push", "pop", "shift", "unshift", "splice", "sort"
     Reflect.get(state.list, method);
     armed = true;
     Reflect.set(state.list, method, () => 42);
-    expect(seen).toEqual([42]);
+    // a symbol key sends nothing (3.0.19): the next read sees the replacement
+    if (typeof method === "symbol") expect(Reflect.apply(Reflect.get(state.list, method), state.list, [])).toBe(42);
+    expect(seen).toEqual(typeof method === "symbol" ? [] : [42]);
     Reflect.deleteProperty(state.list, method);
     expect(Reflect.get(state.list, method)).toBeFunction();
   });

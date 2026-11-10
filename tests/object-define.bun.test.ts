@@ -21,11 +21,13 @@ test("an own accessor marks the object as one with accessors, and an accessor de
   expect(node.dataOnly).toBe(false);
   expect([...node.hidden!]).toEqual(["foo"]);
   Object.defineProperty(state.obj, "foo", { value: 3, writable: true, enumerable: true, configurable: true });
-  // the hidden setter became an enumerable key; the object keeps reading descriptors
-  expect(node.dataOnly).toBe(false);
+  // the hidden setter became an enumerable data key: the next write looks at
+  // the keys again, and finds no accessor (3.0.18 review F5)
+  expect(node.dataOnly).toBe(undefined);
   expect(node.hidden).toBe(null);
   state.obj.foo = 4;
   expect(toRaw(state.obj).foo).toBe(4);
+  expect(node.dataOnly).toBe(true);
   // a plain object is marked on its first write; an accessor define marks it as one with accessors
   const plain = reactive({ obj: { a: 1 } }, () => {});
   plain.obj.a = 2;
@@ -42,6 +44,54 @@ test("an own accessor marks the object as one with accessors, and an accessor de
   // flags alone on an accessor show it
   Object.defineProperty(plain.obj, "g", { enumerable: true });
   expect(plainNode.hidden).toBe(null);
+});
+
+// 3.0.18 kept reading a descriptor per write after the last accessor went
+// (3.0.18 review F5). A delete or a define that makes an accessor data has
+// the next write look at the keys once; an object with more than 64 keys
+// reads a descriptor per write and never looks again.
+test("an object whose last accessor went reads no descriptor per write after one look", async () => {
+  const { reactive, toRaw } = await import("../src/index");
+  const { getLocationNode } = await import("../src/location");
+  const { expect } = await import("bun:test");
+  for (const kind of ["object", "array"]) {
+    const raw: any = kind === "object" ? { a: 1 } : Object.assign([1], { name: 0 });
+    Object.defineProperty(raw, "g", { get: () => 1, set: () => {}, enumerable: true, configurable: true });
+    Object.defineProperty(raw, "h", { get: () => 1, set: () => {}, enumerable: true, configurable: true });
+    const state = reactive({ obj: raw }, () => {});
+    const write = () => (kind === "object" ? (state.obj.a = Math.random()) : (state.obj.name = Math.random()));
+    write();
+    const node = getLocationNode(toRaw(state.obj))!;
+    expect(node.dataOnly).toBe(false);
+    // one accessor left: the look finds it and the object keeps reading
+    delete state.obj.g;
+    expect(node.dataOnly).toBe(undefined);
+    write();
+    expect(node.dataOnly).toBe(false);
+    expect(countLooks(write).descriptors).toBe(1);
+    // the last one made data
+    Object.defineProperty(state.obj, "h", { value: 2, writable: true, enumerable: true, configurable: true });
+    expect(node.dataOnly).toBe(undefined);
+    write();
+    expect(node.dataOnly).toBe(true);
+    expect(countLooks(() => { write(); write(); })).toEqual({ descriptors: 0, keyLists: 0 });
+    // a delete on a data-only object changes nothing
+    delete state.obj.h;
+    expect(node.dataOnly).toBe(true);
+  }
+  // more than 64 keys: a descriptor per write, and no look after a delete
+  const big: any = {};
+  for (let i = 0; i < 100; i++) big["k" + i] = i;
+  const state = reactive({ big }, () => {});
+  state.big.k1 = 0;
+  const node = getLocationNode(toRaw(state.big))!;
+  expect(node.dataOnly).toBe(null);
+  expect(countLooks(() => {
+    state.big.extra = 1;
+    delete state.big.extra;
+    state.big.k1 = 2;
+  })).toEqual({ descriptors: 1, keyLists: 0 });
+  expect(node.dataOnly).toBe(null);
 });
 
 /** Counts the descriptor reads and key lists `body` makes. */
