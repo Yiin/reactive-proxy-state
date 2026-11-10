@@ -173,6 +173,189 @@ export function arrayDefineCases(lib) {
     }
   };
 
+  // A write through an inherited setter reruns the readers of its key: the
+  // getter can read what no proxy sees, such as a closure. 3.0.13 reran
+  // them only when the setter wrote through the proxy. No event is sent for
+  // the key, on any route.
+  cases["a write through an inherited setter reruns the readers of its key, on every route"] = () => {
+    let hidden = 1;
+    class Hidden extends Array {
+      get foo() {
+        return hidden;
+      }
+      set foo(value) {
+        hidden = value;
+      }
+    }
+    for (const [name, route] of Object.entries(routes)) {
+      hidden = 1;
+      let seen;
+      const result = record(lib, Hidden.from([1, 2]), ["foo"], (list) => {
+        route(list, "foo", 7);
+        seen = list.foo;
+        // the same value reruns nothing, as for any write
+        route(list, "foo", 7);
+      });
+      assert.deepEqual({ ...result, seen }, { events: [], runs: 2, seen: 7 }, name);
+    }
+  };
+
+  cases["a setter that reads and writes through the proxy reruns each effect once per write"] = () => {
+    class Mirror extends Array {
+      get foo() {
+        return this.bar;
+      }
+      set foo(value) {
+        this.bar = value;
+        this.baz = value;
+      }
+    }
+    for (const [name, route] of Object.entries(routes)) {
+      const result = record(lib, Mirror.from([1]), ["foo", "bar", "baz"], (list) => route(list, "foo", 4));
+      assert.deepEqual(result, { events: ["set list.bar 4", "set list.baz 4"], runs: 2 }, name);
+    }
+    Object.defineProperty(Array.prototype, "hiddenOnArrays", {
+      get() {
+        return 5;
+      },
+      set(value) {
+        this.qux = value;
+      },
+      configurable: true,
+    });
+    try {
+      const result = record(lib, [1], ["hiddenOnArrays", "qux"], (list) => (list.hiddenOnArrays = 3));
+      assert.deepEqual(result, { events: ["set list.qux 3"], runs: 2 });
+    } finally {
+      delete Array.prototype.hiddenOnArrays;
+    }
+  };
+
+  cases["an effect that writes an inherited accessor it reads runs once"] = () => {
+    let hidden = 0;
+    class Hidden extends Array {
+      get foo() {
+        return hidden;
+      }
+      set foo(value) {
+        hidden = value;
+      }
+    }
+    const state = reactive({ list: Hidden.from([1]) }, () => {});
+    const list = state.list;
+    let runs = 0;
+    const stop = watchEffect(() => {
+      runs++;
+      list.foo = list.foo + 1;
+    });
+    assert.deepEqual({ runs, hidden }, { runs: 1, hidden: 1 });
+    list.foo = 10;
+    assert.deepEqual({ runs, hidden }, { runs: 2, hidden: 11 });
+    stop();
+  };
+
+  // `__proto__` is the setter of Object.prototype: it changes the array's
+  // prototype and sends no event, as any inherited setter. A replica cannot
+  // apply a prototype. 3.0.11 and 3.0.12 sent `set list.__proto__`.
+  cases["list.__proto__ = proto changes the array's prototype, sends no event, and reruns its readers"] = () => {
+    const proto = Object.create(Array.prototype, { extra: { value: "from proto" } });
+    let raw;
+    let seen;
+    const result = record(lib, [1, 2], [0, "length"], (list) => {
+      raw = toRaw(list);
+      let runs = 0;
+      const stop = watchEffect(() => {
+        runs++;
+        seen = list.__proto__;
+      });
+      list.__proto__ = proto;
+      assert.equal(runs, 2);
+      stop();
+    });
+    assert.deepEqual(result, { events: [], runs: 1 });
+    assert.equal(seen, proto);
+    assert.equal(Object.getPrototypeOf(raw), proto);
+    assert.equal(raw.extra, "from proto");
+    assert.equal(Object.hasOwn(raw, "__proto__"), false);
+  };
+
+  // A non-extensible array refuses a new key: the define fails, as on a
+  // plain array, and nothing is sent.
+  cases["flags alone on a new key of a non-extensible array fail and send nothing"] = () => {
+    const descriptor = { writable: true, enumerable: true, configurable: true };
+    for (const key of ["4", "bar"]) {
+      let raw;
+      const result = record(lib, Object.preventExtensions([1, 2]), [4, "length", "bar"], (list) => {
+        raw = toRaw(list);
+        assert.equal(Reflect.defineProperty(list, key, descriptor), false);
+        assert.throws(() => Object.defineProperty(list, key, descriptor), TypeError);
+      });
+      assert.deepEqual(result, { events: [], runs: 1 }, key);
+      assert.deepEqual(Object.keys(raw), ["0", "1"], key);
+    }
+  };
+
+  // The effect's own write does not rerun it, on any route.
+  cases["an effect that writes what it reads through an outer proxy runs once per change"] = () => {
+    for (const [name, route] of Object.entries(routes)) {
+      const state = reactive({ list: [1, 2] }, () => {});
+      const list = state.list;
+      let runs = 0;
+      const stop = watchEffect(() => {
+        runs++;
+        route(list, 0, list[0] + list[1]);
+        route(list, "bar", (list.bar ?? 0) + 1);
+      });
+      assert.equal(runs, 1, name);
+      assert.deepEqual([toRaw(list)[0], toRaw(list).bar], [3, 1], name);
+      list[1] = 5;
+      assert.equal(runs, 2, name);
+      assert.deepEqual([toRaw(list)[0], toRaw(list).bar], [8, 2], name);
+      stop();
+    }
+  };
+
+  // The raw array as receiver is a write to the raw array: outside the
+  // proxies, so nothing is sent (3.0.11 sent an event).
+  cases["Reflect.set with the raw array as receiver writes the raw array and sends nothing"] = () => {
+    let raw;
+    const result = record(lib, [1, 2], [0, "length"], (list) => {
+      raw = toRaw(list);
+      assert.equal(Reflect.set(list, 0, 9, raw), true);
+      assert.equal(Reflect.set(list, "length", 3, raw), true);
+    });
+    assert.deepEqual(result, { events: [], runs: 1 });
+    assert.equal(raw[0], 9);
+    assert.equal(raw.length, 3);
+  };
+
+  // A value written through an outer proxy is unwrapped once, where the
+  // write lands, and stored raw. 3.0.13 unwrapped it twice.
+  cases["an outer-proxy write of an array holding proxies stores it raw, unwrapped once"] = () => {
+    const walks = (write) => {
+      const state = reactive({ list: [1], other: [{ n: 1 }, { n: 2 }] }, () => {});
+      let reads = 0;
+      const counter = new Proxy(
+        {},
+        {
+          get(target, key, receiver) {
+            if (key === "__v_isReactive") reads++;
+            return Reflect.get(target, key, receiver);
+          },
+        }
+      );
+      const value = [state.other[0], state.other[1], counter];
+      write(state.list, value);
+      const stored = toRaw(state.list)[0];
+      assert.equal(stored, value);
+      assert.equal(stored[0], toRaw(state.other)[0]);
+      assert.equal(stored[1], toRaw(state.other)[1]);
+      return reads;
+    };
+    const direct = walks((list, value) => (list[0] = value));
+    for (const [name, route] of Object.entries(routes)) assert.equal(walks((list, value) => route(list, 0, value)), direct, name);
+  };
+
   // The read that checks a kept reader is the read the trap returns.
   cases["a getter defined over a function read before runs once per read"] = () => {
     const state = reactive({ list: [1] }, () => {});

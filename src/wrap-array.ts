@@ -189,11 +189,21 @@ const notRead = Symbol("notRead");
  */
 function callsSetter(target: unknown[], prop: string | symbol, node: LocationNode): boolean {
   if (hasOwn.call(target, prop)) return writesThroughSetter(target, prop, node);
+  return inheritedSetter(target, prop);
+}
+
+/** Does a write of `prop`, a key the array does not own, call a setter on its prototype chain? */
+function inheritedSetter(target: unknown[], prop: string | symbol): boolean {
   for (let proto = Object.getPrototypeOf(target); proto !== null; proto = Object.getPrototypeOf(proto)) {
     const descriptor = Reflect.getOwnPropertyDescriptor(proto, prop);
     if (descriptor !== undefined) return descriptor.set !== undefined;
   }
   return false;
+}
+
+/** Is `prop` a name: no index, no numeric-looking key ("1.5", "01"), not `length`? */
+function isName(prop: string | symbol): boolean {
+  return typeof prop === "symbol" || (prop !== "length" && isNaN(parseInt(prop)));
 }
 
 /** What a splice that removes nothing removed. */
@@ -661,12 +671,16 @@ export function wrapArray<T extends any[]>(arr: T, node: LocationNode): T {
     },
     // `descriptor`: the write is `Object.defineProperty` with a value (see below)
     set(target: T, prop: string | symbol, value: any, receiver: any, descriptor?: PropertyDescriptor): boolean {
-      if (isObject(value)) value = unwrapForStore(value);
       // Another receiver (an outer proxy, `Reflect.set` with a receiver, an
       // object that inherits from the proxy) gets the ordinary write. When
       // the write lands on this array, it ends in the `defineProperty` trap
-      // below, which sends the event once. 3.0.12 also sent it here: twice.
-      if (receiver !== proxy) return Reflect.set(target, prop, value, receiver);
+      // below, which unwraps the value and sends the event once. 3.0.12 also
+      // sent it here: twice. A write that calls a setter on the prototype
+      // chain goes on below, as on the proxy, with the receiver as `this`.
+      const foreign = receiver !== proxy;
+      if (foreign && !(isName(prop) && !hasOwn.call(target, prop) && inheritedSetter(target, prop)))
+        return Reflect.set(target, prop, value, receiver);
+      if (isObject(value)) value = unwrapForStore(value);
 
       const oldValue = (target as any)[prop];
 
@@ -689,21 +703,32 @@ export function wrapArray<T extends any[]>(arr: T, node: LocationNode): T {
           : undefined;
 
       const index = arrayIndex(prop);
-      const isNumericIndex =
-        typeof prop === "number" ||
-        index >= 0 ||
-        (typeof prop === "string" && !isNaN(parseInt(prop)));
-      // emit event and trigger effects only if the set was successful and wasn't intercepted by a setter
-      // (unless it's a direct numeric index set, which doesn't have a descriptor.set; `length` never has one)
-      const throughSetter = !isNumericIndex && prop !== "length" && callsSetter(target, prop, node);
-      const emits = descriptor !== undefined || !throughSetter;
+      // only a name can call a setter: an index or `length` is written as data
+      const throughSetter = foreign || (index < 0 && isName(prop) && callsSetter(target, prop, node));
+      if (throughSetter && descriptor === undefined) {
+        // A setter, own or inherited, runs with the proxy (or the other
+        // receiver) as `this`: its own writes send their events, and the
+        // write of its key sends none. An inherited setter also reruns the
+        // readers of its key, as until 3.0.12: its getter can read what no
+        // proxy sees. One batch: an effect that reads the key and what the
+        // setter writes runs once.
+        if (!foreign && hasOwn.call(target, prop)) return Reflect.set(target, prop, value, proxy);
+        beginWrite();
+        try {
+          const result = Reflect.set(target, prop, value, receiver);
+          if (result) trigger(target, prop);
+          return result;
+        } finally {
+          endWrite();
+        }
+      }
       // direct length grow (e.g. arr.length = N) — emit ascending per-index sets
       // instead of a bare length event so the remote fills every index and never
       // ends up with a hole.
       const grows = prop === "length" && Number(value) > Number(oldValue);
 
       // the write does not move `target`, so its paths are known before it
-      const located = emits ? (grows ? locate(node) : locate(node, prop)) : undefined;
+      const located = grows ? locate(node) : locate(node, prop);
       const event: StateEvent | undefined =
         located === undefined || grows
           ? undefined
@@ -717,18 +742,15 @@ export function wrapArray<T extends any[]>(arr: T, node: LocationNode): T {
         copyPayloadReaching(event!, located!, target, after);
       }
       const oldLength = target.length;
-      // A setter, own or inherited, runs with the proxy as `this`. Any other
-      // write goes to the target: through the proxy it would end in the
+      // The write goes to the target: through the proxy it would end in the
       // proxy's `defineProperty` trap. A define keeps its descriptor unless
       // the value was unwrapped.
       const result =
         descriptor !== undefined
           ? Reflect.defineProperty(target, prop, descriptor.value === value ? descriptor : { ...descriptor, value })
-          : throughSetter
-            ? Reflect.set(target, prop, value, proxy)
-            : Reflect.set(target, prop, value);
+          : Reflect.set(target, prop, value);
 
-      if (result && emits) {
+      if (result) {
         // move places before anything can write again (emit may throw)
         if (truncated !== undefined) {
           relinkArray(node, target, target.length, truncated);
