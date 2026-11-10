@@ -143,13 +143,14 @@ export interface LocationNode {
    */
   dataOnly: boolean | null | undefined;
   /**
-   * The object's hidden own keys (not enumerable, or a symbol; an array's
-   * items and `length` aside), as the proxy saw them at its first look (see
+   * The object's hidden own keys (not enumerable; an array's items and
+   * `length` aside), as the proxy saw them at its first look (see
    * `lookAtKeys`) and its writes and defines changed them since: null when
    * there is none, undefined before that look. A replica holds the
    * enumerable string keys alone, as JSON does, so it does not hold a hidden
-   * key, and a place under one leads to no root (see `locate`). A map or a
-   * set has none: its places are its entries.
+   * key, and a place under one leads to no root (see `locate`). A symbol key
+   * is never held either; `locate` and `unsentPlace` tell it by its type. A
+   * map or a set has none: its places are its entries.
    */
   hidden: Set<PropertyKey> | null | undefined;
   /**
@@ -274,29 +275,22 @@ function lookAtKeys(node: LocationNode): void {
     if (small) {
       const descriptor = Reflect.getOwnPropertyDescriptor(target, key)!;
       if (descriptor.get !== undefined || descriptor.set !== undefined) dataOnly = false;
-      if (!descriptor.enumerable || typeof key === "symbol") (hidden ??= new Set()).add(key);
-    } else if (typeof key === "symbol" || !isEnumerable.call(target, key)) (hidden ??= new Set()).add(key);
+      if (!descriptor.enumerable) (hidden ??= new Set()).add(key);
+    } else if (!isEnumerable.call(target, key)) (hidden ??= new Set()).add(key);
   }
   node.dataOnly = dataOnly;
   node.hidden = hidden;
 }
 
 /**
- * Does a replica hold an own key `key` with the enumerable flag
- * `enumerable`? It holds the enumerable string keys, as JSON does. (An
- * array's index is sent whatever its flags; no caller asks for one.)
- */
-export function shownKey(key: PropertyKey, enumerable: boolean): boolean {
-  return enumerable && typeof key !== "symbol";
-}
-
-/**
  * The object of `node` may have lost its last accessor (a delete, or a
- * define that made one data): its next write looks at its keys again (see
- * `dataOnly`).
+ * define with a value or `writable`, which makes an accessor data) when
+ * `result` is true: its next write looks at its keys again (see
+ * `dataOnly`). Gives `result`. Only an object with an accessor looks again.
  */
-export function accessorMayBeGone(node: LocationNode): void {
-  if (node.dataOnly === false) node.dataOnly = undefined;
+export function accessorMayBeGone(node: LocationNode, result: boolean): boolean {
+  if (result && node.dataOnly === false) node.dataOnly = undefined;
+  return result;
 }
 
 /**
@@ -328,8 +322,8 @@ function hiddenAt(parent: LocationNode, key: unknown): boolean {
  * or a set's entry are followed.
  */
 function unsentPlace(parent: LocationNode, key: unknown): boolean {
-  // an object's key is never a number
-  if (parent.kind !== ContainerKind.Array) return parent.hidden !== null && hiddenAt(parent, key);
+  // an object's key is never a number; a symbol key is never followed (see `locate`)
+  if (parent.kind !== ContainerKind.Array) return typeof key === "symbol" || (parent.hidden !== null && hiddenAt(parent, key));
   return typeof key !== "number" && (typeof key !== "string" || isNaN(parseInt(key, 10)) || hiddenAt(parent, key));
 }
 
@@ -473,7 +467,7 @@ export function replacedInTree(node: LocationNode, oldValue: unknown): unknown {
  */
 export function definedAccessorFlags(node: LocationNode, target: object, prop: PropertyKey, descriptor: PropertyDescriptor): boolean {
   const result = Reflect.defineProperty(target, prop, descriptor);
-  if (result && "enumerable" in descriptor) noteHidden(node, prop, !shownKey(prop, descriptor.enumerable === true));
+  if (result && "enumerable" in descriptor) noteHidden(node, prop, descriptor.enumerable !== true);
   return result;
 }
 
@@ -670,9 +664,16 @@ function buildPath(base: Path, reversed: string[] | undefined, tail: PropertyKey
  * A write whose object is in no tree is counted in
  * `proxyStats.detachedWrites`; one that only unsent places hold is in the
  * tree, and is not (see `countUnsent`).
+ *
+ * A symbol `tail` has no event: a replica holds no symbol key. The traps
+ * leave symbol keys to this check, so their common path has none.
  */
 export function locate(node: LocationNode, tail?: PropertyKey): Target | undefined {
   checkListenerWrite();
+  if (typeof tail === "symbol") {
+    countUnsent(node);
+    return undefined;
+  }
   const single = chain(node, tail, true);
   if (single !== undefined) {
     if (single === null) {

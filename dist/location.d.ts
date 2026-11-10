@@ -99,13 +99,14 @@ export interface LocationNode {
      */
     dataOnly: boolean | null | undefined;
     /**
-     * The object's hidden own keys (not enumerable, or a symbol; an array's
-     * items and `length` aside), as the proxy saw them at its first look (see
+     * The object's hidden own keys (not enumerable; an array's items and
+     * `length` aside), as the proxy saw them at its first look (see
      * `lookAtKeys`) and its writes and defines changed them since: null when
      * there is none, undefined before that look. A replica holds the
      * enumerable string keys alone, as JSON does, so it does not hold a hidden
-     * key, and a place under one leads to no root (see `locate`). A map or a
-     * set has none: its places are its entries.
+     * key, and a place under one leads to no root (see `locate`). A symbol key
+     * is never held either; `locate` and `unsentPlace` tell it by its type. A
+     * map or a set has none: its places are its entries.
      */
     hidden: Set<PropertyKey> | null | undefined;
     /**
@@ -150,17 +151,12 @@ export declare function ensureLocationNode(raw: object): LocationNode;
  */
 export declare function ownDescriptor(target: object, prop: PropertyKey, node: LocationNode): PropertyDescriptor | undefined;
 /**
- * Does a replica hold an own key `key` with the enumerable flag
- * `enumerable`? It holds the enumerable string keys, as JSON does. (An
- * array's index is sent whatever its flags; no caller asks for one.)
- */
-export declare function shownKey(key: PropertyKey, enumerable: boolean): boolean;
-/**
  * The object of `node` may have lost its last accessor (a delete, or a
- * define that made one data): its next write looks at its keys again (see
- * `dataOnly`).
+ * define with a value or `writable`, which makes an accessor data) when
+ * `result` is true: its next write looks at its keys again (see
+ * `dataOnly`). Gives `result`. Only an object with an accessor looks again.
  */
-export declare function accessorMayBeGone(node: LocationNode): void;
+export declare function accessorMayBeGone(node: LocationNode, result: boolean): boolean;
 /**
  * A write or define through the proxy left `prop` of the object of `node`
  * hidden, or not: `node.hidden` follows, once the proxy looked (see
@@ -251,6 +247,9 @@ export interface Target {
  * A write whose object is in no tree is counted in
  * `proxyStats.detachedWrites`; one that only unsent places hold is in the
  * tree, and is not (see `countUnsent`).
+ *
+ * A symbol `tail` has no event: a replica holds no symbol key. The traps
+ * leave symbol keys to this check, so their common path has none.
  */
 export declare function locate(node: LocationNode, tail?: PropertyKey): Target | undefined;
 /**

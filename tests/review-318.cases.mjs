@@ -342,19 +342,25 @@ export function review318Cases(lib) {
 
   // F5: 3.0.18 read a descriptor per write after the last accessor went.
   cases["an object whose last accessor went reads no descriptor per write after one look"] = () => {
-    const { state } = setup(lib);
-    Object.defineProperty(state.obj, "g", { get: () => 1, set: () => {}, enumerable: true, configurable: true });
-    state.obj.a = 2;
-    delete state.obj.g;
-    state.obj.a = 3;
-    assert.equal(descriptorReads(() => {
-      state.obj.a = 4;
-      state.obj.a = 5;
-    }), 0);
-    Object.defineProperty(state.obj, "g", { get: () => 1, set: () => {}, enumerable: true, configurable: true });
-    Object.defineProperty(state.obj, "g", { value: 1, writable: true, enumerable: true, configurable: true });
-    state.obj.a = 6;
-    assert.equal(descriptorReads(() => (state.obj.a = 7)), 0);
+    const accessor = { get: () => 1, set: () => {}, enumerable: true, configurable: true };
+    // objects and arrays; the accessor goes by delete, by a define with a value, or by `writable` alone
+    for (const kind of ["object", "array"]) {
+      for (const how of ["delete", "value", "writable"]) {
+        const { state } = setup(lib, { tagged: Object.assign([1], { label: 0 }) });
+        const target = kind === "object" ? state.obj : state.tagged;
+        const key = kind === "object" ? "a" : "label";
+        Object.defineProperty(target, "g", accessor);
+        target[key] = 2;
+        if (how === "delete") delete target.g;
+        else if (how === "value") Object.defineProperty(target, "g", { value: 1, writable: true, enumerable: true, configurable: true });
+        else Object.defineProperty(target, "g", { writable: true });
+        target[key] = 3;
+        assert.equal(descriptorReads(() => {
+          target[key] = 4;
+          target[key] = 5;
+        }), 0, `${kind} ${how}`);
+      }
+    }
   };
 
   // Gaps the review listed: a Map and a Set under a hidden key, a parent
