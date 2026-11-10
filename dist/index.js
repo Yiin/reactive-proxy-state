@@ -4247,6 +4247,19 @@ function wrapObject(obj, node, options) {
   let forwarders;
   let landing;
   let landingProp;
+  let defining;
+  function writeThrough(target, prop, value, receiver) {
+    const previous = landing;
+    const previousProp = landingProp;
+    landing = receiver;
+    landingProp = prop;
+    try {
+      return Reflect.set(target, prop, value, receiver);
+    } finally {
+      landing = previous;
+      landingProp = previousProp;
+    }
+  }
   const handler = {
     get(target, prop, receiver) {
       if (prop === "__v_raw" /* RAW */) {
@@ -4261,21 +4274,14 @@ function wrapObject(obj, node, options) {
         return value;
       return wrapChild(value, node, prop, options);
     },
-    set(target, prop, value, receiver, descriptor) {
+    set(target, prop, value, receiver) {
+      const descriptor = defining;
+      if (descriptor !== undefined)
+        defining = undefined;
       const had = hasOwn.call(target, prop);
       const setter = had && node.dataOnly === true ? undefined : setterOf(target, prop, had, node);
-      if (receiver !== proxy && setter === undefined && !(had && forwarders?.get(receiver)?.has(prop) === true)) {
-        const previous = landing;
-        const previousProp = landingProp;
-        landing = receiver;
-        landingProp = prop;
-        try {
-          return Reflect.set(target, prop, value, receiver);
-        } finally {
-          landing = previous;
-          landingProp = previousProp;
-        }
-      }
+      if (receiver !== proxy && setter === undefined && !(had && forwarders?.get(receiver)?.has(prop) === true))
+        return writeThrough(target, prop, value, receiver);
       if (isObject6(value))
         value = unwrapForStore(value);
       const oldValue = target[prop];
@@ -4375,13 +4381,15 @@ function wrapObject(obj, node, options) {
           }
           landing = undefined;
         }
-        return handler.set(target, prop, descriptor.value, proxy, descriptor);
+        defining = descriptor;
+        return handler.set(target, prop, descriptor.value, proxy);
       }
       if (!("get" in descriptor) && !("set" in descriptor)) {
         const current = Reflect.getOwnPropertyDescriptor(target, prop);
         if (current !== undefined && (("value" in current) || !("writable" in descriptor)))
           return Reflect.defineProperty(target, prop, descriptor);
-        return handler.set(target, prop, undefined, proxy, descriptor);
+        defining = descriptor;
+        return handler.set(target, prop, undefined, proxy);
       }
       const had = hasOwn.call(target, prop);
       const result = Reflect.defineProperty(target, prop, descriptor);

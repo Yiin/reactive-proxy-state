@@ -253,6 +253,23 @@ function wrapObject<T extends object>(obj: T, node: LocationNode, options?: Reac
   let forwarders: WeakMap<object, Set<string | symbol>> | undefined;
   let landing: object | undefined;
   let landingProp: string | symbol | undefined;
+  // The descriptor of a define the `defineProperty` trap hands to `set`,
+  // which takes it at once. A fifth parameter of `set` would cost every
+  // write an arity fixup, which is about as much as the equal-value check.
+  let defining: PropertyDescriptor | undefined;
+  /** The ordinary write of `prop` with `receiver`, as the foreign write in progress. */
+  function writeThrough(target: T, prop: string | symbol, value: unknown, receiver: object): boolean {
+    const previous = landing;
+    const previousProp = landingProp;
+    landing = receiver;
+    landingProp = prop;
+    try {
+      return Reflect.set(target, prop, value, receiver);
+    } finally {
+      landing = previous;
+      landingProp = previousProp;
+    }
+  }
   const handler = {
     get(target: T, prop: string | symbol, receiver: any): any {
       // Special handling for reactive flags
@@ -274,8 +291,10 @@ function wrapObject<T extends object>(obj: T, node: LocationNode, options?: Reac
       // wrap the nested value if it's an object/collection
       return wrapChild(value, node, prop, options);
     },
-    // `descriptor`: the write is `Object.defineProperty` with a value (see below)
-    set(target: T, prop: string | symbol, value: any, receiver: any, descriptor?: PropertyDescriptor): boolean {
+    set(target: T, prop: string | symbol, value: any, receiver: any): boolean {
+      // the write is `Object.defineProperty` with this descriptor (see below)
+      const descriptor = defining;
+      if (descriptor !== undefined) defining = undefined;
       const had = hasOwn.call(target, prop);
       // an own key of an object that has no own accessor is data: no lookup (see `setterOf`)
       const setter = had && node.dataOnly === true ? undefined : setterOf(target, prop, had, node);
@@ -288,18 +307,8 @@ function wrapObject<T extends object>(obj: T, node: LocationNode, options?: Reac
       // A receiver whose write of this own key landed here before as the
       // plain write of a value is not asked again: the write goes on below
       // as the direct one (see `forwarders`).
-      if (receiver !== proxy && setter === undefined && !(had && forwarders?.get(receiver)?.has(prop) === true)) {
-        const previous = landing;
-        const previousProp = landingProp;
-        landing = receiver;
-        landingProp = prop;
-        try {
-          return Reflect.set(target, prop, value, receiver);
-        } finally {
-          landing = previous;
-          landingProp = previousProp;
-        }
-      }
+      if (receiver !== proxy && setter === undefined && !(had && forwarders?.get(receiver)?.has(prop) === true))
+        return writeThrough(target, prop, value, receiver);
 
       // Spreading a reactive proxy (`{ ...proxy }`) embeds proxy wrappers
       // in the plain result — unwrap to prevent unbounded nesting.
@@ -452,7 +461,8 @@ function wrapObject<T extends object>(obj: T, node: LocationNode, options?: Reac
           }
           landing = undefined;
         }
-        return handler.set(target, prop, descriptor.value, proxy, descriptor);
+        defining = descriptor;
+        return handler.set(target, prop, descriptor.value, proxy);
       }
       if (!("get" in descriptor) && !("set" in descriptor)) {
         // new flags alone on a key the object has change no value
@@ -462,7 +472,8 @@ function wrapObject<T extends object>(obj: T, node: LocationNode, options?: Reac
         if (current !== undefined && ("value" in current || !("writable" in descriptor)))
           return Reflect.defineProperty(target, prop, descriptor);
         // a new key, or an accessor made data: a write of `undefined`
-        return handler.set(target, prop, undefined, proxy, descriptor);
+        defining = descriptor;
+        return handler.set(target, prop, undefined, proxy);
       }
       // an accessor: effects rerun, and no event is sent
       // (an accessor added later is outside the supported input, see `setterOf`)
