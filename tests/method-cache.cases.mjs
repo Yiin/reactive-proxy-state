@@ -187,21 +187,29 @@ export function methodCacheCases(lib) {
     const own = function own() {
       return "own";
     };
+    // not enumerable: a hidden name, off the replica, so no event (3.0.17)
     Object.defineProperty(list, "map", { value: own, writable: true, configurable: true });
     assert.equal(list.map(), "own");
     assert.equal(toRaw(list).map, own);
     assert.equal(runs, 2);
-    assert.deepEqual(log, [["set", "list.map", '"function own"']]);
+    assert.deepEqual(log, []);
     delete list.map;
     assert.deepEqual(list.map((x) => x * 2), [2, 4]);
     assert.equal(runs, 3);
+    // enumerable: sent, as the write with `=`
+    Object.defineProperty(list, "map", { value: own, writable: true, enumerable: true, configurable: true });
+    assert.equal(list.map(), "own");
+    assert.deepEqual(log, [["set", "list.map", '"function own"']]);
+    delete list.map;
+    assert.deepEqual(list.map((x) => x * 2), [2, 4]);
+    assert.equal(runs, 5);
     // an accessor: effects rerun and no event is sent
     log.length = 0;
     Object.defineProperty(list, "slice", { get: () => () => "getter", configurable: true });
     assert.equal(list.slice(), "getter");
     Object.defineProperty(list, "map", { get: () => () => "getter", configurable: true });
     assert.equal(list.map(), "getter");
-    assert.equal(runs, 4);
+    assert.equal(runs, 6);
     assert.deepEqual(log, []);
     stop();
   };
