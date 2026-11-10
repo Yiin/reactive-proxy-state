@@ -3133,265 +3133,196 @@ class ArrayProxyIterator {
 }
 Object.setPrototypeOf(ArrayProxyIterator.prototype, Object.getPrototypeOf(Object.getPrototypeOf([][Symbol.iterator]())));
 var defining;
-
-class ArrayHandler {
-  node;
-  proxy;
-  methodCache;
-  otherReaders;
-  constructor(node) {
-    this.node = node;
-    this.proxy = undefined;
-    this.methodCache = newMethodCache();
-    this.otherReaders = undefined;
-  }
-  get(target, prop, receiver) {
-    if (prop === "__v_raw" /* RAW */)
-      return target;
-    if (prop === "__v_isReactive" /* IS_REACTIVE */)
+function arraySet(target, prop, value, receiver) {
+  const descriptor = defining;
+  if (descriptor !== undefined)
+    defining = undefined;
+  const node = this.node;
+  const proxy = this.proxy;
+  const methodCache = this.methodCache;
+  const index = arrayIndex(prop);
+  const named = index < 0 && prop !== "length";
+  const had = named && hasOwn.call(target, prop);
+  const current = had && node.dataOnly !== true ? ownDescriptor(target, prop, node) : undefined;
+  const setter = !named || !isName(prop) ? undefined : had ? current !== undefined && current.set !== undefined ? current : undefined : inheritedSetter(target, prop);
+  const foreign = receiver !== proxy;
+  if (foreign && setter === undefined)
+    return Reflect.set(target, prop, value, receiver);
+  if (isObject3(value))
+    value = unwrapForStore(value);
+  const oldValue = descriptor === undefined || !named ? target[prop] : definedOver(target, prop, had, current);
+  if (setter !== undefined && descriptor === undefined) {
+    const forwards = !foreign || forwardsTo(receiver, target);
+    if (forwards && setter.get !== undefined && (oldValue === value || isObject3(oldValue) && isObject3(value) && deepEqual(oldValue, value)))
       return true;
-    track(target, prop);
-    if (typeof prop === "string") {
-      const first = prop.charCodeAt(0);
-      if (first <= 57 && first >= 48) {
-        const index = arrayIndex(prop);
-        if (index >= 0) {
-          const value2 = Reflect.get(target, prop, receiver);
-          if (!isObject3(value2))
-            return value2;
-          return wrapChild(value2, this.node, index);
-        }
-      } else if (prop === "length") {
-        return Reflect.get(target, prop, receiver);
-      }
-    }
-    const methodCache = this.methodCache;
-    const cached = methodCache[prop];
-    if (cached !== undefined)
-      return cached;
-    let read = notRead;
-    const otherReaders = this.otherReaders;
-    if (otherReaders !== undefined) {
-      const kept = otherReaders.get(prop);
-      if (kept !== undefined) {
-        read = Reflect.get(target, prop, receiver);
-        if (kept[0] === read)
-          return kept[1];
-      }
-    }
-    const made = arrayMethod(this, target, prop);
-    if (made !== undefined)
-      return made;
-    const value = read !== notRead ? read : Reflect.get(target, prop, receiver);
-    const isNumericIndex = typeof prop === "string" && !isNaN(parseInt(prop, 10));
-    if (isNumericIndex) {
-      if (!isObject3(value))
-        return value;
-      return wrapChild(value, this.node, placeKey(prop));
-    }
-    if (typeof value === "function") {
-      if (prop === "constructor" || prop === "valueOf")
-        return value;
-      if (hasOwn.call(Array.prototype, prop) && Array.prototype[prop] === value) {
-        return methodCache[prop] = readerOf(target, value);
-      }
-      const method = readerOf(target, value);
-      (this.otherReaders ??= new Map).set(prop, [value, method]);
-      return method;
-    }
-    return value;
+    return writeThroughSetter(target, prop, value, receiver, forwards, oldValue);
   }
-  set(target, prop, value, receiver) {
-    const descriptor = defining;
-    if (descriptor !== undefined)
-      defining = undefined;
-    const node = this.node;
-    const proxy = this.proxy;
-    const methodCache = this.methodCache;
-    const index = arrayIndex(prop);
-    const named = index < 0 && prop !== "length";
-    const had = named && hasOwn.call(target, prop);
-    const current = had && node.dataOnly !== true ? ownDescriptor(target, prop, node) : undefined;
-    const setter = !named || !isName(prop) ? undefined : had ? current !== undefined && current.set !== undefined ? current : undefined : inheritedSetter(target, prop);
-    const foreign = receiver !== proxy;
-    if (foreign && setter === undefined)
-      return Reflect.set(target, prop, value, receiver);
-    if (isObject3(value))
-      value = unwrapForStore(value);
-    const oldValue = descriptor === undefined || !named ? target[prop] : definedOver(target, prop, had, current);
-    if (setter !== undefined && descriptor === undefined) {
-      const forwards = !foreign || forwardsTo(receiver, target);
-      if (forwards && setter.get !== undefined && (oldValue === value || isObject3(oldValue) && isObject3(value) && deepEqual(oldValue, value)))
-        return true;
-      return writeThroughSetter(target, prop, value, receiver, forwards, oldValue);
-    }
-    const shownBefore = !named || had && (current === undefined ? node.hidden?.has(prop) !== true : current.enumerable === true);
-    let shown = named && had ? shownBefore : true;
-    if (descriptor !== undefined) {
-      if (named)
-        shown = "enumerable" in descriptor ? descriptor.enumerable === true : shownBefore;
-      if (refusedDefine(target, prop, value, descriptor, current))
-        return false;
-    }
-    if ((shown === shownBefore || !had && descriptor === undefined) && (oldValue === value && Reflect.has(target, prop) || isObject3(oldValue) && isObject3(value) && deepEqual(oldValue, value)) && (descriptor === undefined || definesFlagsAlone(target, prop, oldValue, value, descriptor, current)))
-      return descriptor === undefined || Reflect.defineProperty(target, prop, { ...descriptor, value: oldValue });
-    const sameNaN = oldValue !== oldValue && value !== value && Reflect.has(target, prop);
-    const truncated = prop === "length" && Number(value) < target.length ? target.slice(Number(value)) : undefined;
-    const grows = prop === "length" && Number(value) > Number(oldValue);
-    const sent = shown || shownBefore;
-    const located = grows ? locate(node) : sent ? locate(node, prop) : unsent(node);
-    const event = located === undefined || grows ? undefined : shown ? { action: "set", path: located.paths[0], oldValue, newValue: value } : { action: "delete", path: located.paths[0], oldValue };
-    const held = event !== undefined && shown ? heldItems(value, oldValue) : undefined;
-    const copied = copyPayload(event, located, target, held);
-    if (copied === 0 /* Reaches */) {
-      const after = target.slice();
-      if (shown)
-        Reflect.set(after, prop, value);
-      copyPayloadReaching(event, located, target, after);
-    }
-    const oldLength = target.length;
-    const result = descriptor !== undefined ? Reflect.defineProperty(target, prop, descriptor.value === value ? descriptor : { ...descriptor, value }) : Reflect.set(target, prop, value);
-    if (result) {
-      if (descriptor !== undefined && !(shown && shownBefore))
-        noteHidden(node, prop, !shown);
-      if (truncated !== undefined) {
-        relinkArray(node, target, target.length, truncated);
-      } else if (prop !== "length") {
-        const key = placeKey(prop);
-        if (isObject3(oldValue))
-          detachPlace(oldValue, node, key);
-        if (isObject3(value))
-          attachValue(value, node, key, copied === 2 /* Fresh */, sent ? located && oldValue : replacedInTree(node, oldValue), held);
-      }
-      beginWrite();
-      try {
-        const newLength = target.length;
-        if (sameNaN) {} else if (index >= 0) {
-          triggerArray(target, index, index + 1, newLength !== oldLength);
-        } else if (prop === "length") {
-          if (newLength !== oldLength)
-            triggerArray(target, newLength, oldLength, true);
-        } else {
-          if (methodCache[prop] !== undefined)
-            methodCache[prop] = undefined;
-          trigger(target, prop);
-        }
-        if (grows) {
-          if (located !== undefined) {
-            const oldLength2 = Number(oldValue);
-            const newLength2 = Number(value);
-            const events = [];
-            for (let i = oldLength2;i < newLength2; i++) {
-              const index2 = String(i);
-              for (let j = 0;j < located.paths.length; j++) {
-                events.push({ action: "set", path: [...located.paths[j], index2], newValue: undefined });
-              }
-            }
-            if (events.length > 0)
-              deliver(located.root, events);
-          }
-        } else if (event !== undefined) {
-          dispatch(located, event);
-        }
-      } finally {
-        try {
-          if (isObject3(oldValue) && oldValue !== value) {
-            evictDeep(oldValue);
-          }
-          if (truncated !== undefined)
-            evictRemoved(truncated);
-        } finally {
-          endWrite();
-        }
-      }
-    }
-    return result;
+  const shownBefore = !named || had && (current === undefined ? node.hidden?.has(prop) !== true : current.enumerable === true);
+  let shown = named && had ? shownBefore : true;
+  if (descriptor !== undefined) {
+    if (named)
+      shown = "enumerable" in descriptor ? descriptor.enumerable === true : shownBefore;
+    if (refusedDefine(target, prop, value, descriptor, current))
+      return false;
   }
-  deleteProperty(target, prop) {
-    const node = this.node;
-    const methodCache = this.methodCache;
-    const oldValue = target[prop];
-    const enumerable = isEnumerable.call(target, prop);
-    const hadProperty = enumerable || hasOwn.call(target, prop);
-    const located = hadProperty && (enumerable || arrayIndex(prop) >= 0) ? locate(node, prop) : undefined;
-    const event = located && { action: "delete", path: located.paths[0], oldValue };
-    if (copyPayload(event, located, target) === 0 /* Reaches */) {
-      const after = target.slice();
-      Reflect.deleteProperty(after, prop);
-      copyPayloadReaching(event, located, target, after);
-    }
-    const result = Reflect.deleteProperty(target, prop);
-    if (hadProperty && result) {
-      if (!enumerable)
-        noteHidden(node, prop, false);
-      accessorMayBeGone(node, true);
+  if ((shown === shownBefore || !had && descriptor === undefined) && (oldValue === value && Reflect.has(target, prop) || isObject3(oldValue) && isObject3(value) && deepEqual(oldValue, value)) && (descriptor === undefined || definesFlagsAlone(target, prop, oldValue, value, descriptor, current)))
+    return descriptor === undefined || Reflect.defineProperty(target, prop, { ...descriptor, value: oldValue });
+  const sameNaN = oldValue !== oldValue && value !== value && Reflect.has(target, prop);
+  const truncated = prop === "length" && Number(value) < target.length ? target.slice(Number(value)) : undefined;
+  const grows = prop === "length" && Number(value) > Number(oldValue);
+  const sent = shown || shownBefore;
+  const located = grows ? locate(node) : sent ? locate(node, prop) : unsent(node);
+  const event = located === undefined || grows ? undefined : shown ? { action: "set", path: located.paths[0], oldValue, newValue: value } : { action: "delete", path: located.paths[0], oldValue };
+  const held = event !== undefined && shown ? heldItems(value, oldValue) : undefined;
+  const copied = copyPayload(event, located, target, held);
+  if (copied === 0 /* Reaches */) {
+    const after = target.slice();
+    if (shown)
+      Reflect.set(after, prop, value);
+    copyPayloadReaching(event, located, target, after);
+  }
+  const oldLength = target.length;
+  const result = descriptor !== undefined ? Reflect.defineProperty(target, prop, descriptor.value === value ? descriptor : { ...descriptor, value }) : Reflect.set(target, prop, value);
+  if (result) {
+    if (descriptor !== undefined && !(shown && shownBefore))
+      noteHidden(node, prop, !shown);
+    if (truncated !== undefined) {
+      relinkArray(node, target, target.length, truncated);
+    } else if (prop !== "length") {
+      const key = placeKey(prop);
       if (isObject3(oldValue))
-        detachPlace(oldValue, node, placeKey(prop));
-      beginWrite();
-      try {
-        const index = arrayIndex(prop);
-        if (index >= 0)
-          triggerArray(target, index, index + 1, false);
-        else {
-          if (methodCache[prop] !== undefined)
-            methodCache[prop] = undefined;
-          trigger(target, prop);
-        }
-        if (event !== undefined)
-          dispatch(located, event);
-      } finally {
-        try {
-          if (isObject3(oldValue))
-            evictDeep(oldValue);
-        } finally {
-          endWrite();
-        }
+        detachPlace(oldValue, node, key);
+      if (isObject3(value))
+        attachValue(value, node, key, copied === 2 /* Fresh */, sent ? located && oldValue : replacedInTree(node, oldValue), held);
+    }
+    beginWrite();
+    try {
+      const newLength = target.length;
+      if (sameNaN) {} else if (index >= 0) {
+        triggerArray(target, index, index + 1, newLength !== oldLength);
+      } else if (prop === "length") {
+        if (newLength !== oldLength)
+          triggerArray(target, newLength, oldLength, true);
+      } else {
+        if (methodCache[prop] !== undefined)
+          methodCache[prop] = undefined;
+        trigger(target, prop);
       }
-    }
-    return result;
-  }
-  defineProperty(target, prop, descriptor) {
-    const node = this.node;
-    const methodCache = this.methodCache;
-    if ("value" in descriptor) {
-      defining = descriptor;
-      return accessorMayBeGone(node, this.set(target, prop, descriptor.value, this.proxy));
-    }
-    if (!("get" in descriptor) && !("set" in descriptor)) {
-      const current = Reflect.getOwnPropertyDescriptor(target, prop);
-      if (current !== undefined && "value" in current) {
-        if (!("enumerable" in descriptor) || descriptor.enumerable === true === current.enumerable || arrayIndex(prop) >= 0 || prop === "length")
-          return Reflect.defineProperty(target, prop, descriptor);
-        defining = { ...descriptor, value: current.value };
-        return this.set(target, prop, current.value, this.proxy);
-      }
-      if (current !== undefined && !("writable" in descriptor))
-        return definedAccessorFlags(node, target, prop, descriptor);
-      defining = descriptor;
-      return accessorMayBeGone(node, this.set(target, prop, undefined, this.proxy));
-    }
-    const oldLength = target.length;
-    const result = Reflect.defineProperty(target, prop, descriptor);
-    if (result) {
-      if (node.dataOnly === true)
-        node.dataOnly = false;
-      noteHidden(node, prop, !isEnumerable.call(target, prop));
-      beginWrite();
-      try {
-        const index = arrayIndex(prop);
-        if (index >= 0)
-          triggerArray(target, index, index + 1, target.length !== oldLength);
-        else {
-          if (methodCache[prop] !== undefined)
-            methodCache[prop] = undefined;
-          trigger(target, prop);
+      if (grows) {
+        if (located !== undefined) {
+          const oldLength2 = Number(oldValue);
+          const newLength2 = Number(value);
+          const events = [];
+          for (let i = oldLength2;i < newLength2; i++) {
+            const index2 = String(i);
+            for (let j = 0;j < located.paths.length; j++) {
+              events.push({ action: "set", path: [...located.paths[j], index2], newValue: undefined });
+            }
+          }
+          if (events.length > 0)
+            deliver(located.root, events);
         }
+      } else if (event !== undefined) {
+        dispatch(located, event);
+      }
+    } finally {
+      try {
+        if (isObject3(oldValue) && oldValue !== value) {
+          evictDeep(oldValue);
+        }
+        if (truncated !== undefined)
+          evictRemoved(truncated);
       } finally {
         endWrite();
       }
     }
-    return result;
   }
+  return result;
+}
+function arrayDeleteProperty(target, prop) {
+  const node = this.node;
+  const methodCache = this.methodCache;
+  const oldValue = target[prop];
+  const enumerable = isEnumerable.call(target, prop);
+  const hadProperty = enumerable || hasOwn.call(target, prop);
+  const located = hadProperty && (enumerable || arrayIndex(prop) >= 0) ? locate(node, prop) : undefined;
+  const event = located && { action: "delete", path: located.paths[0], oldValue };
+  if (copyPayload(event, located, target) === 0 /* Reaches */) {
+    const after = target.slice();
+    Reflect.deleteProperty(after, prop);
+    copyPayloadReaching(event, located, target, after);
+  }
+  const result = Reflect.deleteProperty(target, prop);
+  if (hadProperty && result) {
+    if (!enumerable)
+      noteHidden(node, prop, false);
+    accessorMayBeGone(node, true);
+    if (isObject3(oldValue))
+      detachPlace(oldValue, node, placeKey(prop));
+    beginWrite();
+    try {
+      const index = arrayIndex(prop);
+      if (index >= 0)
+        triggerArray(target, index, index + 1, false);
+      else {
+        if (methodCache[prop] !== undefined)
+          methodCache[prop] = undefined;
+        trigger(target, prop);
+      }
+      if (event !== undefined)
+        dispatch(located, event);
+    } finally {
+      try {
+        if (isObject3(oldValue))
+          evictDeep(oldValue);
+      } finally {
+        endWrite();
+      }
+    }
+  }
+  return result;
+}
+function arrayDefineProperty(target, prop, descriptor) {
+  const node = this.node;
+  const methodCache = this.methodCache;
+  if ("value" in descriptor) {
+    defining = descriptor;
+    return accessorMayBeGone(node, this.set(target, prop, descriptor.value, this.proxy));
+  }
+  if (!("get" in descriptor) && !("set" in descriptor)) {
+    const current = Reflect.getOwnPropertyDescriptor(target, prop);
+    if (current !== undefined && "value" in current) {
+      if (!("enumerable" in descriptor) || descriptor.enumerable === true === current.enumerable || arrayIndex(prop) >= 0 || prop === "length")
+        return Reflect.defineProperty(target, prop, descriptor);
+      defining = { ...descriptor, value: current.value };
+      return this.set(target, prop, current.value, this.proxy);
+    }
+    if (current !== undefined && !("writable" in descriptor))
+      return definedAccessorFlags(node, target, prop, descriptor);
+    defining = descriptor;
+    return accessorMayBeGone(node, this.set(target, prop, undefined, this.proxy));
+  }
+  const oldLength = target.length;
+  const result = Reflect.defineProperty(target, prop, descriptor);
+  if (result) {
+    if (node.dataOnly === true)
+      node.dataOnly = false;
+    noteHidden(node, prop, !isEnumerable.call(target, prop));
+    beginWrite();
+    try {
+      const index = arrayIndex(prop);
+      if (index >= 0)
+        triggerArray(target, index, index + 1, target.length !== oldLength);
+      else {
+        if (methodCache[prop] !== undefined)
+          methodCache[prop] = undefined;
+        trigger(target, prop);
+      }
+    } finally {
+      endWrite();
+    }
+  }
+  return result;
 }
 function arrayMethod(handler, target, prop) {
   const node = handler.node;
@@ -3711,7 +3642,70 @@ function wrapArray(arr, node) {
     return cachedProxy;
   if (globalSeen.has(arr))
     return globalSeen.get(arr);
-  const handler = new ArrayHandler(node);
+  const methodCache = newMethodCache();
+  let otherReaders;
+  const handler = {
+    get(target, prop, receiver) {
+      if (prop === "__v_raw" /* RAW */)
+        return target;
+      if (prop === "__v_isReactive" /* IS_REACTIVE */)
+        return true;
+      track(target, prop);
+      if (typeof prop === "string") {
+        const first = prop.charCodeAt(0);
+        if (first <= 57 && first >= 48) {
+          const index = arrayIndex(prop);
+          if (index >= 0) {
+            const value2 = Reflect.get(target, prop, receiver);
+            if (!isObject3(value2))
+              return value2;
+            return wrapChild(value2, node, index);
+          }
+        } else if (prop === "length") {
+          return Reflect.get(target, prop, receiver);
+        }
+      }
+      const cached = methodCache[prop];
+      if (cached !== undefined)
+        return cached;
+      let read = notRead;
+      if (otherReaders !== undefined) {
+        const kept = otherReaders.get(prop);
+        if (kept !== undefined) {
+          read = Reflect.get(target, prop, receiver);
+          if (kept[0] === read)
+            return kept[1];
+        }
+      }
+      const made = arrayMethod(handler, target, prop);
+      if (made !== undefined)
+        return made;
+      const value = read !== notRead ? read : Reflect.get(target, prop, receiver);
+      const isNumericIndex = typeof prop === "string" && !isNaN(parseInt(prop, 10));
+      if (isNumericIndex) {
+        if (!isObject3(value))
+          return value;
+        return wrapChild(value, node, placeKey(prop));
+      }
+      if (typeof value === "function") {
+        if (prop === "constructor" || prop === "valueOf")
+          return value;
+        if (hasOwn.call(Array.prototype, prop) && Array.prototype[prop] === value) {
+          return methodCache[prop] = readerOf(target, value);
+        }
+        const method = readerOf(target, value);
+        (otherReaders ??= new Map).set(prop, [value, method]);
+        return method;
+      }
+      return value;
+    },
+    set: arraySet,
+    deleteProperty: arrayDeleteProperty,
+    defineProperty: arrayDefineProperty,
+    node,
+    proxy: undefined,
+    methodCache
+  };
   const proxy = new Proxy(arr, handler);
   handler.proxy = proxy;
   globalSeen.set(arr, proxy);
@@ -4354,180 +4348,176 @@ function createProxy(raw, node, options) {
   return proxy;
 }
 var defining2;
-
-class ObjectHandler {
-  node;
-  options;
-  proxy;
-  constructor(node, options) {
-    this.node = node;
-    this.options = options;
-    this.proxy = undefined;
-  }
-  get(target, prop, receiver) {
-    if (prop === "__v_raw" /* RAW */) {
-      return target;
-    }
-    if (prop === "__v_isReactive" /* IS_REACTIVE */) {
+function objectSet(target, prop, value, receiver) {
+  const descriptor = defining2;
+  if (descriptor !== undefined)
+    defining2 = undefined;
+  const node = this.node;
+  const proxy = this.proxy;
+  const options = this.options;
+  const had = hasOwn.call(target, prop);
+  const current = had && node.dataOnly !== true ? ownDescriptor(target, prop, node) : undefined;
+  const setter = had ? current !== undefined && current.set !== undefined ? current : undefined : inheritedSetter(target, prop);
+  if (receiver !== proxy && setter === undefined)
+    return Reflect.set(target, prop, value, receiver);
+  if (isObject6(value))
+    value = unwrapForStore(value);
+  const oldValue = descriptor === undefined ? target[prop] : definedOver(target, prop, had, current);
+  if (setter !== undefined && descriptor === undefined) {
+    const forwards = receiver === proxy || forwardsTo(receiver, target);
+    if (forwards && setter.get !== undefined && (oldValue === value || !options?.async && isObject6(oldValue) && isObject6(value) && deepEqual(oldValue, value)))
       return true;
-    }
-    const value = Reflect.get(target, prop, receiver);
-    track(target, prop);
-    if (!isObject6(value))
-      return value;
-    return wrapChild(value, this.node, prop, this.options);
+    return writeThroughSetter(target, prop, value, receiver, forwards, oldValue);
   }
-  set(target, prop, value, receiver) {
-    const descriptor = defining2;
-    if (descriptor !== undefined)
-      defining2 = undefined;
-    const node = this.node;
-    const proxy = this.proxy;
-    const options = this.options;
-    const had = hasOwn.call(target, prop);
-    const current = had && node.dataOnly !== true ? ownDescriptor(target, prop, node) : undefined;
-    const setter = had ? current !== undefined && current.set !== undefined ? current : undefined : inheritedSetter(target, prop);
-    if (receiver !== proxy && setter === undefined)
-      return Reflect.set(target, prop, value, receiver);
-    if (isObject6(value))
-      value = unwrapForStore(value);
-    const oldValue = descriptor === undefined ? target[prop] : definedOver(target, prop, had, current);
-    if (setter !== undefined && descriptor === undefined) {
-      const forwards = receiver === proxy || forwardsTo(receiver, target);
-      if (forwards && setter.get !== undefined && (oldValue === value || !options?.async && isObject6(oldValue) && isObject6(value) && deepEqual(oldValue, value)))
-        return true;
-      return writeThroughSetter(target, prop, value, receiver, forwards, oldValue);
-    }
-    const shownBefore = had && (current === undefined ? node.hidden?.has(prop) !== true : current.enumerable === true);
-    let shown = had ? shownBefore : true;
-    if (descriptor !== undefined) {
-      shown = "enumerable" in descriptor ? descriptor.enumerable === true : shownBefore;
-      if (refusedDefine(target, prop, value, descriptor, current))
-        return false;
-    }
-    if (had && (oldValue === value || !options?.async && isObject6(oldValue) && isObject6(value) && deepEqual(oldValue, value)) && (descriptor === undefined || shown === shownBefore && definesFlagsAlone(target, prop, oldValue, value, descriptor, current)))
-      return descriptor === undefined || Reflect.defineProperty(target, prop, { ...descriptor, value: oldValue });
-    const sent = shown || shownBefore;
-    const located = sent ? locate(node, prop) : unsent(node);
-    const event = located === undefined ? undefined : shown ? { action: "set", path: located.paths[0], oldValue, newValue: value } : { action: "delete", path: located.paths[0], oldValue };
-    const held = located && heldItems(value, oldValue);
-    const copied = copyPayload(event, located, target, held);
-    if (copied === 0 /* Reaches */) {
-      const after = shallowCopy(target);
-      if (shown)
-        setData(after, prop, value);
-      else
-        delete after[prop];
-      copyPayloadReaching(event, located, target, after);
-    }
-    const result = descriptor === undefined ? Reflect.set(target, prop, value) : had && current === undefined && valueOnly(descriptor) && Reflect.set(target, prop, value) || Reflect.defineProperty(target, prop, descriptor.value === value ? descriptor : { ...descriptor, value });
-    if (result) {
-      if (descriptor !== undefined && !(shown && shownBefore))
-        noteHidden(node, prop, !shown);
-      if (isObject6(oldValue))
-        detachPlace(oldValue, node, prop);
-      if (isObject6(value))
-        attachValue(value, node, prop, copied === 2 /* Fresh */, sent ? located && oldValue : replacedInTree(node, oldValue), held);
-      beginWrite();
-      try {
-        if (!had && hasOwn.call(target, prop) || shown !== shownBefore)
-          triggerKeyChange(target);
-        else if (oldValue === oldValue || value === value)
-          trigger(target, prop);
-        if (event !== undefined)
-          dispatch(located, event);
-      } finally {
-        try {
-          if (isObject6(oldValue)) {
-            evictDeep(oldValue);
-          }
-        } finally {
-          endWrite();
-        }
-      }
-    }
-    return result;
+  const shownBefore = had && (current === undefined ? node.hidden?.has(prop) !== true : current.enumerable === true);
+  let shown = had ? shownBefore : true;
+  if (descriptor !== undefined) {
+    shown = "enumerable" in descriptor ? descriptor.enumerable === true : shownBefore;
+    if (refusedDefine(target, prop, value, descriptor, current))
+      return false;
   }
-  deleteProperty(target, prop) {
-    const node = this.node;
-    const oldValue = target[prop];
-    const shown = isEnumerable.call(target, prop);
-    const hadProperty = shown || hasOwn.call(target, prop);
-    const located = shown ? locate(node, prop) : undefined;
-    const event = located && {
-      action: "delete",
-      path: located.paths[0],
-      oldValue
-    };
-    if (copyPayload(event, located, target) === 0 /* Reaches */) {
-      const after = shallowCopy(target);
+  if (had && (oldValue === value || !options?.async && isObject6(oldValue) && isObject6(value) && deepEqual(oldValue, value)) && (descriptor === undefined || shown === shownBefore && definesFlagsAlone(target, prop, oldValue, value, descriptor, current)))
+    return descriptor === undefined || Reflect.defineProperty(target, prop, { ...descriptor, value: oldValue });
+  const sent = shown || shownBefore;
+  const located = sent ? locate(node, prop) : unsent(node);
+  const event = located === undefined ? undefined : shown ? { action: "set", path: located.paths[0], oldValue, newValue: value } : { action: "delete", path: located.paths[0], oldValue };
+  const held = located && heldItems(value, oldValue);
+  const copied = copyPayload(event, located, target, held);
+  if (copied === 0 /* Reaches */) {
+    const after = shallowCopy(target);
+    if (shown)
+      setData(after, prop, value);
+    else
       delete after[prop];
-      copyPayloadReaching(event, located, target, after);
-    }
-    const result = Reflect.deleteProperty(target, prop);
-    if (hadProperty && result) {
-      if (!shown)
-        noteHidden(node, prop, false);
-      accessorMayBeGone(node, true);
-      if (isObject6(oldValue))
-        detachPlace(oldValue, node, prop);
-      beginWrite();
-      try {
-        triggerKeyChange(target);
-        if (event !== undefined)
-          dispatch(located, event);
-      } finally {
-        try {
-          if (isObject6(oldValue)) {
-            evictDeep(oldValue);
-          }
-        } finally {
-          endWrite();
-        }
-      }
-    }
-    return result;
+    copyPayloadReaching(event, located, target, after);
   }
-  defineProperty(target, prop, descriptor) {
-    const node = this.node;
-    if ("value" in descriptor) {
-      defining2 = descriptor;
-      return accessorMayBeGone(node, this.set(target, prop, descriptor.value, this.proxy));
-    }
-    if (!("get" in descriptor) && !("set" in descriptor)) {
-      const current = Reflect.getOwnPropertyDescriptor(target, prop);
-      if (current !== undefined && "value" in current) {
-        if (!("enumerable" in descriptor) || descriptor.enumerable === true === current.enumerable)
-          return Reflect.defineProperty(target, prop, descriptor);
-        defining2 = { ...descriptor, value: current.value };
-        return this.set(target, prop, current.value, this.proxy);
-      }
-      if (current !== undefined && !("writable" in descriptor))
-        return definedAccessorFlags(node, target, prop, descriptor);
-      defining2 = descriptor;
-      return accessorMayBeGone(node, this.set(target, prop, undefined, this.proxy));
-    }
-    const had = hasOwn.call(target, prop);
-    const result = Reflect.defineProperty(target, prop, descriptor);
-    if (result) {
-      if (node.dataOnly === true)
-        node.dataOnly = false;
-      noteHidden(node, prop, !isEnumerable.call(target, prop));
-      beginWrite();
+  const result = descriptor === undefined ? Reflect.set(target, prop, value) : had && current === undefined && valueOnly(descriptor) && Reflect.set(target, prop, value) || Reflect.defineProperty(target, prop, descriptor.value === value ? descriptor : { ...descriptor, value });
+  if (result) {
+    if (descriptor !== undefined && !(shown && shownBefore))
+      noteHidden(node, prop, !shown);
+    if (isObject6(oldValue))
+      detachPlace(oldValue, node, prop);
+    if (isObject6(value))
+      attachValue(value, node, prop, copied === 2 /* Fresh */, sent ? located && oldValue : replacedInTree(node, oldValue), held);
+    beginWrite();
+    try {
+      if (!had && hasOwn.call(target, prop) || shown !== shownBefore)
+        triggerKeyChange(target);
+      else if (oldValue === oldValue || value === value)
+        trigger(target, prop);
+      if (event !== undefined)
+        dispatch(located, event);
+    } finally {
       try {
-        if (!had)
-          triggerKeyChange(target);
-        else
-          trigger(target, prop);
+        if (isObject6(oldValue)) {
+          evictDeep(oldValue);
+        }
       } finally {
         endWrite();
       }
     }
-    return result;
   }
+  return result;
+}
+function objectDeleteProperty(target, prop) {
+  const node = this.node;
+  const oldValue = target[prop];
+  const shown = isEnumerable.call(target, prop);
+  const hadProperty = shown || hasOwn.call(target, prop);
+  const located = shown ? locate(node, prop) : undefined;
+  const event = located && {
+    action: "delete",
+    path: located.paths[0],
+    oldValue
+  };
+  if (copyPayload(event, located, target) === 0 /* Reaches */) {
+    const after = shallowCopy(target);
+    delete after[prop];
+    copyPayloadReaching(event, located, target, after);
+  }
+  const result = Reflect.deleteProperty(target, prop);
+  if (hadProperty && result) {
+    if (!shown)
+      noteHidden(node, prop, false);
+    accessorMayBeGone(node, true);
+    if (isObject6(oldValue))
+      detachPlace(oldValue, node, prop);
+    beginWrite();
+    try {
+      triggerKeyChange(target);
+      if (event !== undefined)
+        dispatch(located, event);
+    } finally {
+      try {
+        if (isObject6(oldValue)) {
+          evictDeep(oldValue);
+        }
+      } finally {
+        endWrite();
+      }
+    }
+  }
+  return result;
+}
+function objectDefineProperty(target, prop, descriptor) {
+  const node = this.node;
+  if ("value" in descriptor) {
+    defining2 = descriptor;
+    return accessorMayBeGone(node, this.set(target, prop, descriptor.value, this.proxy));
+  }
+  if (!("get" in descriptor) && !("set" in descriptor)) {
+    const current = Reflect.getOwnPropertyDescriptor(target, prop);
+    if (current !== undefined && "value" in current) {
+      if (!("enumerable" in descriptor) || descriptor.enumerable === true === current.enumerable)
+        return Reflect.defineProperty(target, prop, descriptor);
+      defining2 = { ...descriptor, value: current.value };
+      return this.set(target, prop, current.value, this.proxy);
+    }
+    if (current !== undefined && !("writable" in descriptor))
+      return definedAccessorFlags(node, target, prop, descriptor);
+    defining2 = descriptor;
+    return accessorMayBeGone(node, this.set(target, prop, undefined, this.proxy));
+  }
+  const had = hasOwn.call(target, prop);
+  const result = Reflect.defineProperty(target, prop, descriptor);
+  if (result) {
+    if (node.dataOnly === true)
+      node.dataOnly = false;
+    noteHidden(node, prop, !isEnumerable.call(target, prop));
+    beginWrite();
+    try {
+      if (!had)
+        triggerKeyChange(target);
+      else
+        trigger(target, prop);
+    } finally {
+      endWrite();
+    }
+  }
+  return result;
 }
 function wrapObject(obj, node, options) {
-  const handler = new ObjectHandler(node, options);
+  const handler = {
+    get(target, prop, receiver) {
+      if (prop === "__v_raw" /* RAW */) {
+        return target;
+      }
+      if (prop === "__v_isReactive" /* IS_REACTIVE */) {
+        return true;
+      }
+      const value = Reflect.get(target, prop, receiver);
+      track(target, prop);
+      if (!isObject6(value))
+        return value;
+      return wrapChild(value, node, prop, options);
+    },
+    set: objectSet,
+    deleteProperty: objectDeleteProperty,
+    defineProperty: objectDefineProperty,
+    node,
+    options,
+    proxy: undefined
+  };
   const proxy = new Proxy(obj, handler);
   handler.proxy = proxy;
   globalSeen.set(obj, proxy);

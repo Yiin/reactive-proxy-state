@@ -3,18 +3,17 @@ import { heapStats } from "bun:jsc";
 
 /**
  * What a proxy holds of its own. Until 3.0.19 each object and array proxy
- * had its own handler with four closures; since 3.0.20 the traps are shared
- * and a proxy holds three or four fields. Measured with
+ * had its own handler with four closures; since 3.0.20 the three write
+ * traps are shared and only the read trap is the proxy's own. Measured with
  * `benchmarks/proxy-memory.mjs` on Bun 1.3.9, per item of 200,000:
  *
  * | item        | 3.0.11 | 3.0.19 | 3.0.20 |
  * | ----------- | ------ | ------ | ------ |
- * | {a, b:{c}}  | 1289 B | 1481 B | 1001 B |
- * | {a, b:[c]}  | 1443 B | 1603 B | 1107 B |
+ * | {a, b:{c}}  | 1289 B | 1481 B | 1225 B |
+ * | {a, b:[c]}  | 1443 B | 1603 B | 1395 B |
  *
- * The bounds sit below 3.0.11 and well above 3.0.20, so engine changes do
- * not trip them, and a per-proxy closure (about 60 B a proxy) or a context
- * does.
+ * The bounds sit between 3.0.20 and 3.0.11: one more closure per proxy
+ * (about 60 B, two proxies an item) trips them.
  */
 const lib = await import(process.env.RPS_TEST_BUNDLE ?? "../src/index");
 const { reactive } = lib;
@@ -41,11 +40,11 @@ function bytesPerItem(count: number, make: (i: number) => object, read: (item: a
 describe("the heap a read holds per proxy", () => {
   test("an item with a nested object holds less than in 3.0.11", () => {
     const perItem = bytesPerItem(100_000, (i) => ({ a: i, b: { c: i } }), (item) => item.b.c);
-    expect(perItem).toBeLessThan(1200);
+    expect(perItem).toBeLessThan(1260);
   });
 
   test("an item with a nested array holds less than in 3.0.11", () => {
     const perItem = bytesPerItem(100_000, (i) => ({ a: i, b: [i] }), (item) => item.b[0]);
-    expect(perItem).toBeLessThan(1330);
+    expect(perItem).toBeLessThan(1415);
   });
 });

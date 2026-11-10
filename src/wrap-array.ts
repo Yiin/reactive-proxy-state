@@ -288,368 +288,292 @@ Object.setPrototypeOf(
 let defining: PropertyDescriptor | undefined;
 
 /**
- * The handler of one array proxy. Its traps are shared by every array proxy,
- * and the fields are all a proxy holds of its own (see the object proxy).
+ * The handler of one array proxy: its own read trap, the write traps every
+ * array proxy shares, and what they need (see the object proxy's handler).
  */
-class ArrayHandler<T extends any[]> {
+interface ArrayHandler<T extends any[]> {
+  get(target: T, prop: string | symbol, receiver: any): any;
+  set(this: ArrayHandler<T>, target: T, prop: string | symbol, value: any, receiver: any): boolean;
+  deleteProperty(this: ArrayHandler<T>, target: T, prop: string | symbol): boolean;
+  defineProperty(this: ArrayHandler<T>, target: T, prop: string | symbol, descriptor: PropertyDescriptor): boolean;
   node: LocationNode;
+  /** set right after the proxy is made, before any trap runs */
   proxy: T | undefined;
   /** wrapped methods, made once per proxy */
   methodCache: MethodCache;
-  /** readers of functions that are not Array.prototype's, with their function */
-  otherReaders: Map<string | symbol, [Function, Function]> | undefined;
+}
 
-  constructor(node: LocationNode) {
-    this.node = node;
-    this.proxy = undefined;
-    this.methodCache = newMethodCache();
-    this.otherReaders = undefined;
-  }
+function arraySet<T extends any[]>(this: ArrayHandler<T>, target: T, prop: string | symbol, value: any, receiver: any): boolean {
+  // the write is `Object.defineProperty` with this descriptor (see below)
+  const descriptor = defining;
+  if (descriptor !== undefined) defining = undefined;
+  const node = this.node;
+  const proxy = this.proxy;
+  const methodCache = this.methodCache;
+  const index = arrayIndex(prop);
+  // A name: no index, not `length`. Only a name without digits first
+  // can call a setter ("1.5" and "01" are written as data, as indexes).
+  const named = index < 0 && prop !== "length";
+  const had = named && hasOwn.call(target, prop);
+  // the name's descriptor, unless the array has no accessor (see `ownDescriptor`)
+  const current = had && node.dataOnly !== true ? ownDescriptor(target, prop, node) : undefined;
+  const setter =
+    !named || !isName(prop)
+      ? undefined
+      : had
+        ? current !== undefined && current.set !== undefined ? current : undefined
+        : inheritedSetter(target, prop);
+  // Another receiver (an outer proxy, `Reflect.set` with a receiver, an
+  // object that inherits from the proxy) gets the ordinary write. When
+  // the write lands on this array, it ends in the `defineProperty` trap
+  // below, which unwraps the value and sends the event once. 3.0.12 also
+  // sent it here: twice. A write that calls a setter goes on below, on
+  // every route.
+  const foreign = receiver !== proxy;
+  if (foreign && setter === undefined) return Reflect.set(target, prop, value, receiver);
+  if (isObject(value)) value = unwrapForStore(value);
 
-  get(target: T, prop: string | symbol, receiver: any): any {
-    if (prop === ReactiveFlags.RAW) return target;
-    if (prop === ReactiveFlags.IS_REACTIVE) return true;
+  // A define, like `Object.defineProperty`, calls no getter (see
+  // `definedOver`). An index or `length` is read: an accessor index is
+  // outside the supported input.
+  const oldValue = descriptor === undefined || !named ? (target as any)[prop] : definedOver(target, prop, had, current);
 
-    track(target, prop);
-
-    // Index reads come first: they are the most frequent, and an index
-    // never names a cached method. A key whose first character is no digit
-    // is no index, and this test needs no call: calling `arrayIndex` for
-    // every key made method reads 2.5x slower on Bun.
-    if (typeof prop === "string") {
-      const first = prop.charCodeAt(0);
-      if (first <= 57 && first >= 48) {
-        // an array index ("0", "17"), parsed once
-        const index = arrayIndex(prop);
-        if (index >= 0) {
-          const value = Reflect.get(target, prop, receiver);
-          if (!isObject(value)) return value;
-          // recursively wrap nested structures
-          return wrapChild(value, this.node, index);
-        }
-      } else if (prop === "length") {
-        return Reflect.get(target, prop, receiver);
-      }
-    }
-
-    const methodCache = this.methodCache;
-    const cached = methodCache[prop];
-    if (cached !== undefined) return cached;
-    // a function read before that is not Array.prototype's (see below).
-    // The value read here is the one the tail uses: a getter runs once.
-    let read: unknown = notRead;
-    const otherReaders = this.otherReaders;
-    if (otherReaders !== undefined) {
-      const kept = otherReaders.get(prop);
-      if (kept !== undefined) {
-        read = Reflect.get(target, prop, receiver);
-        if (kept[0] === read) return kept[1];
-      }
-    }
-
-    // the methods that need their own wrapper (see `arrayMethod`)
-    const made = arrayMethod(this, target, prop);
-    if (made !== undefined) return made;
-
-    const value = read !== notRead ? read : Reflect.get(target, prop, receiver);
-
-    // other numeric-looking keys ("1.5", "01") are tracked like indexes
-    const isNumericIndex = typeof prop === "string" && !isNaN(parseInt(prop, 10));
-
-    if (isNumericIndex) {
-      if (!isObject(value)) return value;
-      return wrapChild(value, this.node, placeKey(prop));
-    }
-
-    // functions run on the raw target. The methods left (`map`, `filter`,
-    // `slice`, `join`, `with` and the rest) read the whole array,
-    // and track it when they run, not when they are read: until 3.0.2
-    // `const slice = list.slice` before an effect gave a slice that tracked
-    // nothing. `constructor` is a class, and `valueOf` gives its receiver:
-    // both keep the proxy.
-    if (typeof value === "function") {
-      if (prop === "constructor" || prop === "valueOf") return value;
-      // Array.prototype's own methods, one per proxy: a change to
-      // Array.prototype after a proxy read the method is not seen
-      if (hasOwn.call(Array.prototype, prop) && (Array.prototype as any)[prop] === value) {
-        return (methodCache[prop] = readerOf(target, value));
-      }
-      // any other function (Object.prototype's, a subclass's, the array's
-      // own) is read each time, and its reader is kept while it is the same
-      const method = readerOf(target, value);
-      (this.otherReaders ??= new Map()).set(prop, [value, method]);
-      return method;
-    }
-    return value;
-  }
-
-  set(target: T, prop: string | symbol, value: any, receiver: any): boolean {
-    // the write is `Object.defineProperty` with this descriptor (see below)
-    const descriptor = defining;
-    if (descriptor !== undefined) defining = undefined;
-    const node = this.node;
-    const proxy = this.proxy;
-    const methodCache = this.methodCache;
-    const index = arrayIndex(prop);
-    // A name: no index, not `length`. Only a name without digits first
-    // can call a setter ("1.5" and "01" are written as data, as indexes).
-    const named = index < 0 && prop !== "length";
-    const had = named && hasOwn.call(target, prop);
-    // the name's descriptor, unless the array has no accessor (see `ownDescriptor`)
-    const current = had && node.dataOnly !== true ? ownDescriptor(target, prop, node) : undefined;
-    const setter =
-      !named || !isName(prop)
-        ? undefined
-        : had
-          ? current !== undefined && current.set !== undefined ? current : undefined
-          : inheritedSetter(target, prop);
-    // Another receiver (an outer proxy, `Reflect.set` with a receiver, an
-    // object that inherits from the proxy) gets the ordinary write. When
-    // the write lands on this array, it ends in the `defineProperty` trap
-    // below, which unwraps the value and sends the event once. 3.0.12 also
-    // sent it here: twice. A write that calls a setter goes on below, on
-    // every route.
-    const foreign = receiver !== proxy;
-    if (foreign && setter === undefined) return Reflect.set(target, prop, value, receiver);
-    if (isObject(value)) value = unwrapForStore(value);
-
-    // A define, like `Object.defineProperty`, calls no getter (see
-    // `definedOver`). An index or `length` is read: an accessor index is
-    // outside the supported input.
-    const oldValue = descriptor === undefined || !named ? (target as any)[prop] : definedOver(target, prop, had, current);
-
-    // A define with a value makes the key data: it is written below.
-    if (setter !== undefined && descriptor === undefined) {
-      // The same rule as on an object (see `writeThroughSetter`). A write
-      // that lands on the array changes nothing when the getter already
-      // gives the value; a setter with no getter always runs. A receiver
-      // that does not forward (`Object.create(list)`, the raw array) runs
-      // the setter as on a plain array.
-      const forwards = !foreign || forwardsTo(receiver, target);
-      if (
-        forwards &&
-        setter.get !== undefined &&
-        (oldValue === value || (isObject(oldValue) && isObject(value) && deepEqual(oldValue, value)))
-      )
-        return true;
-      return writeThroughSetter(target, prop, value, receiver, forwards, oldValue);
-    }
-
-    // A replica holds the items and the enumerable string names, as on
-    // an object (see its `set`; `locate` sends nothing for a symbol
-    // name). An item is sent whatever its flags.
-    const shownBefore = !named || (had && (current === undefined ? node.hidden?.has(prop) !== true : current.enumerable === true));
-    let shown = named && had ? shownBefore : true;
-    if (descriptor !== undefined) {
-      if (named) shown = "enumerable" in descriptor ? descriptor.enumerable === true : shownBefore;
-      if (refusedDefine(target, prop, value, descriptor, current)) return false;
-    }
-
-    // avoid unnecessary triggers if value hasn't changed. Reading past the end of an
-    // array also yields undefined, so also require the prop to already exist —
-    // otherwise growing into a brand-new hole with newValue: undefined would be
-    // mistaken for a no-op and silently dropped. A define of the same value
-    // sets its flags alone, unless it shows or hides a name (see `definesFlagsAlone`).
+  // A define with a value makes the key data: it is written below.
+  if (setter !== undefined && descriptor === undefined) {
+    // The same rule as on an object (see `writeThroughSetter`). A write
+    // that lands on the array changes nothing when the getter already
+    // gives the value; a setter with no getter always runs. A receiver
+    // that does not forward (`Object.create(list)`, the raw array) runs
+    // the setter as on a plain array.
+    const forwards = !foreign || forwardsTo(receiver, target);
     if (
-      (shown === shownBefore || (!had && descriptor === undefined)) &&
-      ((oldValue === value && Reflect.has(target, prop)) ||
-        (isObject(oldValue) && isObject(value) && deepEqual(oldValue, value))) &&
-      (descriptor === undefined || definesFlagsAlone(target, prop, oldValue, value, descriptor, current))
+      forwards &&
+      setter.get !== undefined &&
+      (oldValue === value || (isObject(oldValue) && isObject(value) && deepEqual(oldValue, value)))
     )
-      return descriptor === undefined || Reflect.defineProperty(target, prop, { ...descriptor, value: oldValue });
-    // NaN in place of NaN is sent, as until now, but changes nothing an effect reads
-    const sameNaN = oldValue !== oldValue && value !== value && Reflect.has(target, prop);
+      return true;
+    return writeThroughSetter(target, prop, value, receiver, forwards, oldValue);
+  }
 
-    // a shorter length removes the items past it
-    const truncated =
-      prop === "length" && Number(value) < target.length
-        ? target.slice(Number(value))
-        : undefined;
+  // A replica holds the items and the enumerable string names, as on
+  // an object (see its `set`; `locate` sends nothing for a symbol
+  // name). An item is sent whatever its flags.
+  const shownBefore = !named || (had && (current === undefined ? node.hidden?.has(prop) !== true : current.enumerable === true));
+  let shown = named && had ? shownBefore : true;
+  if (descriptor !== undefined) {
+    if (named) shown = "enumerable" in descriptor ? descriptor.enumerable === true : shownBefore;
+    if (refusedDefine(target, prop, value, descriptor, current)) return false;
+  }
 
-    // direct length grow (e.g. arr.length = N) — emit ascending per-index sets
-    // instead of a bare length event so the remote fills every index and never
-    // ends up with a hole.
-    const grows = prop === "length" && Number(value) > Number(oldValue);
+  // avoid unnecessary triggers if value hasn't changed. Reading past the end of an
+  // array also yields undefined, so also require the prop to already exist —
+  // otherwise growing into a brand-new hole with newValue: undefined would be
+  // mistaken for a no-op and silently dropped. A define of the same value
+  // sets its flags alone, unless it shows or hides a name (see `definesFlagsAlone`).
+  if (
+    (shown === shownBefore || (!had && descriptor === undefined)) &&
+    ((oldValue === value && Reflect.has(target, prop)) ||
+      (isObject(oldValue) && isObject(value) && deepEqual(oldValue, value))) &&
+    (descriptor === undefined || definesFlagsAlone(target, prop, oldValue, value, descriptor, current))
+  )
+    return descriptor === undefined || Reflect.defineProperty(target, prop, { ...descriptor, value: oldValue });
+  // NaN in place of NaN is sent, as until now, but changes nothing an effect reads
+  const sameNaN = oldValue !== oldValue && value !== value && Reflect.has(target, prop);
 
-    // the write does not move `target`, so its paths are known before it.
-    // A hidden name is written and its effects rerun, with no event, so
-    // it needs no paths; a name a define hides is deleted from the replica.
-    const sent = shown || shownBefore;
-    const located = grows ? locate(node) : sent ? locate(node, prop) : unsent(node);
-    const event: StateEvent | undefined =
-      located === undefined || grows
-        ? undefined
-        : shown
-          ? { action: "set", path: located.paths[0], oldValue, newValue: value }
-          : { action: "delete", path: located.paths[0], oldValue };
-    const held = event !== undefined && shown ? heldItems(value, oldValue) : undefined;
-    // copies the payload, or throws, before the write
-    const copied = copyPayload(event, located, target, held);
-    if (copied === Copied.Reaches) {
-      const after = target.slice();
-      if (shown) Reflect.set(after, prop, value);
-      copyPayloadReaching(event!, located!, target, after);
+  // a shorter length removes the items past it
+  const truncated =
+    prop === "length" && Number(value) < target.length
+      ? target.slice(Number(value))
+      : undefined;
+
+  // direct length grow (e.g. arr.length = N) — emit ascending per-index sets
+  // instead of a bare length event so the remote fills every index and never
+  // ends up with a hole.
+  const grows = prop === "length" && Number(value) > Number(oldValue);
+
+  // the write does not move `target`, so its paths are known before it.
+  // A hidden name is written and its effects rerun, with no event, so
+  // it needs no paths; a name a define hides is deleted from the replica.
+  const sent = shown || shownBefore;
+  const located = grows ? locate(node) : sent ? locate(node, prop) : unsent(node);
+  const event: StateEvent | undefined =
+    located === undefined || grows
+      ? undefined
+      : shown
+        ? { action: "set", path: located.paths[0], oldValue, newValue: value }
+        : { action: "delete", path: located.paths[0], oldValue };
+  const held = event !== undefined && shown ? heldItems(value, oldValue) : undefined;
+  // copies the payload, or throws, before the write
+  const copied = copyPayload(event, located, target, held);
+  if (copied === Copied.Reaches) {
+    const after = target.slice();
+    if (shown) Reflect.set(after, prop, value);
+    copyPayloadReaching(event!, located!, target, after);
+  }
+  const oldLength = target.length;
+  // The write goes to the target: through the proxy it would end in the
+  // proxy's `defineProperty` trap. A define keeps its descriptor unless
+  // the value was unwrapped.
+  const result =
+    descriptor !== undefined
+      ? Reflect.defineProperty(target, prop, descriptor.value === value ? descriptor : { ...descriptor, value })
+      : Reflect.set(target, prop, value);
+
+  if (result) {
+    // a define may add a hidden name, or show or hide one
+    if (descriptor !== undefined && !(shown && shownBefore)) noteHidden(node, prop, !shown);
+    // move places before anything can write again (emit may throw)
+    if (truncated !== undefined) {
+      relinkArray(node, target, target.length, truncated);
+    } else if (prop !== "length") {
+      const key = placeKey(prop);
+      if (isObject(oldValue)) detachPlace(oldValue, node, key);
+      if (isObject(value))
+        attachValue(value, node, key, copied === Copied.Fresh, sent ? located && oldValue : replacedInTree(node, oldValue), held);
     }
-    const oldLength = target.length;
-    // The write goes to the target: through the proxy it would end in the
-    // proxy's `defineProperty` trap. A define keeps its descriptor unless
-    // the value was unwrapped.
-    const result =
-      descriptor !== undefined
-        ? Reflect.defineProperty(target, prop, descriptor.value === value ? descriptor : { ...descriptor, value })
-        : Reflect.set(target, prop, value);
 
-    if (result) {
-      // a define may add a hidden name, or show or hide one
-      if (descriptor !== undefined && !(shown && shownBefore)) noteHidden(node, prop, !shown);
-      // move places before anything can write again (emit may throw)
-      if (truncated !== undefined) {
-        relinkArray(node, target, target.length, truncated);
-      } else if (prop !== "length") {
-        const key = placeKey(prop);
-        if (isObject(oldValue)) detachPlace(oldValue, node, key);
-        if (isObject(value))
-          attachValue(value, node, key, copied === Copied.Fresh, sent ? located && oldValue : replacedInTree(node, oldValue), held);
+    beginWrite();
+    try {
+      const newLength = target.length;
+      if (sameNaN) {
+        // nothing to trigger
+      } else if (index >= 0) {
+        // a write past the end makes the array longer
+        triggerArray(target, index, index + 1, newLength !== oldLength);
+      } else if (prop === "length") {
+        // a shorter length removes the indexes past it
+        if (newLength !== oldLength) triggerArray(target, newLength, oldLength, true);
+      } else {
+        // an own function in place of an array method is read from now on
+        if (methodCache[prop] !== undefined) methodCache[prop] = undefined;
+        trigger(target, prop);
       }
-
-      beginWrite();
-      try {
-        const newLength = target.length;
-        if (sameNaN) {
-          // nothing to trigger
-        } else if (index >= 0) {
-          // a write past the end makes the array longer
-          triggerArray(target, index, index + 1, newLength !== oldLength);
-        } else if (prop === "length") {
-          // a shorter length removes the indexes past it
-          if (newLength !== oldLength) triggerArray(target, newLength, oldLength, true);
-        } else {
-          // an own function in place of an array method is read from now on
-          if (methodCache[prop] !== undefined) methodCache[prop] = undefined;
-          trigger(target, prop);
-        }
-        if (grows) {
-          if (located !== undefined) {
-            // one event per new index and place, delivered as one write
-            const oldLength = Number(oldValue);
-            const newLength = Number(value);
-            const events: StateEvent[] = [];
-            for (let i = oldLength; i < newLength; i++) {
-              const index = String(i);
-              for (let j = 0; j < located.paths.length; j++) {
-                events.push({ action: "set", path: [...located.paths[j], index], newValue: undefined });
-              }
+      if (grows) {
+        if (located !== undefined) {
+          // one event per new index and place, delivered as one write
+          const oldLength = Number(oldValue);
+          const newLength = Number(value);
+          const events: StateEvent[] = [];
+          for (let i = oldLength; i < newLength; i++) {
+            const index = String(i);
+            for (let j = 0; j < located.paths.length; j++) {
+              events.push({ action: "set", path: [...located.paths[j], index], newValue: undefined });
             }
-            if (events.length > 0) deliver(located.root, events);
           }
-        } else if (event !== undefined) {
-          dispatch(located!, event);
+          if (events.length > 0) deliver(located.root, events);
         }
-      } finally {
-        try {
-          if (isObject(oldValue) && oldValue !== value) {
-            evictDeep(oldValue);
-          }
-          if (truncated !== undefined) evictRemoved(truncated);
-        } finally {
-          endWrite();
-        }
+      } else if (event !== undefined) {
+        dispatch(located!, event);
       }
-    }
-    return result;
-  }
-
-  deleteProperty(target: T, prop: string | symbol): boolean {
-    const node = this.node;
-    const methodCache = this.methodCache;
-    const oldValue = (target as any)[prop];
-    // an own enumerable key, or an index: what a replica holds (see `set`)
-    const enumerable = isEnumerable.call(target, prop);
-    const hadProperty = enumerable || hasOwn.call(target, prop);
-    const located = hadProperty && (enumerable || arrayIndex(prop) >= 0) ? locate(node, prop) : undefined;
-    const event: StateEvent | undefined = located && { action: "delete", path: located.paths[0], oldValue };
-    if (copyPayload(event, located, target) === Copied.Reaches) {
-      const after = target.slice();
-      Reflect.deleteProperty(after, prop);
-      copyPayloadReaching(event!, located!, target, after);
-    }
-    const result = Reflect.deleteProperty(target, prop);
-
-    if (hadProperty && result) {
-      if (!enumerable) noteHidden(node, prop, false);
-      accessorMayBeGone(node, true);
-      if (isObject(oldValue)) detachPlace(oldValue, node, placeKey(prop));
-      beginWrite();
+    } finally {
       try {
-        const index = arrayIndex(prop);
-        if (index >= 0) triggerArray(target, index, index + 1, false);
-        else {
-          if (methodCache[prop] !== undefined) methodCache[prop] = undefined;
-          trigger(target, prop);
+        if (isObject(oldValue) && oldValue !== value) {
+          evictDeep(oldValue);
         }
-        if (event !== undefined) dispatch(located!, event);
-      } finally {
-        try {
-          if (isObject(oldValue)) evictDeep(oldValue);
-        } finally {
-          endWrite();
-        }
-      }
-    }
-    return result;
-  }
-
-  defineProperty(target: T, prop: string | symbol, descriptor: PropertyDescriptor): boolean {
-    const node = this.node;
-    const methodCache = this.methodCache;
-    // a value is written as `set` writes it: the same event, and the same effects rerun
-    if ("value" in descriptor) {
-      defining = descriptor;
-      return accessorMayBeGone(node, this.set(target, prop, descriptor.value, this.proxy));
-    }
-    if (!("get" in descriptor) && !("set" in descriptor)) {
-      // new flags alone on a key the array has change no value
-      // (`Object.freeze` ends here for each key), unless `writable` makes
-      // an accessor a data property, or `enumerable` shows or hides a
-      // name: then it is the define of the value it holds
-      const current = Reflect.getOwnPropertyDescriptor(target, prop);
-      if (current !== undefined && "value" in current) {
-        if (
-          !("enumerable" in descriptor) ||
-          (descriptor.enumerable === true) === current.enumerable ||
-          arrayIndex(prop) >= 0 ||
-          prop === "length"
-        )
-          return Reflect.defineProperty(target, prop, descriptor);
-        defining = { ...descriptor, value: current.value };
-        return this.set(target, prop, current.value, this.proxy);
-      }
-      if (current !== undefined && !("writable" in descriptor)) return definedAccessorFlags(node, target, prop, descriptor);
-      // a new key, or an accessor made data: a write of `undefined`
-      defining = descriptor;
-      return accessorMayBeGone(node, this.set(target, prop, undefined, this.proxy));
-    }
-    // an accessor: effects rerun, and no event is sent
-    // (an accessor added later is outside the supported input, see `ownDescriptor`)
-    const oldLength = target.length;
-    const result = Reflect.defineProperty(target, prop, descriptor);
-    if (result) {
-      if (node.dataOnly === true) node.dataOnly = false;
-      noteHidden(node, prop, !isEnumerable.call(target, prop));
-      beginWrite();
-      try {
-        const index = arrayIndex(prop);
-        if (index >= 0) triggerArray(target, index, index + 1, target.length !== oldLength);
-        else {
-          if (methodCache[prop] !== undefined) methodCache[prop] = undefined;
-          trigger(target, prop);
-        }
+        if (truncated !== undefined) evictRemoved(truncated);
       } finally {
         endWrite();
       }
     }
-    return result;
   }
+  return result;
+}
+
+function arrayDeleteProperty<T extends any[]>(this: ArrayHandler<T>, target: T, prop: string | symbol): boolean {
+  const node = this.node;
+  const methodCache = this.methodCache;
+  const oldValue = (target as any)[prop];
+  // an own enumerable key, or an index: what a replica holds (see `set`)
+  const enumerable = isEnumerable.call(target, prop);
+  const hadProperty = enumerable || hasOwn.call(target, prop);
+  const located = hadProperty && (enumerable || arrayIndex(prop) >= 0) ? locate(node, prop) : undefined;
+  const event: StateEvent | undefined = located && { action: "delete", path: located.paths[0], oldValue };
+  if (copyPayload(event, located, target) === Copied.Reaches) {
+    const after = target.slice();
+    Reflect.deleteProperty(after, prop);
+    copyPayloadReaching(event!, located!, target, after);
+  }
+  const result = Reflect.deleteProperty(target, prop);
+
+  if (hadProperty && result) {
+    if (!enumerable) noteHidden(node, prop, false);
+    accessorMayBeGone(node, true);
+    if (isObject(oldValue)) detachPlace(oldValue, node, placeKey(prop));
+    beginWrite();
+    try {
+      const index = arrayIndex(prop);
+      if (index >= 0) triggerArray(target, index, index + 1, false);
+      else {
+        if (methodCache[prop] !== undefined) methodCache[prop] = undefined;
+        trigger(target, prop);
+      }
+      if (event !== undefined) dispatch(located!, event);
+    } finally {
+      try {
+        if (isObject(oldValue)) evictDeep(oldValue);
+      } finally {
+        endWrite();
+      }
+    }
+  }
+  return result;
+}
+
+function arrayDefineProperty<T extends any[]>(
+  this: ArrayHandler<T>,
+  target: T,
+  prop: string | symbol,
+  descriptor: PropertyDescriptor
+): boolean {
+  const node = this.node;
+  const methodCache = this.methodCache;
+  // a value is written as `set` writes it: the same event, and the same effects rerun
+  if ("value" in descriptor) {
+    defining = descriptor;
+    return accessorMayBeGone(node, this.set(target, prop, descriptor.value, this.proxy));
+  }
+  if (!("get" in descriptor) && !("set" in descriptor)) {
+    // new flags alone on a key the array has change no value
+    // (`Object.freeze` ends here for each key), unless `writable` makes
+    // an accessor a data property, or `enumerable` shows or hides a
+    // name: then it is the define of the value it holds
+    const current = Reflect.getOwnPropertyDescriptor(target, prop);
+    if (current !== undefined && "value" in current) {
+      if (
+        !("enumerable" in descriptor) ||
+        (descriptor.enumerable === true) === current.enumerable ||
+        arrayIndex(prop) >= 0 ||
+        prop === "length"
+      )
+        return Reflect.defineProperty(target, prop, descriptor);
+      defining = { ...descriptor, value: current.value };
+      return this.set(target, prop, current.value, this.proxy);
+    }
+    if (current !== undefined && !("writable" in descriptor)) return definedAccessorFlags(node, target, prop, descriptor);
+    // a new key, or an accessor made data: a write of `undefined`
+    defining = descriptor;
+    return accessorMayBeGone(node, this.set(target, prop, undefined, this.proxy));
+  }
+  // an accessor: effects rerun, and no event is sent
+  // (an accessor added later is outside the supported input, see `ownDescriptor`)
+  const oldLength = target.length;
+  const result = Reflect.defineProperty(target, prop, descriptor);
+  if (result) {
+    if (node.dataOnly === true) node.dataOnly = false;
+    noteHidden(node, prop, !isEnumerable.call(target, prop));
+    beginWrite();
+    try {
+      const index = arrayIndex(prop);
+      if (index >= 0) triggerArray(target, index, index + 1, target.length !== oldLength);
+      else {
+        if (methodCache[prop] !== undefined) methodCache[prop] = undefined;
+        trigger(target, prop);
+      }
+    } finally {
+      endWrite();
+    }
+  }
+  return result;
 }
 
 /**
@@ -974,7 +898,91 @@ export function wrapArray<T extends any[]>(arr: T, node: LocationNode): T {
   if (cachedProxy) return cachedProxy as T;
   if (globalSeen.has(arr)) return globalSeen.get(arr);
 
-  const handler = new ArrayHandler<T>(node);
+  const methodCache = newMethodCache();
+  // readers of functions that are not Array.prototype's, with their function
+  let otherReaders: Map<string | symbol, [Function, Function]> | undefined;
+  const handler: ArrayHandler<T> = {
+    get(target: T, prop: string | symbol, receiver: any): any {
+      if (prop === ReactiveFlags.RAW) return target;
+      if (prop === ReactiveFlags.IS_REACTIVE) return true;
+
+      track(target, prop);
+
+      // Index reads come first: they are the most frequent, and an index
+      // never names a cached method. A key whose first character is no digit
+      // is no index, and this test needs no call: calling `arrayIndex` for
+      // every key made method reads 2.5x slower on Bun.
+      if (typeof prop === "string") {
+        const first = prop.charCodeAt(0);
+        if (first <= 57 && first >= 48) {
+          // an array index ("0", "17"), parsed once
+          const index = arrayIndex(prop);
+          if (index >= 0) {
+            const value = Reflect.get(target, prop, receiver);
+            if (!isObject(value)) return value;
+            // recursively wrap nested structures
+            return wrapChild(value, node, index);
+          }
+        } else if (prop === "length") {
+          return Reflect.get(target, prop, receiver);
+        }
+      }
+
+      const cached = methodCache[prop];
+      if (cached !== undefined) return cached;
+      // a function read before that is not Array.prototype's (see below).
+      // The value read here is the one the tail uses: a getter runs once.
+      let read: unknown = notRead;
+      if (otherReaders !== undefined) {
+        const kept = otherReaders.get(prop);
+        if (kept !== undefined) {
+          read = Reflect.get(target, prop, receiver);
+          if (kept[0] === read) return kept[1];
+        }
+      }
+
+      // the methods that need their own wrapper (see `arrayMethod`)
+      const made = arrayMethod(handler, target, prop);
+      if (made !== undefined) return made;
+
+      const value = read !== notRead ? read : Reflect.get(target, prop, receiver);
+
+      // other numeric-looking keys ("1.5", "01") are tracked like indexes
+      const isNumericIndex = typeof prop === "string" && !isNaN(parseInt(prop, 10));
+
+      if (isNumericIndex) {
+        if (!isObject(value)) return value;
+        return wrapChild(value, node, placeKey(prop));
+      }
+
+      // functions run on the raw target. The methods left (`map`, `filter`,
+      // `slice`, `join`, `with` and the rest) read the whole array,
+      // and track it when they run, not when they are read: until 3.0.2
+      // `const slice = list.slice` before an effect gave a slice that tracked
+      // nothing. `constructor` is a class, and `valueOf` gives its receiver:
+      // both keep the proxy.
+      if (typeof value === "function") {
+        if (prop === "constructor" || prop === "valueOf") return value;
+        // Array.prototype's own methods, one per proxy: a change to
+        // Array.prototype after a proxy read the method is not seen
+        if (hasOwn.call(Array.prototype, prop) && (Array.prototype as any)[prop] === value) {
+          return (methodCache[prop] = readerOf(target, value));
+        }
+        // any other function (Object.prototype's, a subclass's, the array's
+        // own) is read each time, and its reader is kept while it is the same
+        const method = readerOf(target, value);
+        (otherReaders ??= new Map()).set(prop, [value, method]);
+        return method;
+      }
+      return value;
+    },
+    set: arraySet,
+    deleteProperty: arrayDeleteProperty,
+    defineProperty: arrayDefineProperty,
+    node,
+    proxy: undefined,
+    methodCache,
+  };
   const proxy: T = new Proxy(arr, handler);
   handler.proxy = proxy;
 

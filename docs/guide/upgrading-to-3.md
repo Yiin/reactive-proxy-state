@@ -393,17 +393,19 @@ Every other write sends the same events as in 3.0.18.
 
 ## 3.0.20: proxies hold less memory
 
-Every object proxy now shares one set of traps, and so does every array proxy.
-A proxy keeps only its own fields: where its object sits, its options and itself.
-Until 3.0.19 each proxy had its own handler with four functions, about 300 bytes more on Node.
+Every object proxy now shares its write traps (`set`, `deleteProperty`, `defineProperty`) with the other object proxies, and every array proxy with the other array proxies.
+A proxy keeps its own read trap and a few fields: where its object sits, its options and itself.
+Until 3.0.19 each proxy had its own copy of all four traps.
 
-Reading 200,000 items of `{ a, b: { c } }` keeps this much heap per item:
+Reading 200,000 items through a root keeps this much heap per item:
 
-| Runtime     | 3.0.11  | 3.0.19  | 3.0.20  |
-| ----------- | ------- | ------- | ------- |
-| Node 26     | 1,651 B | 1,843 B | 1,235 B |
-| Bun 1.3.9   | 1,289 B | 1,481 B | 1,001 B |
+| Item              | Runtime   | 3.0.11  | 3.0.19  | 3.0.20  |
+| ----------------- | --------- | ------- | ------- | ------- |
+| `{ a, b: { c } }` | Node 26   | 1,651 B | 1,843 B | 1,507 B |
+| `{ a, b: { c } }` | Bun 1.3.9 | 1,289 B | 1,481 B | 1,225 B |
+| `{ a, b: [c] }`   | Node 26   | 1,725 B | 1,917 B | 1,589 B |
+| `{ a, b: [c] }`   | Bun 1.3.9 | 1,443 B | 1,603 B | 1,395 B |
 
-`benchmarks/proxy-memory.mjs` measures it; pass `array` to measure `{ a, b: [c] }` items.
+`benchmarks/proxy-memory.mjs` measures it.
 
 Events, effects and every other behaviour are the same as in 3.0.19.
