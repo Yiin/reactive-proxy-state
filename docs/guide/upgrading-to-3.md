@@ -264,7 +264,8 @@ In 3.0.13, a setter that wrote two keys reran a reader of both twice.
 
 A write through another receiver, such as an outer proxy, that calls a setter of the array now acts as the same write on the proxy.
 When the getter already gives the value, the setter does not run.
-3.0.13 ran an own setter for such a write, so a write of `undefined` to a key the setter creates sent an event that the direct write did not send.
+3.0.13 ran the setter, own or inherited, for such a write, so it could send events that the direct write did not send.
+For example, a setter that also writes a key its getter does not read sent that write.
 
 `list.__proto__ = proto` runs the `__proto__` setter of `Object.prototype`.
 Since 3.0.13 it changes the array's prototype and sends no event, because a replica cannot apply a prototype.
@@ -277,3 +278,38 @@ Since 3.0.13 it changes the array and sends nothing, as a write through `toRaw()
 
 A value written through an outer proxy is unwrapped once, where the write lands.
 3.0.13 unwrapped it twice, which walked an array value's items twice.
+
+## 3.0.15: one rule for every setter
+
+A setter now acts the same wherever it is: on the array or object itself, or on its prototype chain, such as a class setter.
+A write through it runs the setter with the proxy as `this`, and the setter's writes send their events.
+The write of the setter's key sends no event.
+The setter's writes and the rerun of the effects that read its key make one batch.
+
+An own setter now reruns the effects that read its key.
+3.0.14 did not, so an effect that read an own accessor backed by a closure kept the old value.
+An effect that read two keys an own setter wrote ran twice per write in 3.0.14; it now runs once.
+
+A setter on an object's prototype chain no longer sends `set` of its key.
+3.0.14 sent it after the setter's own events, and a replica stored the value as a data key that the object does not have.
+3.0.14 also ran such a setter outside a batch, so an effect that read the key and a key the setter wrote ran twice per write.
+If your state holds class instances with setters, their replicas now hold only the keys the setters write.
+
+A write whose value the getter already gives runs no setter, on arrays and objects.
+3.0.14 ran a setter on an object's prototype chain for such a write.
+A setter with no getter runs on every write.
+3.0.14 skipped a write of `undefined` to it.
+
+`obj.__proto__ = proto` changes the object's prototype and sends nothing, as on arrays since 3.0.13.
+3.0.14 sent `set obj.__proto__`.
+
+A write to an object through a receiver that does not forward to the proxy now lands on that receiver, as on arrays since 3.0.13.
+A write to `Object.create(state.obj)` changes that new object and sends nothing.
+3.0.14 sent an event for it, and a replica got a key the object did not have.
+The raw object as receiver, `Reflect.set(state.obj, "a", 1, toRaw(state.obj))`, is a raw write: it changes the object and sends nothing.
+3.0.14 sent an event for it.
+
+A setter reached through such a receiver, on an array or an object, runs with that receiver as `this`, as on a plain array or object.
+It runs also when its getter already gives the value, and its writes land on that receiver.
+The effects that read its key rerun when the getter gives another value afterwards, for example when the setter changes a closure.
+3.0.14 skipped the setter when the getter gave the value, and reran those effects after every such write to an array.
