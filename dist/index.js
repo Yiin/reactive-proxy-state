@@ -2992,6 +2992,17 @@ function writeReorder(target, reorder) {
       delete target[i];
   }
 }
+var notRead = Symbol("notRead");
+function callsSetter(target, prop, node) {
+  if (hasOwn.call(target, prop))
+    return writesThroughSetter(target, prop, node);
+  for (let proto = Object.getPrototypeOf(target);proto !== null; proto = Object.getPrototypeOf(proto)) {
+    const descriptor = Reflect.getOwnPropertyDescriptor(proto, prop);
+    if (descriptor !== undefined)
+      return descriptor.set !== undefined;
+  }
+  return false;
+}
 var noItems = [];
 function readerOf(target, method) {
   return function() {
@@ -3072,10 +3083,14 @@ function wrapArray(arr, node) {
       const cached = methodCache[prop];
       if (cached !== undefined)
         return cached;
+      let read = notRead;
       if (otherReaders !== undefined) {
         const kept = otherReaders.get(prop);
-        if (kept !== undefined && kept[0] === Reflect.get(target, prop, receiver))
-          return kept[1];
+        if (kept !== undefined) {
+          read = Reflect.get(target, prop, receiver);
+          if (kept[0] === read)
+            return kept[1];
+        }
       }
       switch (prop) {
         case "sort":
@@ -3383,7 +3398,7 @@ function wrapArray(arr, node) {
           return methodCache[prop];
         }
       }
-      const value = Reflect.get(target, prop, receiver);
+      const value = read !== notRead ? read : Reflect.get(target, prop, receiver);
       const isNumericIndex = typeof prop === "string" && !isNaN(parseInt(prop, 10));
       if (isNumericIndex) {
         if (!isObject3(value))
@@ -3405,6 +3420,8 @@ function wrapArray(arr, node) {
     set(target, prop, value, receiver, descriptor) {
       if (isObject3(value))
         value = unwrapForStore(value);
+      if (receiver !== proxy)
+        return Reflect.set(target, prop, value, receiver);
       const oldValue = target[prop];
       if (oldValue === value && Reflect.has(target, prop) || isObject3(oldValue) && isObject3(value) && deepEqual(oldValue, value))
         return descriptor === undefined || Reflect.defineProperty(target, prop, { ...descriptor, value: oldValue });
@@ -3412,7 +3429,7 @@ function wrapArray(arr, node) {
       const truncated = prop === "length" && Number(value) < target.length ? target.slice(Number(value)) : undefined;
       const index = arrayIndex(prop);
       const isNumericIndex = typeof prop === "number" || index >= 0 || typeof prop === "string" && !isNaN(parseInt(prop));
-      const throughSetter = !isNumericIndex && prop !== "length" && writesThroughSetter(target, prop, node);
+      const throughSetter = !isNumericIndex && prop !== "length" && callsSetter(target, prop, node);
       const emits = descriptor !== undefined || !throughSetter;
       const grows = prop === "length" && Number(value) > Number(oldValue);
       const located = emits ? grows ? locate(node) : locate(node, prop) : undefined;
@@ -3425,7 +3442,7 @@ function wrapArray(arr, node) {
         copyPayloadReaching(event, located, target, after);
       }
       const oldLength = target.length;
-      const result = descriptor !== undefined ? Reflect.defineProperty(target, prop, { ...descriptor, value }) : receiver === proxy && !throughSetter ? Reflect.set(target, prop, value) : Reflect.set(target, prop, value, receiver);
+      const result = descriptor !== undefined ? Reflect.defineProperty(target, prop, { ...descriptor, value }) : throughSetter ? Reflect.set(target, prop, value, proxy) : Reflect.set(target, prop, value);
       if (result && emits) {
         if (truncated !== undefined) {
           relinkArray(node, target, target.length, truncated);
@@ -3520,8 +3537,12 @@ function wrapArray(arr, node) {
     defineProperty(target, prop, descriptor) {
       if ("value" in descriptor)
         return handler.set(target, prop, descriptor.value, proxy, descriptor);
-      if (!("get" in descriptor) && !("set" in descriptor))
-        return Reflect.defineProperty(target, prop, descriptor);
+      if (!("get" in descriptor) && !("set" in descriptor)) {
+        const current = Reflect.getOwnPropertyDescriptor(target, prop);
+        if (current !== undefined && (("value" in current) || !("writable" in descriptor)))
+          return Reflect.defineProperty(target, prop, descriptor);
+        return handler.set(target, prop, undefined, proxy, descriptor);
+      }
       const oldLength = target.length;
       const result = Reflect.defineProperty(target, prop, descriptor);
       if (result) {
