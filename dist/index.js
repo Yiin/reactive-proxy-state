@@ -3463,26 +3463,27 @@ function wrapArray(arr, node) {
         return Reflect.set(target, prop, value, receiver);
       if (isObject3(value))
         value = unwrapForStore(value);
-      const own = descriptor === undefined ? current : had ? current ?? Reflect.getOwnPropertyDescriptor(target, prop) : named ? undefined : Reflect.getOwnPropertyDescriptor(target, prop);
-      const oldValue = descriptor === undefined ? target[prop] : own !== undefined && ("value" in own) ? own.value : undefined;
+      const oldValue = descriptor === undefined || !named || had && current === undefined ? target[prop] : current !== undefined && ("value" in current) ? current.value : undefined;
       if (setter !== undefined && descriptor === undefined) {
         const forwards = !foreign || forwardsTo(receiver, target);
         if (forwards && setter.get !== undefined && (oldValue === value || isObject3(oldValue) && isObject3(value) && deepEqual(oldValue, value)))
           return true;
         return writeThroughSetter(target, prop, value, receiver, forwards, oldValue);
       }
-      const shownBefore = !named || had && (current === undefined || current.enumerable === true);
-      let shown = named && had ? shownBefore : true;
-      let fixed = false;
-      if (descriptor !== undefined) {
-        if (named)
-          shown = "enumerable" in descriptor ? descriptor.enumerable === true : shownBefore;
-        fixed = fixedAfter(descriptor, own);
-        if (fixed && value !== descriptor.value)
+      let shownBefore;
+      let shown;
+      if (descriptor === undefined) {
+        if (oldValue === value && Reflect.has(target, prop) || isObject3(oldValue) && isObject3(value) && deepEqual(oldValue, value))
+          return true;
+        shownBefore = shown = current === undefined || current.enumerable === true;
+      } else {
+        shownBefore = !named || had && (current === undefined || current.enumerable === true);
+        shown = !named || ("enumerable" in descriptor ? descriptor.enumerable === true : shownBefore);
+        if (value !== descriptor.value && fixedAfter(descriptor, current ?? Reflect.getOwnPropertyDescriptor(target, prop)))
           return false;
+        if (shown === shownBefore && (oldValue === value && Reflect.has(target, prop) || isObject3(oldValue) && isObject3(value) && deepEqual(oldValue, value)) && (current === undefined || ("value" in current)) && (Object.is(oldValue, value) || !fixedAfter(descriptor, current ?? Reflect.getOwnPropertyDescriptor(target, prop))))
+          return Reflect.defineProperty(target, prop, { ...descriptor, value: oldValue });
       }
-      if ((shown === shownBefore || !had && descriptor === undefined) && (oldValue === value && Reflect.has(target, prop) || isObject3(oldValue) && isObject3(value) && deepEqual(oldValue, value)) && (!fixed || Object.is(oldValue, value)) && (descriptor === undefined || own === undefined || ("value" in own)))
-        return descriptor === undefined || Reflect.defineProperty(target, prop, { ...descriptor, value: oldValue });
       const sameNaN = oldValue !== oldValue && value !== value && Reflect.has(target, prop);
       const truncated = prop === "length" && Number(value) < target.length ? target.slice(Number(value)) : undefined;
       const grows = prop === "length" && Number(value) > Number(oldValue);
@@ -4299,25 +4300,27 @@ function wrapObject(obj, node, options) {
         return Reflect.set(target, prop, value, receiver);
       if (isObject6(value))
         value = unwrapForStore(value);
-      const own = descriptor !== undefined && had ? current ?? Reflect.getOwnPropertyDescriptor(target, prop) : current;
-      const oldValue = descriptor === undefined ? target[prop] : own !== undefined && ("value" in own) ? own.value : undefined;
+      const oldValue = descriptor === undefined || had && current === undefined ? target[prop] : current !== undefined && ("value" in current) ? current.value : undefined;
       if (setter !== undefined && descriptor === undefined) {
         const forwards = receiver === proxy || forwardsTo(receiver, target);
         if (forwards && setter.get !== undefined && (oldValue === value || !options?.async && isObject6(oldValue) && isObject6(value) && deepEqual(oldValue, value)))
           return true;
         return writeThroughSetter(target, prop, value, receiver, forwards, oldValue);
       }
-      const shownBefore = had && (current === undefined || current.enumerable === true);
-      let shown = had ? shownBefore : true;
-      let fixed = false;
-      if (descriptor !== undefined) {
+      let shownBefore;
+      let shown;
+      if (descriptor === undefined) {
+        if (had && (oldValue === value || !options?.async && isObject6(oldValue) && isObject6(value) && deepEqual(oldValue, value)))
+          return true;
+        shownBefore = shown = current === undefined || current.enumerable === true;
+      } else {
+        shownBefore = had && (current === undefined || current.enumerable === true);
         shown = "enumerable" in descriptor ? descriptor.enumerable === true : shownBefore;
-        fixed = fixedAfter(descriptor, own);
-        if (fixed && value !== descriptor.value)
+        if (value !== descriptor.value && fixedAfter(descriptor, current ?? (had ? Reflect.getOwnPropertyDescriptor(target, prop) : undefined)))
           return false;
+        if (had && shown === shownBefore && (oldValue === value || !options?.async && isObject6(oldValue) && isObject6(value) && deepEqual(oldValue, value)) && (current === undefined || ("value" in current)) && (Object.is(oldValue, value) || !fixedAfter(descriptor, current ?? Reflect.getOwnPropertyDescriptor(target, prop))))
+          return Reflect.defineProperty(target, prop, { ...descriptor, value: oldValue });
       }
-      if (had && shown === shownBefore && (oldValue === value || !options?.async && isObject6(oldValue) && isObject6(value) && deepEqual(oldValue, value)) && (!fixed || Object.is(oldValue, value)) && (descriptor === undefined || own === undefined || ("value" in own)))
-        return descriptor === undefined || Reflect.defineProperty(target, prop, { ...descriptor, value: oldValue });
       const located = locate(node, prop);
       const event = located === undefined || !(shown || shownBefore) ? undefined : shown ? { action: "set", path: located.paths[0], oldValue, newValue: value } : { action: "delete", path: located.paths[0], oldValue };
       const held = located && heldItems(value, oldValue);

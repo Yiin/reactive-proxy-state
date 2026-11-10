@@ -687,11 +687,16 @@ export function wrapArray<T extends any[]>(arr: T, node: LocationNode): T {
       if (isObject(value)) value = unwrapForStore(value);
 
       // A define, like `Object.defineProperty`, calls no getter: it
-      // replaces the value the key holds as data, if any.
-      const own =
-        descriptor === undefined ? current : had ? current ?? Reflect.getOwnPropertyDescriptor(target, prop) : named ? undefined : Reflect.getOwnPropertyDescriptor(target, prop);
+      // replaces the value a name holds as data, if any (`current` is
+      // undefined for a name of an array of enumerable data alone). An
+      // index or `length` is read: an accessor index is outside the
+      // supported input.
       const oldValue =
-        descriptor === undefined ? (target as any)[prop] : own !== undefined && "value" in own ? own.value : undefined;
+        descriptor === undefined || !named || (had && current === undefined)
+          ? (target as any)[prop]
+          : current !== undefined && "value" in current
+            ? current.value
+            : undefined;
 
       // A define with a value makes the key data: it is written below.
       if (setter !== undefined && descriptor === undefined) {
@@ -711,34 +716,41 @@ export function wrapArray<T extends any[]>(arr: T, node: LocationNode): T {
       }
 
       // A replica holds the items and the enumerable names, as on an object
-      // (see its `set`). An item is sent whatever its flags.
-      const shownBefore = !named || (had && (current === undefined || current.enumerable === true));
-      let shown = named && had ? shownBefore : true;
-      // a define that leaves the key fixed (see `fixedAfter`)
-      let fixed = false;
-      if (descriptor !== undefined) {
-        if (named) shown = "enumerable" in descriptor ? descriptor.enumerable === true : shownBefore;
-        fixed = fixedAfter(descriptor, own);
-        // the engine would find the raw object where the caller defined its
-        // proxy, and throw after the write: refuse it before
-        if (fixed && value !== descriptor.value) return false;
+      // (see its `set`): `shownBefore` and `shown`, whether it holds the key
+      // before and after the write. An item is sent whatever its flags.
+      let shownBefore: boolean;
+      let shown: boolean;
+      if (descriptor === undefined) {
+        // avoid unnecessary triggers if value hasn't changed. Reading past the end of an
+        // array also yields undefined, so also require the prop to already exist —
+        // otherwise growing into a brand-new hole with newValue: undefined would be
+        // mistaken for a no-op and silently dropped.
+        if (
+          (oldValue === value && Reflect.has(target, prop)) ||
+          (isObject(oldValue) && isObject(value) && deepEqual(oldValue, value))
+        )
+          return true;
+        // `=` keeps a name the array has as it was, and adds a new one enumerable
+        shownBefore = shown = current === undefined || current.enumerable === true;
+      } else {
+        shownBefore = !named || (had && (current === undefined || current.enumerable === true));
+        shown = !named || ("enumerable" in descriptor ? descriptor.enumerable === true : shownBefore);
+        // A define that leaves the key fixed (see `fixedAfter`) of a proxy:
+        // refused before the write, as on an object.
+        if (value !== descriptor.value && fixedAfter(descriptor, current ?? Reflect.getOwnPropertyDescriptor(target, prop)))
+          return false;
+        // The same value: the define sets its flags alone, unless it shows
+        // or hides a name, fixes a value that is equal but not the same, or
+        // makes an accessor data.
+        if (
+          shown === shownBefore &&
+          ((oldValue === value && Reflect.has(target, prop)) ||
+            (isObject(oldValue) && isObject(value) && deepEqual(oldValue, value))) &&
+          (current === undefined || "value" in current) &&
+          (Object.is(oldValue, value) || !fixedAfter(descriptor, current ?? Reflect.getOwnPropertyDescriptor(target, prop)))
+        )
+          return Reflect.defineProperty(target, prop, { ...descriptor, value: oldValue });
       }
-
-      // avoid unnecessary triggers if value hasn't changed. Reading past the end of an
-      // array also yields undefined, so also require the prop to already exist —
-      // otherwise growing into a brand-new hole with newValue: undefined would be
-      // mistaken for a no-op and silently dropped. A define still sets its
-      // flags; one that shows or hides a name, or fixes another value than
-      // the one held, goes on.
-      if (
-        (shown === shownBefore || (!had && descriptor === undefined)) &&
-        ((oldValue === value && Reflect.has(target, prop)) ||
-          (isObject(oldValue) && isObject(value) && deepEqual(oldValue, value))) &&
-        (!fixed || Object.is(oldValue, value)) &&
-        // a define that makes an accessor data: the getter is not read
-        (descriptor === undefined || own === undefined || "value" in own)
-      )
-        return descriptor === undefined || Reflect.defineProperty(target, prop, { ...descriptor, value: oldValue });
       // NaN in place of NaN is sent, as until now, but changes nothing an effect reads
       const sameNaN = oldValue !== oldValue && value !== value && Reflect.has(target, prop);
 
